@@ -1,6 +1,3 @@
-investigate fd and memory leaks!!
 
-  - http pipelining
-  - a benchmark program
-  - ftp
+FreeBSD: accf_http(9)
 

@@ -2026,7 +2026,7 @@ int main(int argc,char* argv[]) {
 usage:
       buffer_putsflush(buffer_2,
 		  "usage: gatling [-hnvVtdD] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
-		  "               [-u uid] [-c dir] [-w workgroup]\n"
+		  "               [-u uid] [-c dir] [-w workgroup] [-P bytes]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -2044,7 +2044,7 @@ usage:
 		  "\t-F\tdo not provide FTP\n"
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
-		  "\t-P\tdisable experimental prefetching code (may actually be slower)\n"
+		  "\t-P n\tensable experimental prefetching code (may actually be slower)\n"
 		  "\t-w name\tset SMB workgroup\n"
 		  );
       return 0;
