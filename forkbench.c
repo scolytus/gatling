@@ -40,13 +40,13 @@ int main(int argc,char* argv[]) {
 	buffer_putsflush(buffer_2,"\n");
       }
       break;
-    case '?':
+    case 'h':
 usage:
       buffer_putsflush(buffer_2,
-		  "usage: mmapbench [-h] [-c count] filename\n"
+		  "usage: forkbench [-h] [-c count] filename\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
-		  "\t-c n\tmmap n 4k pages (default: 1000)\n");
+		  "\t-c n\tfork off n children (default: 1000)\n");
       return 0;
     }
   }
