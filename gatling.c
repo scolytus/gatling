@@ -2092,7 +2092,13 @@ emerge:
     }
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
-      int64 r=iob_send(i,&h->iob);
+      int64 r;
+      if (timeout_secs) {
+	io_timeout(i,next);
+	if (h->t==FTPSLAVE)
+	  io_timeout(h->buddy,next);
+      }
+      r=iob_send(i,&h->iob);
       if (r==-1)
 	io_eagain(i);
       else if (r<=0) {
@@ -2151,12 +2157,7 @@ emerge:
 	    cleanup(i);
 	  }
 	}
-      } else
-	if (timeout_secs) {
-	  io_timeout(i,next);
-	  if (h->t==FTPSLAVE)
-	    io_timeout(h->buddy,next);
-	}
+      }
     }
   }
   io_finishandshutdown();
