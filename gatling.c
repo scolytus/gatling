@@ -2310,6 +2310,7 @@ usage:
 	assert(h);
 	n=socket_accept6(i,H->myip,&H->myport,&H->myscope_id);
 	if (n==-1) {
+pasverror:
 	  if (logging) {
 	    buffer_puts(buffer_1,"pasv_accept_error ");
 	    buffer_putulong(buffer_1,i);
@@ -2323,6 +2324,7 @@ usage:
 	  free(H);
 	  io_close(i);
 	} else {
+	  if (!io_fd(n)) goto pasverror;
 	  if (logging) {
 	    buffer_puts(buffer_1,"pasv_accept ");
 	    buffer_putulong(buffer_1,i);
@@ -2333,7 +2335,6 @@ usage:
 	    buffer_putnlflush(buffer_1);
 	  }
 	  h->buddy=n;
-	  io_fd(n);
 	  io_setcookie(n,H);
 	  io_nonblock(n);
 	  io_close(i);
@@ -2566,6 +2567,7 @@ pipeline:
 	H=io_getcookie(h->buddy);
 	assert(H);
 	if (socket_connect6(i,h->peerip,h->destport,h->myscope_id)==-1 && errno!=EISCONN) {
+porterror:
 	  if (logging) {
 	    buffer_puts(buffer_1,"port_connect_error ");
 	    buffer_putulong(buffer_1,i);
@@ -2579,6 +2581,7 @@ pipeline:
 	  free(h);
 	  io_close(i);
 	} else {
+	  if (!io_fd(i)) goto porterror;
 	  if (logging) {
 	    char buf[IP6_FMT];
 	    buffer_puts(buffer_1,"port_connect ");
@@ -2596,8 +2599,8 @@ pipeline:
 	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
 	  }
 #endif
-	  io_fd(i);
-	  io_dontwantwrite(i);
+	  if (h->f != DOWNLOADING)
+	    io_dontwantwrite(i);
 	  if (H->f==WAITCONNECT) {
 	    H->f=LOGGEDIN;
 	    if (h->f==DOWNLOADING)
