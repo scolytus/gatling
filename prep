@@ -18,7 +18,7 @@ case `uname -s` in
     sysctl -w kern.maxproc=6000
     ;;
   AIX)
-    chdev -L sys0 -a maxuproc=11000
+    chdev -l sys0 -a maxuproc=11000
     no -o tcp_ephemeral_low=1024
     ;;
 esac
