@@ -3,6 +3,8 @@ if test -f /proc/sys/kernel/threads-max;
 fi
 
 sysctl -w kern.maxfiles=11000
+sysctl -w kern.maxfilesperproc=11000
 sysctl -w kern.maxproc=6000
+sysctl -w kern.maxprocperuid=6000
 
 # kill sendmail

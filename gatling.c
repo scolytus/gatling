@@ -886,7 +886,7 @@ usage:
     if (chroot(chroot_to)==-1)
       panic("chroot");
   }
-  if (switch_uid()==-1)
+  if (new_uid && switch_uid()==-1)
     panic("switch_uid");
 
   {
