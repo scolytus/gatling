@@ -1912,6 +1912,7 @@ usage:
 	  }
 	  h->buddy=n;
 	  io_setcookie(n,H);
+	  io_nonblock(n);
 	  io_close(i);
 	  H->t=FTPSLAVE;
 #ifdef TCP_NODELAY
