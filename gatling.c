@@ -21,6 +21,8 @@
 #include <dirent.h>
 #include <time.h>
 #include <signal.h>
+#include <pwd.h>
+#include <grp.h>
 #include "version.h"
 
 #ifdef USE_ZLIB
@@ -678,6 +680,45 @@ fini:
   io_wantwrite(s);
 }
 
+static uid_t __uid;
+static gid_t __gid;
+
+static int prepare_switch_uid(const char* new_uid) {
+  if (new_uid) {
+    uid_t u=0;
+    gid_t g=0;
+    if (new_uid[0]>='0' && new_uid[0]<='9') {
+      unsigned long l;
+      const char *c=new_uid+scan_ulong(new_uid,&l);
+      if (*c && *c!=':' && *c!='.') return -1;
+      u=l;
+      if (u!=l) return -1;
+      if (*c) {
+	++c;
+	c=c+scan_ulong(c,&l);
+	g=l;
+	if (g!=l) return -1;
+	if (*c) return -1;
+      }
+    } else {
+      struct passwd *p=getpwnam(new_uid);
+      if (!p) return -1;
+      u=p->pw_uid;
+      g=p->pw_gid;
+    }
+    __uid=u;
+    __gid=g;
+  }
+  return 0;
+}
+
+static int switch_uid() {
+  if (setgid(__gid)) return -1;
+  if (setgroups(1,&__gid)) return -1;
+  if (setuid(__uid)) return -1;
+  return 0;
+}
+
 int main(int argc,char* argv[]) {
   int s=socket_tcp6();
 #ifdef __broken_itojun_v6__
@@ -689,6 +730,8 @@ int main(int argc,char* argv[]) {
   uint16 port;
   tai6464 now,last,next,tick;
   unsigned long timeout_secs=23;
+  char* new_uid=0;
+  char* chroot_to=0;
 
   signal(SIGPIPE,SIG_IGN);
 
@@ -710,11 +753,17 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"hni:p:vVdDtT:");
+    int c=getopt(argc,argv,"hni:p:vVdDtT:c:u:");
     if (c==-1) break;
     switch (c) {
     case 'n':
       logging=0;
+      break;
+    case 'u':
+      new_uid=optarg;
+      break;
+    case 'c':
+      chroot_to=optarg;
       break;
     case 'i':
       i=scan_ip6(optarg,ip);
@@ -764,8 +813,10 @@ int main(int argc,char* argv[]) {
       }
       break;
     case 'h':
+usage:
       buffer_putsflush(buffer_2,
 		  "usage: gatling [-hvVtdD] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
+		  "               [-u uid] [-c dir]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -775,6 +826,8 @@ int main(int argc,char* argv[]) {
 		  "\t-d\tgenerate directory index\n"
 		  "\t-D\tdo not generate directory index\n"
 		  "\t-T n\tset timeout in seconds (0 to disable, default 23)\n"
+		  "\t-u uid\tswitch to this UID after binding\n"
+		  "\t-c dir\tchroot to dir after binding\n"
 		  "\t\t(default is -d unless in virtual hosting mode)\n"
 		  );
       return 0;
@@ -826,6 +879,15 @@ int main(int argc,char* argv[]) {
     if (socket_bind6_reuse(s,ip,port,0)==-1)
       panic("socket_bind6_reuse");
 #endif
+
+  if (prepare_switch_uid(new_uid)==-1)
+    goto usage;
+  if (chroot_to) {
+    if (chroot(chroot_to)==-1)
+      panic("chroot");
+  }
+  if (switch_uid()==-1)
+    panic("switch_uid");
 
   {
     char buf[IP6_FMT];

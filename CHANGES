@@ -1,3 +1,6 @@
+0.3:
+  add chroot+setuid support
+
 0.2:
   zlib support (directory listings only)
   add timeout support
