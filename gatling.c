@@ -53,6 +53,7 @@
 #include <regex.h>
 #endif
 #include <limits.h>
+#include <string.h>
 #include "havealloca.h"
 
 unsigned long timeout_secs=23;
@@ -3442,6 +3443,17 @@ static int is_server_connection(enum conntype t) {
 	);
 }
 
+#ifdef __broken_itojun_v6__
+#warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
+  int s4;		/* ipv4 http socket */
+#ifdef SUPPORT_FTP
+  int f4;		/* ipv4 ftp socket */
+#endif
+#ifdef SUPPORT_HTTPS
+  int httpss4;		/* ipv4 https socket */
+#endif
+#endif
+
 static void accept_server_connection(int64 i,struct http_data* H,unsigned long ftptimeout_secs,tai6464 nextftp) {
   /* This is an FTP or HTTP(S) or SMB server connection.
     * This read event means that someone connected to us.
@@ -3942,15 +3954,11 @@ int main(int argc,char* argv[],char* envp[]) {
   int dohttps=0;
 #endif
 #ifdef __broken_itojun_v6__
-#warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
-  int s4;		/* ipv4 http socket */
   enum conntype ct4=HTTPSERVER4;
 #ifdef SUPPORT_FTP
-  int f4;		/* ipv4 ftp socket */
   enum conntype fct4=FTPSERVER4;
 #endif
 #ifdef SUPPORT_HTTPS
-  int httpss4;		/* ipv4 https socket */
   enum conntype httpsct4=HTTPSSERVER4;
 #endif
 #endif
