@@ -11,11 +11,20 @@
 #include <sys/resource.h>
 #include <stdlib.h>
 
+#ifdef __i386__
+#define rdtscl(low) \
+     __asm__ __volatile__ ("rdtsc" : "=A" (low))
+#endif
+
 int main(int argc,char* argv[]) {
   unsigned long count=25000;
   int64 fd;
+#ifdef __i386__
+  unsigned long long a,b,c;
+#else
   struct timeval a,b,c;
   unsigned long d;
+#endif
 
   for (;;) {
     int i;
@@ -72,23 +81,40 @@ usage:
     }
     for (i=0; i<count; ++i) {
       volatile char ch;
+#ifdef __i386__
+      rdtscl(a);
+#else
       gettimeofday(&a,0);
+#endif
       p[i]=mmap(0,4096,PROT_READ,MAP_SHARED,fd,((off_t)i)*8192);
       if (p[i]==MAP_FAILED) {
 	buffer_puts(buffer_2,"mmap failed: ");
 	buffer_puterror(buffer_2);
 	buffer_putnlflush(buffer_2);
       }
+#ifdef __i386__
+      rdtscl(b);
+#else
       gettimeofday(&b,0);
+#endif
       ch=*p[i];
+#ifdef __i386__
+      rdtscl(c);
+      buffer_putulong(buffer_1,b-a);
+#else
       gettimeofday(&c,0);
       d=(b.tv_sec-a.tv_sec)*10000000;
       d=d+b.tv_usec-a.tv_usec;
       buffer_putulong(buffer_1,d);
+#endif
       buffer_putspace(buffer_1);
+#ifdef __i386__
+      buffer_putulong(buffer_1,c-b);
+#else
       d=(c.tv_sec-b.tv_sec)*10000000;
       d=d+c.tv_usec-b.tv_usec;
       buffer_putulong(buffer_1,d);
+#endif
       buffer_puts(buffer_1,"\n");
     }
   }
