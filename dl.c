@@ -8,6 +8,7 @@
 #include "fmt.h"
 #include "ip4.h"
 #include "io.h"
+#include "textcode.h"
 #include <sys/types.h>
 #include <unistd.h>
 #include <signal.h>
