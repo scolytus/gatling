@@ -3757,6 +3757,7 @@ httpposthandler:
 	}
       } else
 #endif
+#ifdef SUPPORT_FTP
       if (h->t==FTPACTIVE) {
 	struct http_data* H;
 	H=io_getcookie(h->buddy);
@@ -3802,7 +3803,9 @@ httpposthandler:
 	      io_wantread(H->buddy);
 	  }
 	}
-      } else {
+      } else
+#endif
+	     {
 	r=iob_send(i,&h->iob);
 	if (r==-1)
 	  io_eagain(i);
