@@ -663,6 +663,10 @@ fini:
 
 int main(int argc,char* argv[]) {
   int s=socket_tcp6();
+#ifdef __OpenBSD__
+#warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
+  int s4=socket_tcp4();
+#endif
   uint32 scope_id;
   char ip[16];
   uint16 port;
@@ -761,13 +765,34 @@ int main(int argc,char* argv[]) {
   if (!io_readfile(&origdir,".")) panic("open()");
   /* get fd for . so we can always fchdir back */
 
+  if (port==0)
+    port=geteuid()?8000:80;
+#ifdef __OpenBSD__
+  if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
+    if (byte_equal(ip,16,V6any)) {
+      if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
+	panic("socket_bind6_reuse");
+    } else {
+      close(s); s=-1;
+    }
+    if (socket_bind4_reuse(s4,ip+12,port)==-1)
+      panic("socket_bind4_reuse");
+  } else {
+    if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
+      panic("socket_bind6_reuse");
+    s4=-1;
+  }
+  buffer_putsflush(buffer_2,"WARNING: We are taking heavy losses working around itojun/OpenBSD madness here.\n"
+		            "         Please consider using an operating system with real IPv6 support instead!\n");
+#else
   if (port==0) {
     if (socket_bind6_reuse(s,ip,port=80,0)==-1)
       if (socket_bind6_reuse(s,ip,port=8000,0)==-1)
 	panic("socket_bind6_reuse");
   } else
-    if (socket_bind6_reuse(s,ip,8000,0)==-1)
+    if (socket_bind6_reuse(s,ip,port,0)==-1)
       panic("socket_bind6_reuse");
+#endif
 
   {
     char buf[IP6_FMT];
@@ -778,12 +803,31 @@ int main(int argc,char* argv[]) {
     buffer_putnlflush(buffer_1);
   }
 
+#ifdef __OpenBSD__
+  if (s!=-1) {
+    if (socket_listen(s,16)==-1)
+      panic("socket_listen");
+    io_nonblock(s);
+    if (!io_fd(s))
+      panic("io_fd");
+    io_wantread(s);
+  }
+  if (s4!=-1) {
+    if (socket_listen(s4,16)==-1)
+      panic("socket_listen");
+    io_nonblock(s4);
+    if (!io_fd(s4))
+      panic("io_fd");
+    io_wantread(s4);
+  }
+#else
   if (socket_listen(s,16)==-1)
     panic("socket_listen");
   io_nonblock(s);
   if (!io_fd(s))
     panic("io_fd");
   io_wantread(s);
+#endif
 
   for (;;) {
     int64 i;
@@ -812,18 +856,35 @@ int main(int argc,char* argv[]) {
     }
 
     while ((i=io_canread())!=-1) {
+#ifdef __OpenBSD__
+      if (i==s || i==s4) {
+#else
       if (i==s) {
+#endif
 	int n;
+#ifdef __OpenBSD__
+	while (1) {
+	  if (i==s4) {
+	    byte_copy(ip,12,V4mappedprefix);
+	    scope_id=0;
+	    n=socket_accept4(i,ip+12,&port);
+	  } else
+	    n=socket_accept6(i,ip,&port,&scope_id);
+	  if (n==-1) break;
+#else
 	while ((n=socket_accept6(s,ip,&port,&scope_id))!=-1) {
-	  char buf[IP6_FMT];
+#endif
+	  {
+	    char buf[IP6_FMT];
 
-	  buffer_puts(buffer_1,"accept ");
-	  buffer_putulong(buffer_1,n);
-	  buffer_puts(buffer_1," ");
-	  buffer_put(buffer_1,buf,byte_equal(ip,12,V4mappedprefix)?fmt_ip4(buf,ip+12):fmt_ip6(buf,ip));
-	  buffer_puts(buffer_1," ");
-	  buffer_putulong(buffer_1,port);
-	  buffer_putnlflush(buffer_1);
+	    buffer_puts(buffer_1,"accept ");
+	    buffer_putulong(buffer_1,n);
+	    buffer_puts(buffer_1," ");
+	    buffer_put(buffer_1,buf,byte_equal(ip,12,V4mappedprefix)?fmt_ip4(buf,ip+12):fmt_ip6(buf,ip));
+	    buffer_puts(buffer_1," ");
+	    buffer_putulong(buffer_1,port);
+	    buffer_putnlflush(buffer_1);
+	  }
 
 	  io_nonblock(n);
 	  if (io_fd(n)) {
@@ -831,7 +892,15 @@ int main(int argc,char* argv[]) {
 	    io_wantread(n);
 	    if (h) {
 	      byte_zero(h,sizeof(struct http_data));
+#ifdef __OpenBSD__
+	      if (i==s4) {
+		byte_copy(h->myip,12,V4mappedprefix);
+		socket_local4(i,h->myip+12,&h->myport);
+	      } else
+		socket_local6(s,h->myip,&h->myport,0);
+#else
 	      socket_local6(s,h->myip,&h->myport,0);
+#endif
 	      io_setcookie(n,h);
 	      if (timeout_secs)
 		io_timeout(n,next);
@@ -842,9 +911,13 @@ int main(int argc,char* argv[]) {
 	  }
 	}
 	if (errno==EAGAIN)
-	  io_eagain(s);
+	  io_eagain(i);
 	else
+#ifdef __OpenBSD__
+	  carp(i==s4?"socket_accept4":"socket_accept6");
+#else
 	  carp("socket_accept6");
+#endif
       } else {
 	char buf[8192];
 	struct http_data* h=io_getcookie(i);
