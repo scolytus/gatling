@@ -1,11 +1,11 @@
-#undef SUPPORT_SMB
+#define SUPPORT_SMB
 #define SUPPORT_FTP
 #define SUPPORT_PROXY
 /* #define DEBUG to enable more verbose debug messages for tracking fd
  * leaks */
 /* #define DEBUG */
 #define SUPPORT_CGI
-#define SUPPORT_HTACCESS
+/* #define SUPPORT_HTACCESS */
 
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
@@ -1016,7 +1016,7 @@ int http_dohtaccess(struct http_data* h) {
   char* realm;
   int r=0;
   map=mmap_read(".htaccess",&filesize);
-  if (!map) return 0;
+  if (!map) return 1;
   for (s=map; (s<map+filesize) && (*s!='\n'); ++s);		/* XXX */
   if (s>=map+filesize) goto done;
   realm=alloca(s-map+1);
@@ -2523,6 +2523,7 @@ void smbresponse(struct http_data* h,int64 s) {
     /* Read AndX Request */
   case 0x04:
     /* Close Request */
+    break;
   }
 }
 
