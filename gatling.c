@@ -4623,4 +4623,3 @@ usage:
   return 0;
 }
 
-int epoll_create(int i) { return -1; }
