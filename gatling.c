@@ -2109,14 +2109,14 @@ usage:
 	  io_nonblock(n);
 	  if (io_fd(n)) {
 	    struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
-	    if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6)
-	      io_wantread(n);
-	    else
-	      io_wantwrite(n);
 	    if (h) {
+	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6)
+		io_wantread(n);
+	      else
+		io_wantwrite(n);
 	      byte_zero(h,sizeof(struct http_data));
 #ifdef __broken_itojun_v6__
-	      if (i==s4) {
+	      if (i==s4 || i==f4) {
 		byte_copy(h->myip,12,V4mappedprefix);
 		socket_local4(n,h->myip+12,&h->myport);
 	      } else
@@ -2126,11 +2126,11 @@ usage:
 #endif
 	      byte_copy(h->peerip,16,ip);
 	      h->myscope_id=scope_id;
-	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6)
+	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
 		h->t=HTTPREQUEST;
 		if (timeout_secs)
 		  io_timeout(n,next);
-	      else {
+	      } else {
 		if (H->t==FTPSERVER6)
 		  h->t=FTPCONTROL6;
 		else
