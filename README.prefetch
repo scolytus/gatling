@@ -24,3 +24,16 @@ prefetch too small, the OS internal prefetching will prefetch more than
 gatling does and thus there will be no effect.  If you serve data from
 many different disks of different speed, set the prefetch to a value
 that is good for the _slowest_ disk of the pack.
+
+
+NB: prefetching does not help AT ALL if your files are fragmented on
+disk.  This usually happens if you downloaded them with some P2P
+application or download manager (BitTorrent 3.3 has some counter
+measures here and should be safe).  I'll include the readfrag program
+which you can use to defragment files (it will output the file on
+stdout, if stdout is a terminal, it will just say how much head movement
+it could save compared to a naive OS; Linux 2.6's internal disk I/O
+scheduler is good enough so you can just use cp instead of readfrag).
+readfrag uses a little documented Linux specific ioctl that is used by
+LILO (the boot loader) normally; if you know how to port this to other
+OSes, please tell me.

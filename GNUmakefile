@@ -3,8 +3,8 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-TARGETS=gatling httpbench bindbench mmapbench forkbench dl pthreadbench \
-mktestdata manymapbench ioerr forksbench
+TARGETS=gatling httpbench bindbench mmapbench forkbench dl \
+mktestdata manymapbench ioerr forksbench pthreadbench
 
 all: $(TARGETS)
 
@@ -74,8 +74,11 @@ libsocket:
 	fi; fi; fi > libsocket
 	rm -f trysocket
 
-libsocketkludge.a: libsocket
-	ar q $@
+dummy.c:
+	touch $@
+
+libsocketkludge.a: libsocket dummy.o
+	ar q $@ dummy.o
 	-ranlib $@
 
 LDLIBS+=`cat libsocket`
