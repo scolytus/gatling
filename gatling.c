@@ -1,4 +1,4 @@
-#define SUPPORT_SMB
+// #define SUPPORT_SMB
 #define SUPPORT_FTP
 #define SUPPORT_PROXY
 /* #define DEBUG to enable more verbose debug messages for tracking fd
@@ -225,6 +225,9 @@ struct http_data {
 #endif
 #ifdef SUPPORT_HTTPS
   SSL* ssl;
+#endif
+#ifdef SUPPORT_SMB
+  enum { PCNET10, LANMAN21, NTLM012 } smbdialect;
 #endif
 };
 
@@ -1468,6 +1471,7 @@ e404:
 		++c;
 		if ((i=scan_ulonglong(c,&range_last))) {
 		  if (!i) goto rangeerror;
+		  ++range_last;
 		}
 	      }
 	    } else {
@@ -1518,7 +1522,7 @@ rangeerror:
 	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
 	  c+=fmt_ulonglong(c,range_first);
 	  c+=fmt_str(c,"-");
-	  c+=fmt_ulonglong(c,range_last);
+	  c+=fmt_ulonglong(c,range_last-1);
 	  c+=fmt_str(c,"/");
 	  c+=fmt_ulonglong(c,ss.st_size);
 	}
@@ -2416,7 +2420,124 @@ static uint16 mksmbtime(int h,int m,int s) {
 }
 
 
-void smbresponse(struct http_data* h,int64 s) {
+struct smbheader {
+  unsigned char protocol[4];	/* '\xffSMB' */
+  unsigned char command;	/* command code */
+  union {
+    struct {
+      unsigned char errorclass;
+      unsigned char reserved;
+      unsigned short error;
+    } doserror;
+    unsigned long status;
+  } status;
+  unsigned char flags;
+  unsigned short flags2;
+  union {
+    unsigned short pad[6];
+    struct {
+      unsigned short pidhigh;
+      unsigned char securitysignature[8];
+    } extra;
+  };
+  unsigned short tid;	/* tree identifier */
+  unsigned short pid;	/* caller's process id */
+  unsigned short uid;	/* user id */
+  unsigned short mid;	/* multiplex id */
+  /* first:
+  unsigned char wordcount;	// count of parameter words 
+  unsigned short parameterwords[1];
+  */
+  /* then:
+   unsigned short bytecount;
+   unsigned char buf[bytecount];
+   */
+};
+
+int smb_handle_SessionSetupAndX(char* pkt,unsigned long len,struct http_data* h) {
+  struct smbheader* p=(struct pktheader*)pkt;
+  char* s=pkt+sizeof(smbheader);
+  char* andx;
+  if (len<sizeof(smbheader)) return -1;
+  if (h->smbdialect<NTLM012) {
+#if 0
+    struct {
+      unsigned char wordcount;
+      unsigned char andxcommand;
+      unsigned char andxreserved;
+      unsigned short andxoffset;
+      unsigned short maxbuffersize;
+      unsigned short maxmpxcount;	/* max multiplex pending requests */
+      unsigned short vcnumber;		/* 0 */
+      unsigned int sessionkey;		/* valid iff vcnumber!=0 */
+      unsigned short passwordlength;
+      unsigned int reserved;		/* 0 */
+      unsigned char accountpassword[];
+      string accountname[];
+      string primarydomain[];
+      string nativeos[];
+      string nativelanman[];
+    } request;
+    struct {
+      unsigned char wordcount;
+      unsigned char andxcommand;
+      unsigned char andxreserved;
+      unsigned short andxoffset;
+      unsigned short action;	/* bit0 = logged in as GUEST */
+      unsigned short bytecount;
+      string nativeos[];
+      string nativelanman[];
+      string primarydomain[];
+    } response;
+#endif
+    return -1;
+  } else {
+#if 0
+    struct {
+      UCHAR wordcount;
+      UCHAR andxcommand;
+      UCHAR andxreserved;
+      USHORT andxoffset;
+      USHORT maxbuffersize;
+      USHORT maxmpxcount;
+      USHORT vcnumber;
+      ULONG sessionkey;
+      USHORT caseinsensitivepasswordlength;
+      USHORT casesensitivepasswordlength;
+      ULONG reserved;
+      ULONG capabilities; /* & 4 -> unicode
+			     & 8 -> 64-bit offsets
+			     & 0x10 -> understands NT LM 0.12 SMBs
+			     & 0x40 -> understands 32-bit errors
+			     & 0x80 -> understands level 2 oplocks */
+      USHORT bytecount;
+      UCHAR caseinsensitivepassword[];
+      UCHAR casesensitivepassword[];
+      UCHAR reserved2;
+      STRING accountname[];
+      STRING primarydomain[];
+      STRING nativeos[];
+      STRING nativelanman[];
+    } request;
+    struct {
+      unsigned char wordcount;
+      unsigned char andxcommand;
+      unsigned char andxreserved;
+      unsigned short andxoffset;
+      unsigned short action;	/* bit0 = looged in as GUEST */
+      unsigned short securitybloblength;
+      unsigned short bytecount;
+      unsigned char securityblob[];
+      string nativeos[];
+      string nativelanman[];
+      string primarydomain[];
+    } response;
+#endif
+  }
+  return 0;
+}
+
+int smbresponse(struct http_data* h,int64 s) {
   char* c=array_start(&h->r);
   int len;
   /* is it SMB? */
@@ -2450,6 +2571,7 @@ void smbresponse(struct http_data* h,int64 s) {
       }
       switch (lvl) {
       case -1: case 0:
+	h->smbdialect=PCNET10;
 	c[0x24]=1;
 	c[0x25]=ack; c[0x26]=0;
 	c[0x27]=0; c[0x28]=0;
@@ -2457,6 +2579,7 @@ void smbresponse(struct http_data* h,int64 s) {
 	write(s,c,0x29);
 	return;
       case 1:
+	h->smbdialect=LANMAN21;
 	c[0x24]=13;
 	uint16_pack(c+0x25,ack);
 	uint16_pack(c+0x27,0);
@@ -2482,6 +2605,7 @@ void smbresponse(struct http_data* h,int64 s) {
 	write(s,c,0x41+wglen16);
 	return;
       case 2:
+	h->smbdialect=NTLM012;
 	c[0x24]=17;
 	uint16_pack(c+0x25,ack);
 	c[0x27]=0;
@@ -2513,6 +2637,9 @@ void smbresponse(struct http_data* h,int64 s) {
     break;
   case 0x73:
     /* Session Setup AndX Request */
+    if (smb_handle_SessionSetupAndX(c+4,len,h)==-1)
+      return -1;
+    break;
   case 0x75:
     /* Tree Connect AndX Request */
   case 0x10:
@@ -2525,6 +2652,7 @@ void smbresponse(struct http_data* h,int64 s) {
     /* Close Request */
     break;
   }
+  return 0;
 }
 
 #endif /* SUPPORT_SMB */
@@ -3629,8 +3757,12 @@ pipeline:
 #ifdef SUPPORT_HTTPS
 #endif
 #ifdef SUPPORT_SMB
-	else if (H->t==SMBREQUEST)
-	  smbresponse(H,i);
+	else if (H->t==SMBREQUEST) {
+	  if (smbresponse(H,i)==-1) {
+	    cleanup(i);
+	    continue;
+	  }
+	}
 #endif
 #ifdef SUPPORT_FTP
 	else

@@ -2,6 +2,8 @@
   implement ABOR (ncftp was confused after aborting a connection)
   add https support (using OpenSSL)
   add primitive .htaccess support
+  fix http ranges (Joachim Berdal Haga via Gerrit Pape, reported for
+    fnord but also applied here)
 
 0.5:
   CGI-through-proxy support (read README.proxy)
