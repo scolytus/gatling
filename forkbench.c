@@ -77,12 +77,12 @@ usage:
       case 0: /* child */
 	{
 	  sigset_t ss;
-	  siginfo_t si;
+	  int sig;
 	  sigemptyset(&ss);
 	  sigaddset(&ss,SIGTERM);
 	  write(pfd[1],".",1);
 	  close(pfd[1]);
-	  sigwaitinfo(&ss,&si);
+	  sigwait(&ss,&sig);
 	  _exit(0);
 	}
       }

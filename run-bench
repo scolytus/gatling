@@ -1,9 +1,11 @@
 OS=`uname -s | tr A-Z a-z`
 VERSION=`uname -r | sed 's/\([0-9]\)\.\([0-9]\).*/\1\2/'`
 TAG=$OS$VERSION
+ulimit -Hn 11000
+ulimit -n 11000
 ./bindbench -6 -c 10000 > bind6-$TAG.log
 ./bindbench -c 10000 > bind4-$TAG.log
-echo "./mmap-bench -c 10000 [filename] > \"mmap-$TAG.log\""
+echo "./mmapbench -c 10000 [filename] > \"mmap-$TAG.log\""
 ./forkbench -c 5000 > fork-$TAG.log
 ./httpbench -k -c 5000 -i 10 -s 5 http://127.0.0.1/README.httpbench > httpa-$TAG.log
 ./httpbench -b -k -c 5000 -i 10 -s 5 http://127.0.0.1/README.httpbench > httpb-$TAG.log
