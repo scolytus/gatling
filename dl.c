@@ -7,12 +7,14 @@
 #include "str.h"
 #include "fmt.h"
 #include "ip4.h"
+#include "io.h"
 #include <sys/types.h>
 #include <unistd.h>
 #include <signal.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <stdlib.h>
+#include <utime.h>
 
 static void carp(const char* routine) {
   buffer_puts(buffer_2,"httpbench: ");
@@ -48,18 +50,19 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   return s;
 }
 
-static int readanswer(int s,int measurethroughput) {
+struct utimbuf u;
+
+static int readanswer(int s,int d) {
   char buf[8192];
   int i,j,body=-1,r;
-  unsigned long rest;
-  unsigned long done;
-  struct timeval a,b;
+  unsigned long long rest;
   i=0;
   while ((r=read(s,buf+i,sizeof(buf)-i)) > 0) {
     i+=r;
     for (j=0; j+3<i; ++j) {
       if (buf[j]=='\r' && buf[j+1]=='\n' && buf[j+2]=='\r' && buf[j+3]=='\n') {
 	body=j+4;
+	if (write(d,buf+body,r-j-4)!=r-j-4) panic("write");
 	break;
       }
     }
@@ -76,17 +79,18 @@ static int readanswer(int s,int measurethroughput) {
   for (j=0; j<r; j+=str_chr(buf+j,'\n')) {
     if (byte_equal(buf+j,17,"\nContent-Length: ")) {
       char* c=buf+j+17;
-      if (c[scan_ulong(c,&rest)]!='\r') {
+      if (c[scan_ulonglong(c,&rest)]!='\r') {
 	buffer_putsflush(buffer_2,"invalid Content-Length header!\n");
 	return -1;
       }
-      break;
+    } else if (byte_equal(buf+j,16,"\nLast-Modified: ")) {
+      char* c=buf+j+16;
+      if (c[scan_httpdate(c,&u.actime)]!='\r') {
+	buffer_putsflush(buffer_2,"invalid Last-Modified header!\n");
+	return -1;
+      }
     }
     ++j;
-  }
-  if (measurethroughput) {
-    gettimeofday(&a,0);
-    done=r-body;
   }
   rest-=(r-body);
   while (rest) {
@@ -101,26 +105,9 @@ static int readanswer(int s,int measurethroughput) {
 	return -1;
       }
     } else {
+      if (write(d,buf,r)!=r)
+	panic("write");
       rest-=r;
-      if (measurethroughput) {
-	unsigned long x=done/1000000;
-	unsigned long y;
-	done+=r;
-	y=done/1000000;
-	if (x!=y) {
-	  unsigned long d;
-	  unsigned long long z;
-	  gettimeofday(&b,0);
-	  d=(b.tv_sec-a.tv_sec)*10000000;
-	  d=d+b.tv_usec-a.tv_usec;
-	  buffer_puts(buffer_1,"tput ");
-	  z=1000000000ull/d;
-	  buffer_putulong(buffer_1,z);
-	  buffer_putnlflush(buffer_1);
-
-	  byte_copy(&a,sizeof(a),&b);
-	}
-      }
     }
   }
   return 0;
@@ -138,6 +125,8 @@ int main(int argc,char* argv[]) {
   int s;
   char* request;
   int rlen;
+  char* filename;
+  int64 d;
 
   signal(SIGPIPE,SIG_IGN);
 
@@ -182,16 +171,7 @@ int main(int argc,char* argv[]) {
       break;
     case '?':
 usage:
-      buffer_putsflush(buffer_2,
-		  "usage: httpbench [-h] [-c count] [-i interval] [-s sample] url\n"
-		  "\n"
-		  "\t-h\tprint this help\n"
-		  "\t-c n\topen n connections total (default: 1000)\n"
-		  "\t-i n\tevery n connections, measure the latency (default: 10)\n"
-		  "\t-s n\tlatency == average of time to fetch an URL n times (default: 5)\n"
-		  "\t-k\tenable HTTP keep-alive\n"
-		  "Setting the number of connections to 1 measures the throughput\n"
-		  "instead of the latency (give URL to a large file).\n");
+      buffer_putsflush(buffer_2,"usage: dl url\n");
       return 0;
     }
   }
@@ -251,7 +231,7 @@ usage:
       }
     }
 
-    request=malloc(300+str_len(host)+str_len(c)*3);
+    request=malloc(300+str_len(host)+3*str_len(c));
     if (!request) panic("malloc");
     {
       int i;
@@ -266,11 +246,14 @@ usage:
       i+=fmt_str(request+i,"\r\n\r\n");
       rlen=i; request[rlen]=0;
     }
+    filename=c+str_rchr(c,'/')+1;
 
   }
 
   {
     int i;
+    if (io_createfile(&d,filename)==0)
+      panic("creat");
     s=-1;
     for (i=0; i+16<=ips.len; i+=16) {
       char buf[IP6_FMT];
@@ -293,68 +276,12 @@ usage:
       return 1;
   }
   if (write(s,request,rlen)!=rlen) panic("write");
-  if (readanswer(s,count==1)==-1) exit(1);
+  if (readanswer(s,d)==-1) exit(1);
   close(s);
-  if (count==1)
-    return 0;
-
-  {
-    long i;
-    long j;
-    long err;
-    int *socks;
-    socks=malloc(sizeof(int)*count);
-    if (!socks) panic("malloc");
-    for (i=j=0; i<count; ++i) {
-      struct timeval a,b;
-      long d;
-      if (j==0) {
-	int k,s;
-	long x=0,y=0;
-	for (k=0; k<sample; ++k) {
-	  if (!keepalive || !k) {
-	    gettimeofday(&a,0);
-	    s=make_connection(ip,port,scope_id);
-	    if (s==-1)
-	      panic("make_connection");
-	    gettimeofday(&b,0);
-	    d=(b.tv_sec-a.tv_sec)*10000000;
-	    d=d+b.tv_usec-a.tv_usec;
-	    x+=d;
-	  }
-	  gettimeofday(&a,0);
-	  write(s,request,rlen);
-	  if (readanswer(s,0)==-1) {
-	    ++err;
-	    keepalive=0;
-	  }
-	  gettimeofday(&b,0);
-	  d=(b.tv_sec-a.tv_sec)*10000000;
-	  d=d+b.tv_usec-a.tv_usec;
-	  y+=d;
-	  if (!keepalive) close(s);
-	}
-	if (keepalive) close(s);
-	buffer_puts(buffer_1,"sample ");
-	buffer_putulong(buffer_1,x);
-	buffer_puts(buffer_1," ");
-	buffer_putulong(buffer_1,y/sample);
-	buffer_puts(buffer_1,"\n");
-      }
-      ++j; if (j==interval) j=0;
-
-      gettimeofday(&a,0);
-      socks[i]=make_connection(ip,port,scope_id);
-      if (socks[i]==-1)
-	panic("make_connection");
-      gettimeofday(&b,0);
-      d=(b.tv_sec-a.tv_sec)*10000000;
-      d=d+b.tv_usec-a.tv_usec;
-      buffer_puts(buffer_1,"clat ");
-      buffer_putulong(buffer_1,d);
-      buffer_puts(buffer_1,"\n");
-    }
+  close(d);
+  if (u.actime) {
+    u.modtime=u.actime;
+    if (utime(filename,&u)==-1) panic("utime");
   }
-  buffer_flush(buffer_1);
   return 0;
 }

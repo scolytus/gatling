@@ -1,7 +1,7 @@
 prefix=/usr/local
 BINDIR=${prefix}/bin
 
-all: gatling httpbench
+all: gatling httpbench dl
 
 CC=gcc
 CFLAGS=-pipe -Wall -O -g -I../libowfat/
@@ -12,6 +12,9 @@ gatling: gatling.o
 
 httpbench: httpbench.o
 	$(CC) -o $@ httpbench.o $(LDFLAGS) -lowfat
+
+dl: dl.o
+	$(CC) -o $@ dl.o $(LDFLAGS) -lowfat
 
 gatling.o: version.h
 

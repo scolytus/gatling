@@ -3,7 +3,7 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-all: gatling httpbench
+all: gatling httpbench dl
 
 CC=gcc
 CFLAGS=-pipe -Wall
@@ -50,6 +50,9 @@ gatling: gatling.o
 	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
 
 httpbench: httpbench.o
+	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
+
+dl: dl.o
 	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
 
 gatling.o: version.h
