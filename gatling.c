@@ -27,6 +27,9 @@
 #include <zlib.h>
 #endif
 
+#if defined(__OpenBSD__) || defined(__NetBSD__)
+#defined __broken_itojun_v6__
+#endif
 #define RELEASE "Gatling/" VERSION
 
 int virtual_hosts;
@@ -677,7 +680,7 @@ fini:
 
 int main(int argc,char* argv[]) {
   int s=socket_tcp6();
-#ifdef __OpenBSD__
+#ifdef __broken_itojun_v6__
 #warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
   int s4=socket_tcp4();
 #endif
@@ -797,7 +800,7 @@ int main(int argc,char* argv[]) {
 
   if (port==0)
     port=geteuid()?8000:80;
-#ifdef __OpenBSD__
+#ifdef __broken_itojun_v6__
   if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
     if (byte_equal(ip,16,V6any)) {
       if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
@@ -812,7 +815,7 @@ int main(int argc,char* argv[]) {
       panic("socket_bind6_reuse");
     s4=-1;
   }
-  buffer_putsflush(buffer_2,"WARNING: We are taking heavy losses working around itojun/OpenBSD madness here.\n"
+  buffer_putsflush(buffer_2,"WARNING: We are taking heavy losses working around itojun KAME madness here.\n"
 		            "         Please consider using an operating system with real IPv6 support instead!\n");
 #else
   if (port==0) {
@@ -833,7 +836,7 @@ int main(int argc,char* argv[]) {
     buffer_putnlflush(buffer_1);
   }
 
-#ifdef __OpenBSD__
+#ifdef __broken_itojun_v6__
   if (s!=-1) {
     if (socket_listen(s,16)==-1)
       panic("socket_listen");
@@ -888,13 +891,13 @@ int main(int argc,char* argv[]) {
     }
 
     while ((i=io_canread())!=-1) {
-#ifdef __OpenBSD__
+#ifdef __broken_itojun_v6__
       if (i==s || i==s4) {
 #else
       if (i==s) {
 #endif
 	int n;
-#ifdef __OpenBSD__
+#ifdef __broken_itojun_v6__
 	while (1) {
 	  if (i==s4) {
 	    byte_copy(ip,12,V4mappedprefix);
@@ -926,7 +929,7 @@ int main(int argc,char* argv[]) {
 	    io_wantread(n);
 	    if (h) {
 	      byte_zero(h,sizeof(struct http_data));
-#ifdef __OpenBSD__
+#ifdef __broken_itojun_v6__
 	      if (i==s4) {
 		byte_copy(h->myip,12,V4mappedprefix);
 		socket_local4(i,h->myip+12,&h->myport);
@@ -947,7 +950,7 @@ int main(int argc,char* argv[]) {
 	if (errno==EAGAIN)
 	  io_eagain(i);
 	else
-#ifdef __OpenBSD__
+#ifdef __broken_itojun_v6__
 	  carp(i==s4?"socket_accept4":"socket_accept6");
 #else
 	  carp("socket_accept6");
