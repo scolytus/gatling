@@ -13,6 +13,8 @@
 #include "uint32.h"
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -30,6 +32,7 @@
 int virtual_hosts;
 int transproxy;
 int directory_index;
+int logging;
 int64 origdir;
 
 static void carp(const char* routine) {
@@ -487,9 +490,11 @@ void httpresponse(struct http_data* h,int64 s) {
 e400:
     httperror(h,"400 Invalid Request","This server only understands GET and HEAD.");
 
-    buffer_puts(buffer_1,"error_400 ");
-    buffer_putulong(buffer_1,s);
-    buffer_putsflush(buffer_1,"\n");
+    if (logging) {
+      buffer_puts(buffer_1,"error_400 ");
+      buffer_putulong(buffer_1,s);
+      buffer_putsflush(buffer_1,"\n");
+    }
 
   } else {
     char *d;
@@ -520,15 +525,17 @@ e400:
 e404:
       httperror(h,"404 Not Found","No such file or directory.");
 
-      buffer_puts(buffer_1,head?"HEAD/404 ":"GET/404 ");
-      buffer_putulong(buffer_1,s);
-      buffer_puts(buffer_1," ");
-      buffer_putlogstr(buffer_1,c);
-      buffer_puts(buffer_1," 0 ");
-      buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
-      buffer_puts(buffer_1," ");
-      buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
-      buffer_putsflush(buffer_1,"\n");
+      if (logging) {
+	buffer_puts(buffer_1,head?"HEAD/404 ":"GET/404 ");
+	buffer_putulong(buffer_1,s);
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,c);
+	buffer_puts(buffer_1," 0 ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	buffer_putsflush(buffer_1,"\n");
+      }
 
     } else {
       char* filename=c;
@@ -539,17 +546,19 @@ e404:
 	  httperror(h,"500 Sorry","Out of Memory.");
 	else {
 
-	  buffer_puts(buffer_1,head?"HEAD ":"GET ");
-	  buffer_putulong(buffer_1,s);
-	  buffer_puts(buffer_1," ");
-	  buffer_putlogstr(buffer_1,filename);
-	  buffer_puts(buffer_1," ");
-	  buffer_putulong(buffer_1,h->blen);
-	  buffer_puts(buffer_1," ");
-	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
-	  buffer_puts(buffer_1," ");
-	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
-	  buffer_putsflush(buffer_1,"\n");
+	  if (logging) {
+	    buffer_puts(buffer_1,head?"HEAD ":"GET ");
+	    buffer_putulong(buffer_1,s);
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,filename);
+	    buffer_puts(buffer_1," ");
+	    buffer_putulong(buffer_1,h->blen);
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	    buffer_putsflush(buffer_1,"\n");
+	  }
 
 	  c+=fmt_str(c,"HTTP/1.1 200 Here you go\r\nContent-Type: text/html\r\nConnection: ");
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
@@ -631,28 +640,32 @@ rangeerror:
 	    iob_addfile(&h->iob,fd,range_first,range_last);
 	    h->filefd=fd;
 	  }
-	  if (h->hdrbuf[9]=='3') {
-	    buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
-	  } else {
-	    buffer_puts(buffer_1,head?"HEAD ":"GET ");
+	  if (logging) {
+	    if (h->hdrbuf[9]=='3') {
+	      buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
+	    } else {
+	      buffer_puts(buffer_1,head?"HEAD ":"GET ");
+	    }
 	  }
 	}
 
-	buffer_putulong(buffer_1,s);
-	buffer_puts(buffer_1," ");
-	buffer_putlogstr(buffer_1,filename);
-	switch (h->encoding) {
-	case GZIP: buffer_puts(buffer_1,".gz"); break;
-	case BZIP2: buffer_puts(buffer_1,".bz2");
-	case NORMAL: break;
+	if (logging) {
+	  buffer_putulong(buffer_1,s);
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,filename);
+	  switch (h->encoding) {
+	  case GZIP: buffer_puts(buffer_1,".gz"); break;
+	  case BZIP2: buffer_puts(buffer_1,".bz2");
+	  case NORMAL: break;
+	  }
+	  buffer_puts(buffer_1," ");
+	  buffer_putulong(buffer_1,range_last-range_first);
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	  buffer_putsflush(buffer_1,"\n");
 	}
-	buffer_puts(buffer_1," ");
-	buffer_putulong(buffer_1,range_last-range_first);
-	buffer_puts(buffer_1," ");
-	buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
-	buffer_puts(buffer_1," ");
-	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
-	buffer_putsflush(buffer_1,"\n");
       }
     }
   }
@@ -675,14 +688,26 @@ int main(int argc,char* argv[]) {
 
   signal(SIGPIPE,SIG_IGN);
 
+  {
+    struct rlimit rl;
+    rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
+    setrlimit(RLIMIT_NOFILE,&rl);
+    setrlimit(RLIMIT_NPROC,&rl);
+  }
+
   byte_zero(ip,16);
   port=0; scope_id=0;
 
+  logging=1;
+
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"hi:p:vVdDtT:");
+    int c=getopt(argc,argv,"hni:p:vVdDtT:");
     if (c==-1) break;
     switch (c) {
+    case 'n':
+      logging=0;
+      break;
     case 'i':
       i=scan_ip6(optarg,ip);
       if (optarg[i]=='%') {
@@ -845,11 +870,13 @@ int main(int argc,char* argv[]) {
 	byte_copy(&tick,sizeof(next),&now);
 	++tick.sec.x;
 	while ((i=io_timeouted())!=-1) {
-	  buffer_puts(buffer_1,"timeout ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_puts(buffer_1,"\nclose ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_putnlflush(buffer_1);
+	  if (logging) {
+	    buffer_puts(buffer_1,"timeout ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
 	  io_close(i);
 	}
       }
@@ -877,13 +904,15 @@ int main(int argc,char* argv[]) {
 	  {
 	    char buf[IP6_FMT];
 
-	    buffer_puts(buffer_1,"accept ");
-	    buffer_putulong(buffer_1,n);
-	    buffer_puts(buffer_1," ");
-	    buffer_put(buffer_1,buf,byte_equal(ip,12,V4mappedprefix)?fmt_ip4(buf,ip+12):fmt_ip6(buf,ip));
-	    buffer_puts(buffer_1," ");
-	    buffer_putulong(buffer_1,port);
-	    buffer_putnlflush(buffer_1);
+	    if (logging) {
+	      buffer_puts(buffer_1,"accept ");
+	      buffer_putulong(buffer_1,n);
+	      buffer_puts(buffer_1," ");
+	      buffer_put(buffer_1,buf,byte_equal(ip,12,V4mappedprefix)?fmt_ip4(buf,ip+12):fmt_ip6(buf,ip));
+	      buffer_puts(buffer_1," ");
+	      buffer_putulong(buffer_1,port);
+	      buffer_putnlflush(buffer_1);
+	    }
 	  }
 
 	  io_nonblock(n);
@@ -929,13 +958,15 @@ int main(int argc,char* argv[]) {
 	    if (h->hdrbuf!=oom) free(h->hdrbuf); h->hdrbuf=0;
 	    free(h->bodybuf); h->bodybuf=0;
 	  }
-	  buffer_puts(buffer_1,"io_error ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_puts(buffer_1," ");
-	  buffer_puterror(buffer_1);
-	  buffer_puts(buffer_1,"\nclose ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_putnlflush(buffer_1);
+	  if (logging) {
+	    buffer_puts(buffer_1,"io_error ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_puts(buffer_1," ");
+	    buffer_puterror(buffer_1);
+	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
 	  io_close(i);
 	} else if (l==0) {
 	  if (h) {
@@ -943,9 +974,11 @@ int main(int argc,char* argv[]) {
 	    iob_reset(&h->iob);
 	    free(h->hdrbuf); h->hdrbuf=0;
 	  }
-	  buffer_puts(buffer_1,"close ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_putnlflush(buffer_1);
+	  if (logging) {
+	    buffer_puts(buffer_1,"close ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
 	  io_close(i);
 	} else if (l>0) {
 	  if (timeout_secs)
@@ -973,15 +1006,19 @@ emerge:
       else if (r<=0) {
 	if (h->filefd!=-1) close(h->filefd);
 	if (r==-3) {
-	  buffer_puts(buffer_1,"socket_error ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_puts(buffer_1," ");
-	  buffer_puterror(buffer_1);
-	  buffer_putnlflush(buffer_1);
+	  if (logging) {
+	    buffer_puts(buffer_1,"socket_error ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_puts(buffer_1," ");
+	    buffer_puterror(buffer_1);
+	    buffer_putnlflush(buffer_1);
+	  }
 	} else {
-	  buffer_puts(buffer_1,"request_done ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_putnlflush(buffer_1);
+	  if (logging) {
+	    buffer_puts(buffer_1,"request_done ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
 	}
 	array_trunc(&h->r);
 	iob_reset(&h->iob);
@@ -990,9 +1027,11 @@ emerge:
 	  io_dontwantwrite(i);
 	  io_wantread(i);
 	} else {
-	  buffer_puts(buffer_1,"close ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_putnlflush(buffer_1);
+	  if (logging) {
+	    buffer_puts(buffer_1,"close ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
 	  io_close(i);
 	}
       } else

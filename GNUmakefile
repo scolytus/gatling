@@ -3,7 +3,7 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-all: gatling
+all: gatling httpbench
 
 CC=gcc
 CFLAGS=-pipe -Wall
@@ -47,6 +47,9 @@ LDFLAGS+=$(foreach fnord,$(libowfat_path),-L$(dir $(fnord)))
 endif
 
 gatling: gatling.o
+	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
+
+httpbench: httpbench.o
 	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
 
 gatling.o: version.h
