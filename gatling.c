@@ -1065,7 +1065,7 @@ static int ftp_size(struct http_data* h,const char* s) {
 
 
 static void ftp_ls(array* x,const char* s,const struct stat* const ss,time_t now) {
-  char buf[PATH_MAX];
+  char buf[2048];
   int i,j;
   struct tm* t;
   {
