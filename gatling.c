@@ -1105,7 +1105,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   if (Filename[i]=='?') { Filename[i]=0; args=filename+i+1; }
   /* second, we need to un-urlencode the file name */
   /* we can do it in-place, the decoded string can never be longer */
-  scan_urlencoded(Filename,Filename,&i);
+  scan_urlencoded2(Filename,Filename,&i);
   Filename[i]=0;
   /* third, change /. to /: so .procmailrc is visible in ls as
    * :procmailrc, and it also thwarts most web root escape attacks */
