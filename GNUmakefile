@@ -67,21 +67,27 @@ version.h: CHANGES
 %.o: %.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS)
 
-libsocket:
+libsocket: trysocket.c
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
 	fi; fi; fi > libsocket
 	rm -f trysocket
 
+libiconv: tryiconv.c
+	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
+	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
+	fi; fi > libiconv
+	rm -f tryiconv
+
 dummy.c:
 	touch $@
 
-libsocketkludge.a: libsocket dummy.o
+libsocketkludge.a: libsocket libiconv dummy.o
 	ar q $@ dummy.o
 	-ranlib $@
 
-LDLIBS+=`cat libsocket`
+LDLIBS+=`cat libsocket libiconv`
 
 $(TARGETS): libsocketkludge.a
 
@@ -93,4 +99,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a
+	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv
