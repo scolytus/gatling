@@ -8,7 +8,7 @@ CFLAGS=-pipe -Wall -O -g -I../libowfat/
 LDFLAGS=-g -L../libowfat/
 
 gatling: gatling.o
-	$(CC) -o $@ $^ -lowfat $(LDFLAGS)
+	$(CC) -o $@ $< -lowfat $(LDFLAGS)
 
 gatling.o: version.h
 
