@@ -395,9 +395,16 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	    io_dontwantwrite(s);
 	    io_dontwantread(sockfd);
 	    io_dontwantwrite(sockfd);
+	  } else {
+	    /* there is still data to copy */
+	    io_wantread(sockfd);
+	    io_dontwantwrite(sockfd);
+	    io_wantread(s);
+	    io_dontwantwrite(s);
 	  }
 	}
       }
+
       if (timeout_secs)
 	io_timeout(s,next);
       return s;
@@ -2575,7 +2582,7 @@ void forkslave(int fd,buffer* in) {
 	      if (x) {
 		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
 		contenttype=alloca(30+j+1);
-		i=fmt_str(authtype,"CONTENT_TYPE=");
+		i=fmt_str(contenttype,"CONTENT_TYPE=");
 		byte_copy(contenttype+i,j,x);
 		contenttype[i+j]=0;
 	      } else
@@ -2585,7 +2592,7 @@ void forkslave(int fd,buffer* in) {
 	      if (x) {
 		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
 		contentlength=alloca(30+j+1);
-		i=fmt_str(authtype,"CONTENT_LENGTH=");
+		i=fmt_str(contentlength,"CONTENT_LENGTH=");
 		byte_copy(contentlength+i,j,x);
 		contentlength[i+j]=0;
 	      } else
@@ -2616,8 +2623,9 @@ void forkslave(int fd,buffer* in) {
 			if (str_start(_envp[i],cgivars[j])) { found=1; break; }
 		      if (!found) ++envc;
 		    }
-		    envp=(char**)alloca(sizeof(char*)*envc+20);
+		    envp=(char**)alloca(sizeof(char*)*(envc+20));
 		    envc=0;
+
 		    for (i=0; _envp[i]; ++i) {
 		      int found=0;
 		      for (j=0; cgivars[j]; ++j)
