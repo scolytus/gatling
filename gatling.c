@@ -2084,6 +2084,8 @@ static int switch_uid() {
   return 0;
 }
 
+static long connections;
+
 static void cleanup(int64 fd) {
   struct http_data* h=io_getcookie(fd);
   int buddyfd=-1;
@@ -2096,6 +2098,16 @@ static void cleanup(int64 fd) {
 #endif
   if (h) {
     buddyfd=h->buddy;
+
+    if (h->t==HTTPREQUEST
+#ifdef SUPPORT_FTP
+	|| h->t==FTPCONTROL6 || h->t==FTPCONTROL4
+#endif
+#ifdef SUPPORT_SMB
+	|| h->t==SMBREQUEST
+#endif
+	  ) --connections;
+
 #if defined(SUPPORT_FTP) || defined(SUPPORT_CGI)
     if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE || h->t==PROXYSLAVE || h->t==HTTPREQUEST) {
       if (buddyfd!=-1) {
@@ -2117,6 +2129,8 @@ static void cleanup(int64 fd) {
 	buffer_puts(buffer_1,"-1");
       else
 	buffer_putulong(buffer_1,h->filefd);
+      buffer_putspace(buffer_1);
+      buffer_putulong(buffer_1,connections-1);
       buffer_putnlflush(buffer_1);
     }
 #endif
@@ -2144,10 +2158,10 @@ static void cleanup(int64 fd) {
   }
 }
 
-static int fini;
+static volatile int fini;
 
 void sighandler(int sig) {
-  fini=1;
+  fini=(sig==SIGINT?1:2);	/* 2 for SIGHUP */
 }
 
 int main(int argc,char* argv[]) {
@@ -2196,6 +2210,7 @@ int main(int argc,char* argv[]) {
     sigemptyset(&sa.sa_mask);
     sa.sa_handler=sighandler;
     sigaction(SIGINT,&sa,0);
+    sigaction(SIGHUP,&sa,0);
   }
 
   if (!geteuid()) {
@@ -2304,8 +2319,8 @@ int main(int argc,char* argv[]) {
     case 'h':
 usage:
       buffer_putsflush(buffer_2,
-		  "usage: gatling [-hnvVtdD] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
-		  "               [-u uid] [-c dir] [-w workgroup] [-P bytes]\n"
+		  "usage: gatling [-hnvVtdDfFUa] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
+		  "               [-u uid] [-c dir] [-w workgroup] [-P bytes] [-C ip/port/regex]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -2314,10 +2329,10 @@ usage:
 		  "\t-t\ttransproxy mode: do not replace :port in Host headers\n"
 		  "\t-d\tgenerate directory index\n"
 		  "\t-D\tdo not generate directory index\n"
+		  "\t\t(default is -d unless in virtual hosting mode)\n"
 		  "\t-T n\tset timeout in seconds (0 to disable, default 23)\n"
 		  "\t-u uid\tswitch to this UID after binding\n"
 		  "\t-c dir\tchroot to dir after binding\n"
-		  "\t\t(default is -d unless in virtual hosting mode)\n"
 		  "\t-n\tdo not produce logging output\n"
 		  "\t-f\tprovide FTP; next -p is meant for the FTP port (default: 21)\n"
 		  "\t-F\tdo not provide FTP\n"
@@ -2550,9 +2565,32 @@ usage:
 #endif
 #endif
 
+  connections=1;
+
   for (;;) {
     int64 i;
 
+    if (fini==2) {
+      --connections;
+      io_close(s);
+#ifdef __broken_itojun_v6__
+      io_close(s4);
+#endif
+#ifdef SUPPORT_FTP
+      io_close(f);
+#ifdef __broken_itojun_v6__
+      io_close(f4);
+#endif
+#endif
+#ifdef SUPPORT_SMB
+      io_close(smbs);
+#endif
+      buffer_puts(buffer_1,"closing_server_sockets ");
+      buffer_putulong(buffer_1,connections);
+      buffer_putnlflush(buffer_1);
+      fini=0;
+    }
+    if (!connections) fini=1;
     if (fini) {
       buffer_putsflush(buffer_1,"stopping\n");
       break;
@@ -2704,6 +2742,7 @@ pasverror:
 #endif
 	    n=socket_accept6(i,ip,&port,&scope_id);
 	  if (n==-1) break;
+	  ++connections;
 	  {
 	    char buf[IP6_FMT];
 
@@ -2714,6 +2753,8 @@ pasverror:
 	      buffer_put(buffer_1,buf,byte_equal(ip,12,V4mappedprefix)?fmt_ip4(buf,ip+12):fmt_ip6(buf,ip));
 	      buffer_puts(buffer_1," ");
 	      buffer_putulong(buffer_1,port);
+	      buffer_puts(buffer_1," ");
+	      buffer_putulong(buffer_1,connections-1);
 	      buffer_putnlflush(buffer_1);
 	    }
 	  }
