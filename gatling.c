@@ -1,6 +1,7 @@
 #undef SUPPORT_SMB
 #define SUPPORT_FTP
 #define SUPPORT_CGI
+#define DEBUG
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
@@ -310,11 +311,12 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
 #endif
 
 
-static int open_for_reading(int64* fd,const char* name) {
+static int open_for_reading(int64* fd,const char* name,struct stat* SS) {
   /* only allow reading of world readable files */
   if (io_readfile(fd,name)) {
     struct stat ss;
-    if (fstat(*fd,&ss)==-1 || !(ss.st_mode&S_IROTH)) {
+    if (!SS) SS=&ss;
+    if (fstat(*fd,SS)==-1 || !(SS->st_mode&S_IROTH)) {
       close(*fd);
       *fd=-1;
       return 0;
@@ -760,7 +762,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     /* Damn.  Directory. */
     if (filename[1] && chdir(filename+1)==-1) return -1;
     h->mimetype="text/html";
-    if (!open_for_reading(&fd,"index.html")) {
+    if (!open_for_reading(&fd,"index.html",ss)) {
       DIR* d;
       if (!directory_index) return -1;
       if (!(d=opendir("."))) return -1;
@@ -797,7 +799,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     }
     if (doesbzip2) {
       int64 gfd;
-      if (open_for_reading(&gfd,"index.html.bz2")) {
+      if (open_for_reading(&gfd,"index.html.bz2",ss)) {
 	io_close(fd);
 	fd=gfd;
 	h->encoding=BZIP2;
@@ -805,7 +807,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     }
     if (doesgzip) {
       int64 gfd;
-      if (open_for_reading(&gfd,"index.html.gz")) {
+      if (open_for_reading(&gfd,"index.html.gz",ss)) {
 	io_close(fd);
 	fd=gfd;
 	h->encoding=GZIP;
@@ -813,8 +815,19 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     }
   } else {
     h->mimetype=mimetype(filename);
-    if (!open_for_reading(&fd,filename+1))
+    if (!open_for_reading(&fd,filename+1,ss))
       return -1;
+#ifdef DEBUG
+    if (logging) {
+      buffer_puts(buffer_1,"open_file ");
+      buffer_putulong(buffer_1,sockfd);
+      buffer_putspace(buffer_1);
+      buffer_putulong(buffer_1,fd);
+      buffer_putspace(buffer_1);
+      buffer_puts(buffer_1,filename);
+      buffer_putnlflush(buffer_1);
+    }
+#endif
     if (doesgzip || doesbzip2) {
       int64 gfd;
       char* tmpfilename=alloca(str_len(filename)+5);
@@ -822,7 +835,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	i=fmt_str(tmpfilename,filename+1);
 	i+=fmt_str(tmpfilename+i,".bz2");
 	tmpfilename[i]=0;
-	if (io_readfile(&gfd,tmpfilename)) {
+	if (open_for_reading(&gfd,tmpfilename,ss)) {
 	  io_close(fd);
 	  fd=gfd;
 	  h->encoding=BZIP2;
@@ -832,7 +845,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	i=fmt_str(tmpfilename,filename+1);
 	i+=fmt_str(tmpfilename+i,".gz");
 	tmpfilename[i]=0;
-	if (io_readfile(&gfd,tmpfilename)) {
+	if (open_for_reading(&gfd,tmpfilename,ss)) {
 	  io_close(fd);
 	  fd=gfd;
 	  h->encoding=GZIP;
@@ -840,7 +853,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       }
     }
   }
-  if (fstat(fd,ss)==-1 || S_ISDIR(ss->st_mode)) {
+  if (S_ISDIR(ss->st_mode)) {
     io_close(fd);
     return -1;
   }
@@ -984,10 +997,15 @@ e404:
 	return;
 #endif
       } else {
-	if (fstat(fd,&ss)==-1) {
-	  io_close(fd);
-	  goto e404;
+#ifdef DEBUG
+	if (logging) {
+	  buffer_puts(buffer_1,"filefd ");
+	  buffer_putulong(buffer_1,s);
+	  buffer_putspace(buffer_1);
+	  buffer_putulong(buffer_1,fd);
+	  buffer_putnlflush(buffer_1);
 	}
+#endif
 	h->filefd=fd;
 	range_first=0; range_last=ss.st_size;
 	if ((c=http_header(h,"If-Modified-Since")))
@@ -1007,6 +1025,15 @@ e404:
 	      }
 	    } else {
 rangeerror:
+#ifdef DEBUG
+	      if (logging) {
+		buffer_puts(buffer_1,"bad_range_close ");
+		buffer_putulong(buffer_1,s);
+		buffer_putspace(buffer_1);
+		buffer_putulong(buffer_1,fd);
+		buffer_putnlflush(buffer_1);
+	      }
+#endif
 	      io_close(h->filefd); h->filefd=-1;
 	      httperror(h,"416 Bad Range","The requested range can not be satisfied.");
 	      goto fini;
@@ -1135,7 +1162,7 @@ static int ftp_vhost(struct http_data* h) {
   return 0;
 }
 
-static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,const char* what) {
+static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,const char* what,struct stat* ss) {
   int l=h->ftppath?str_len(h->ftppath):0;
   char* x=alloca(l+str_len(s)+5);
   char* y;
@@ -1161,7 +1188,7 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
   h->hdrbuf=forreading?"550 No such file or directory.\r\n":"550 You can't upload here!\r\n";
   if (x[1]) {
     switch (forreading) {
-    case 1: open_for_reading(&fd,x+1); break;
+    case 1: open_for_reading(&fd,x+1,ss); break;
     case 0: open_for_writing(&fd,x+1); break;
     case 2: fd=mkdir(x+1,0777);
 	    if (!fd) chmod(x+1,0777);
@@ -1198,7 +1225,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
     return -1;
   }
   if (b->filefd!=-1) { io_close(b->filefd); b->filefd=-1; }
-  b->filefd=ftp_open(h,s,forwriting^1,sock,forwriting?"STOR":"RETR");
+  b->filefd=ftp_open(h,s,forwriting^1,sock,forwriting?"STOR":"RETR",&ss);
   if (b->filefd==-1) {
     if (logging) {
       buffer_putulonglong(buffer_1,0);
@@ -1260,13 +1287,8 @@ static int ftp_mdtm(struct http_data* h,const char* s) {
   int fd;
   int i;
   struct tm* t;
-  if ((fd=ftp_open(h,s,1,0,0))==-1) return -1;
-  i=fstat(fd,&ss);
+  if ((fd=ftp_open(h,s,1,0,0,&ss))==-1) return -1;
   io_close(fd);
-  if (i==-1) {
-    h->hdrbuf="500 file gone?!\r\n";
-    return -1;
-  }
   t=gmtime(&ss.st_mtime);
   h->hdrbuf=malloc(100);
   if (!h->hdrbuf) {
@@ -1290,13 +1312,8 @@ static int ftp_size(struct http_data* h,const char* s) {
   struct stat ss;
   int fd;
   int i;
-  if ((fd=ftp_open(h,s,1,0,0))==-1) return -1;
-  i=fstat(fd,&ss);
+  if ((fd=ftp_open(h,s,1,0,0,&ss))==-1) return -1;
   io_close(fd);
-  if (i==-1) {
-    h->hdrbuf="500 file gone?!\r\n";
-    return -1;
-  }
   h->hdrbuf=malloc(100);
   if (!h->hdrbuf) {
     h->hdrbuf="500 out of memory\r\n";
@@ -1615,7 +1632,7 @@ static int ftp_cwd(struct http_data* h,char* s) {
 }
 
 static int ftp_mkdir(struct http_data* h,const char* s) {
-  if (ftp_open(h,s,2,0,"mkdir")==-1) return -1;
+  if (ftp_open(h,s,2,0,"mkdir",0)==-1) return -1;
   h->hdrbuf="257 directory created.\r\n";
   return 0;
 }
@@ -2077,6 +2094,18 @@ static void cleanup(int64 fd) {
 #endif
     array_reset(&h->r);
     iob_reset(&h->iob);
+#ifdef DEBUG
+    if (logging) {
+      buffer_puts(buffer_1,"cleanup_filefd_close ");
+      buffer_putulong(buffer_1,fd);
+      buffer_putspace(buffer_1);
+      if (h->filefd==-1)
+	buffer_puts(buffer_1,"-1");
+      else
+	buffer_putulong(buffer_1,h->filefd);
+      buffer_putnlflush(buffer_1);
+    }
+#endif
     if (h->filefd!=-1) io_close(h->filefd);
 #ifdef SUPPORT_FTP
     free(h->ftppath);
@@ -2991,6 +3020,15 @@ pipeline:
 	    h->hdrbuf=0;
 	    if (h->keepalive) {
 	      iob_reset(&h->iob);
+#ifdef DEBUG
+	      if (logging) {
+		buffer_puts(buffer_1,"keepalive_cleanup_filefd_close ");
+		buffer_putulong(buffer_1,i);
+		buffer_putspace(buffer_1);
+		buffer_putulong(buffer_1,h->filefd);
+		buffer_putnlflush(buffer_1);
+	      }
+#endif
 	      if (h->filefd!=-1) { io_close(h->filefd); h->filefd=-1; }
 	      io_dontwantwrite(i);
 	      io_wantread(i);
