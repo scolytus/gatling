@@ -20,7 +20,7 @@ bindbench: bindbench.o
 	$(CC) -o $@ bindbench.o $(LDFLAGS)
 
 mmapbench: mmapbench.o
-	$(CC) -o $@ dl.o $(LDFLAGS)
+	$(CC) -o $@ mmapbench.o $(LDFLAGS)
 
 forkbench: forkbench.o
 	$(CC) -o $@ forkbench.o $(LDFLAGS)
