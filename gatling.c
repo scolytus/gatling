@@ -885,6 +885,8 @@ usage:
   if (chroot_to) {
     if (chroot(chroot_to)==-1)
       panic("chroot");
+    if (chdir("/")==-1)
+      panic("chdir");
   }
   if (new_uid && switch_uid()==-1)
     panic("switch_uid");
