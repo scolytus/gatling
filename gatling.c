@@ -2060,7 +2060,11 @@ usage:
     Y=sizeof(workgroup_utf16);
     x=workgroup;
     y=workgroup_utf16;
+#ifdef __sun__
+    if (iconv(i,(const char**)&x,&X,&y,&Y)) panic("UTF-16 conversion of workgroup failed.\n");
+#else
     if (iconv(i,&x,&X,&y,&Y)) panic("UTF-16 conversion of workgroup failed.\n");
+#endif
     wglen=str_len(workgroup);
     wglen16=sizeof(workgroup_utf16)-Y;
   }
