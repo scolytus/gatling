@@ -1,2 +1,6 @@
 gatling
 version.h
+httpbench
+forkbench
+mmapbench
+dl

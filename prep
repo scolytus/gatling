@@ -1,0 +1,8 @@
+if test -f /proc/sys/kernel/threads-max;
+  then echo 11000 > /proc/sys/kernel/threads-max
+fi
+
+sysctl -w kern.maxfiles=11000
+sysctl -w kern.maxproc=6000
+
+# kill sendmail
