@@ -306,11 +306,19 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	  buf[x]=0;
 	}
 	tmp=array_start(&d->r);
+#ifdef SUPPORT_HTTPS
+	switch (*tmp) {
+	case 'H': method=(d->t==HTTPREQUEST)?"HEAD":"HEAD/SSL"; break;
+	case 'G': method=(d->t==HTTPREQUEST)?"GET":"GET/SSL"; break;
+	case 'P': method=(d->t==HTTPREQUEST)?"POST":"POST/SSL"; break;
+	}
+#else
 	switch (*tmp) {
 	case 'H': method="HEAD"; break;
 	case 'G': method="GET"; break;
 	case 'P': method="POST"; break;
 	}
+#endif
 	buffer_putm(buffer_1,method,x->port?"/PROXY ":"/CGI ");
 	buffer_putulong(buffer_1,sockfd);
 	buffer_puts(buffer_1," ");
@@ -650,7 +658,12 @@ static int header_complete(struct http_data* r) {
   long i;
   long l=array_bytes(&r->r);
   const char* c=array_start(&r->r);
-  if (r->t==HTTPREQUEST) {
+#ifdef SUPPORT_HTTPS
+  if (r->t==HTTPREQUEST || r->t==HTTPSREQUEST)
+#else
+  if (r->t==HTTPREQUEST)
+#endif
+  {
     for (i=0; i+1<l; ++i) {
       if (c[i]=='\n' && c[i+1]=='\n')
 	return i+2;
@@ -683,7 +696,12 @@ static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nCo
 
 void httperror(struct http_data* r,const char* title,const char* message) {
   char* c;
-  if (r->t==HTTPSERVER4 || r->t==HTTPSERVER6 || r->t==HTTPREQUEST) {
+  if (r->t==HTTPSERVER4 || r->t==HTTPSERVER6 || r->t==HTTPREQUEST
+#ifdef SUPPORT_HTTPS
+      || r->t==HTTPSSERVER4 || r->t==HTTPSSERVER6
+      || r->t==HTTPSREQUEST || r->t==HTTPSRESPONSE
+#endif
+								) {
     c=r->hdrbuf=(char*)malloc(str_len(message)+str_len(title)+250);
     if (!c) {
       r->hdrbuf=oom;
@@ -1244,6 +1262,10 @@ e404:
 	x+=fmt_str(buf+x,"/");
 	x+=fmt_ulong(buf+x,h->myport);
 	buf[x]=0;
+#ifdef SUPPORT_HTTPS
+	if (h->t == HTTPSREQUEST)
+	  buffer_puts(buffer_1,"HTTPS/");
+#endif
 	buffer_puts(buffer_1,head?"HEAD/404 ":post?"POST/404 ":"GET/404 ");
 	buffer_putulong(buffer_1,s);
 	buffer_puts(buffer_1," ");
@@ -1276,6 +1298,10 @@ e404:
 	    x+=fmt_str(buf+x,"/");
 	    x+=fmt_ulong(buf+x,h->myport);
 	    buf[x]=0;
+#ifdef SUPPORT_HTTPS
+	    if (h->t == HTTPSREQUEST)
+	      buffer_puts(buffer_1,"HTTPS/");
+#endif
 	    buffer_puts(buffer_1,head?"HEAD ":"GET ");
 	    buffer_putulong(buffer_1,s);
 	    buffer_puts(buffer_1," ");
@@ -2462,7 +2488,12 @@ static void cleanup(int64 fd) {
 	  ) --connections;
 
 #if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
-    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE || h->t==PROXYSLAVE || h->t==HTTPREQUEST) {
+    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE || h->t==PROXYSLAVE ||
+	h->t==HTTPREQUEST
+#ifdef SUPPORT_HTTPS
+			  || h->t==HTTPSREQUEST || h->t==HTTPSRESPONSE
+#endif
+	) {
       if (buddyfd!=-1) {
 	struct http_data* b=io_getcookie(buddyfd);
 	if (b)
@@ -3362,7 +3393,8 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
   char buf[8192];
   int l;
 #ifdef SUPPORT_HTTPS
-  if (H->t == HTTPSREQUEST || H->t == HTTPSRESPONSE) {
+  assert(H->t != HTTPSRESPONSE);
+  if (H->t == HTTPSREQUEST) {
     l=SSL_read(H->ssl,buf,sizeof(buf));
     if (l==-1) {
       l=SSL_get_error(H->ssl,l);
@@ -3466,12 +3498,17 @@ emerge:
       } else if ((l=header_complete(H))) {
 	long alen;
 pipeline:
-	if (H->t==HTTPREQUEST
 #ifdef SUPPORT_HTTPS
-	                      || H->t==HTTPSREQUEST
-#endif
-	                                           )
+	if (H->t==HTTPREQUEST || H->t==HTTPSREQUEST) {
 	  httpresponse(H,i,l);
+	  if (H->t == HTTPSREQUEST) H->t=HTTPSRESPONSE;
+	}
+#else
+	if (H->t==HTTPREQUEST)
+	  httpresponse(H,i,l);
+#endif
+#ifdef SUPPORT_HTTPS
+#endif
 #ifdef SUPPORT_SMB
 	else if (H->t==SMBREQUEST)
 	  smbresponse(H,i);
@@ -3519,7 +3556,8 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
 static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum) {
   int64 r;
 #ifdef SUPPORT_HTTPS
-  if (h->t == HTTPSREQUEST || h->t == HTTPSRESPONSE)
+  assert(h->t != HTTPSREQUEST);
+  if (h->t == HTTPSRESPONSE)
     r=iob_write(i,&h->iob,https_write_callback);
   else
 #endif
@@ -3555,15 +3593,27 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
       }
 #endif
       cleanup(i);
-    } else {
+    } else {	/* returned 0, i.e. we wrote it all */
+#ifdef SUPPORT_HTTPS
+      if (h->t == HTTPSRESPONSE) h->t = HTTPSREQUEST;
+#endif
 #ifdef SUPPORT_PROXY
-      if (h->t == HTTPREQUEST && h->buddy!=-1) {
+#ifdef SUPPORT_HTTPS
+      if ((h->t == HTTPREQUEST || h->t == HTTPSREQUEST) && h->buddy!=-1)
+#else
+      if (h->t == HTTPREQUEST && h->buddy!=-1)
+#endif
+      {
 	io_dontwantwrite(i);
 	io_wantread(h->buddy);
 	return;
       }
 #endif
-      if (logging && h->t == HTTPREQUEST) {
+      if (logging && (h->t == HTTPREQUEST
+#ifdef SUPPORT_HTTPS
+	  || h->t == HTTPSREQUEST
+#endif
+	  )) {
 	buffer_puts(buffer_1,"request_done ");
 	buffer_putulong(buffer_1,i);
 	buffer_putnlflush(buffer_1);
@@ -4216,8 +4266,14 @@ usage:
 #endif
       if (is_server_connection(H->t))
 	accept_server_connection(i,H,ftptimeout_secs,nextftp);
-      else
+      else {
+#ifdef SUPPORT_HTTPS
+	if (H->t == HTTPSRESPONSE)
+	  handle_write_misc(i,H,prefetchquantum);
+	else
+#endif
 	handle_read_misc(i,H,ftptimeout_secs,nextftp);
+      }
     }
 
     /* HANDLE WRITABLE EVENTS */
@@ -4257,6 +4313,11 @@ usage:
       if (h->t==FTPACTIVE)
 	handle_write_ftpactive(i,h);
       else
+#endif
+#ifdef SUPPORT_HTTPS
+	if (h->t == HTTPSREQUEST)
+	  handle_read_misc(i,h,ftptimeout_secs,nextftp);
+	else
 #endif
 	handle_write_misc(i,h,prefetchquantum);
     }
