@@ -1333,6 +1333,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
   }
   if (b->filefd!=-1) { io_close(b->filefd); b->filefd=-1; }
   b->filefd=ftp_open(h,s,forwriting^1,sock,forwriting?"STOR":"RETR",&ss);
+  if (forwriting) ss.st_size=0;
   if (b->filefd==-1) {
     if (logging) {
       buffer_putulonglong(buffer_1,0);
@@ -1381,8 +1382,12 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
       i=fmt_str(h->hdrbuf,"150 connecting (");
     else
       i=fmt_str(h->hdrbuf,"150 listening (");
-    i+=fmt_ulonglong(h->hdrbuf+i,ss.st_size);
-    i+=fmt_str(h->hdrbuf+i," bytes)\r\n");
+    if (forwriting)
+      i+=fmt_str(h->hdrbuf+i,"for upload)\r\n");
+    else {
+      i+=fmt_ulonglong(h->hdrbuf+i,ss.st_size);
+      i+=fmt_str(h->hdrbuf+i," bytes)\r\n");
+    }
     h->hdrbuf[i]=0;
   }
 
