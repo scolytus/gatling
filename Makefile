@@ -10,8 +10,8 @@ CC=gcc
 CFLAGS=-pipe -Wall -O -g -I../libowfat/
 LDFLAGS=-g -L../libowfat/ -lowfat
 
-gatling: gatling.o libsocket
-	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket`
+gatling: gatling.o libsocket libiconv
+	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket libiconv`
 
 httpbench: httpbench.o libsocket
 	$(CC) -o $@ httpbench.o $(LDFLAGS) `cat libsocket`
@@ -51,12 +51,18 @@ version.h: CHANGES
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
 
-libsocket:
+libsocket: trysocket.c
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
 	fi; fi; fi > libsocket
 	rm -f trysocket
+
+libiconv: tryiconv.c
+	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
+	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
+	fi; fi > libiconv
+	rm -f tryiconv
 
 install: gatling
 	install -D $(BINDIR)
