@@ -2,6 +2,8 @@
 ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
+MANDIR=${prefix}/man
+man1dir=$(MANDIR)/man1
 
 TARGETS=gatling httpbench bindbench mmapbench forkbench dl \
 mktestdata manymapbench ioerr forksbench pthreadbench
