@@ -1491,7 +1491,7 @@ rangeerror:
 	c=h->hdrbuf=(char*)malloc(500);
 	if (ss.st_mtime<=ims) {
 	  c+=fmt_str(c,"HTTP/1.1 304 Not Changed");
-	  head=1;
+	  head=1; range_last=range_first;
 	  io_close(fd); fd=-1;
 	} else
 	  if (range_first || range_last!=ss.st_size)
@@ -1509,7 +1509,7 @@ rangeerror:
 	  c+=fmt_str(c,"\r\nContent-Encoding: ");
 	  c+=fmt_str(c,h->encoding==GZIP?"gzip":"bzip2");
 	}
-	if (range_first || range_last!=ss.st_size) {
+	if (!head && (range_first || range_last!=ss.st_size)) {
 	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
 	  c+=fmt_ulonglong(c,range_first);
 	  c+=fmt_str(c,"-");
