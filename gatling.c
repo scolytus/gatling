@@ -4,6 +4,7 @@
 /* #define DEBUG to enable more verbose debug messages for tracking fd
  * leaks */
 /* #define DEBUG */
+#define FORKSLAVE
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
@@ -1641,7 +1642,7 @@ static int ftp_cwd(struct http_data* h,char* s) {
   }
   y[fmt_str(y,x)]=0;
   h->ftppath=y;
-  h->hdrbuf="200 ok.\r\n";
+  h->hdrbuf="250 ok.\r\n";
   return 0;
 }
 
@@ -2160,6 +2161,11 @@ static void cleanup(int64 fd) {
   }
 }
 
+#ifdef FORKSLAVE
+void forkslave() {
+}
+#endif
+
 static volatile int fini;
 
 void sighandler(int sig) {
@@ -2197,6 +2203,23 @@ int main(int argc,char* argv[]) {
   char* new_uid=0;
   char* chroot_to=0;
   uint64 prefetchquantum=0;
+
+#ifdef FORKSLAVE
+  int64 forksock[2];
+  if (io_socketpair(forksock)==-1)
+    panic("socketpair");
+  switch (fork()) {
+  case -1:
+    panic("fork");
+  case 0:
+    io_close(forksock[1]);
+    break;
+  default:
+    io_close(forksock[0]);
+    while (1)
+      forkslave(forksock);
+  }
+#endif
 
   s=socket_tcp6();
 #ifdef __broken_itojun_v6__
