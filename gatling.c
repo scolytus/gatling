@@ -4192,19 +4192,23 @@ int main(int argc,char* argv[],char* envp[]) {
 #endif
 #ifdef SUPPORT_CGI
     case 'C':
+      errno=0;
       if (add_cgi(optarg)) {
-	buffer_puts(buffer_2,"gatling: could not parse `");
-	buffer_puts(buffer_2,optarg);
-	buffer_putsflush(buffer_2,"': expected something like `\\.cgi$'\n");
+	if (errno==ENOMEM)
+	  buffer_putmflush(buffer_2,"gatling: out of memory\n");
+	else
+	  buffer_putmflush(buffer_2,"gatling: could not parse `",optarg,"': expected something like `\\.cgi$'\n");
       }
       break;
 #endif
 #ifdef SUPPORT_PROXY
     case 'O':
+      errno=0;
       if (add_proxy(optarg)) {
-	buffer_puts(buffer_2,"gatling: could not parse `");
-	buffer_puts(buffer_2,optarg);
-	buffer_putsflush(buffer_2,"': expected something like `127.0.0.1/8001/\\.jsp$'\n");
+	if (errno==ENOMEM)
+	  buffer_putmflush(buffer_2,"gatling: out of memory\n");
+	else
+	  buffer_putmflush(buffer_2,"gatling: could not parse `",optarg,"': expected something like `127.0.0.1/8001/\\.jsp'\n");
       }
       break;
 #endif
