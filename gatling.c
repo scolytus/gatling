@@ -639,7 +639,10 @@ rangeerror:
 	  head=1;
 	  io_close(fd); fd=-1;
 	} else
-	  c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
+	  if (range_first || range_last!=ss.st_size)
+	    c+=fmt_str(c,"HTTP/1.1 206 Partial Content");
+	  else
+	    c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
 
 	c+=fmt_str(c,"\r\nContent-Type: ");
 	c+=fmt_str(c,h->mimetype);
