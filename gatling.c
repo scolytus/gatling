@@ -410,6 +410,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
 	if (virtual_hosts==1)
 	  return -1;
   }
+  while (filename[1]=='/') ++filename;
   if (filename[(i=str_len(filename))-1] == '/') {
     /* Damn.  Directory. */
     if (filename[1] && chdir(filename+1)==-1) return -1;
