@@ -1688,6 +1688,14 @@ void ftpresponse(struct http_data* h,int64 s) {
 #ifdef __broken_itojun_v6__
 #warning fixme
 #endif
+    if (h->buddy!=-1) {
+      if (logging) {
+	buffer_puts(buffer_1,"close/olddataconn ");
+	buffer_putulong(buffer_1,h->buddy);
+	buffer_putnlflush(buffer_1);
+      }
+      io_close(h->buddy);
+    }
     h->buddy=socket_tcp6();
     if (h->buddy==-1) {
       h->hdrbuf="425 socket() failed.\r\n";
@@ -1753,6 +1761,15 @@ freecloseabort:
 #ifdef __broken_itojun_v6__
 #warning fixme
 #endif
+    if (h->buddy!=-1) {
+      if (logging) {
+	buffer_puts(buffer_1,"close/olddataconn ");
+	buffer_putulong(buffer_1,h->buddy);
+	buffer_putnlflush(buffer_1);
+      }
+      io_close(h->buddy);
+      h->buddy=-1;
+    }
     c+=5;
     if (eprt) {
       /* |1|10.0.0.4|1025| or @2@::1@1026@ */
@@ -3060,19 +3077,6 @@ pipeline:
 	    h->hdrbuf=0;
 	    if (h->keepalive) {
 	      iob_reset(&h->iob);
-#ifdef DEBUG
-	      if (logging) {
-		buffer_puts(buffer_1,"keepalive_cleanup_filefd_close ");
-		buffer_putulong(buffer_1,i);
-		buffer_putspace(buffer_1);
-		if (h->filefd==-1)
-		  buffer_puts(buffer_1,"-1");
-		else
-		  buffer_putulong(buffer_1,h->filefd);
-		buffer_putnlflush(buffer_1);
-	      }
-#endif
-	      if (h->filefd!=-1) { io_close(h->filefd); h->filefd=-1; }
 	      io_dontwantwrite(i);
 	      io_wantread(i);
 	    } else {
