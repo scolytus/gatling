@@ -1748,13 +1748,6 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
    *     -> pathprefix="/pub/"; chdir(/pub); opendir(...); fnmatch($fnord)
    */
 
-  if (h->ftppath && chdir(h->ftppath+1)==-1) {
-    h->hdrbuf="450 Oops, your directory is gone!\n";
-    free(h->ftppath);
-    h->ftppath=0;
-    return -1;
-  }
-
   if (!x[1] || chdir(x+1)==0) {		/* it's a directory */
     pathprefix="";
     match=0;
@@ -1773,7 +1766,7 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
 	z=str_rchr(x,'/');
 	x[z]=0;
 	if (x[0]=='/' && x[1] && chdir(x+1)==-1) {
-  notfound:
+notfound:
 	  h->hdrbuf="450 no such file or directory.\r\n";
 	  return -1;
 	}
