@@ -1087,7 +1087,7 @@ rangeerror:
 	  c+=fmt_str(c,"\r\n\r\n");
 	  iob_addbuf_free(&h->iob,h->hdrbuf,c - h->hdrbuf);
 	  if (!head)
-	    iob_addfile(&h->iob,fd,range_first,range_last-range_first);
+	    iob_addfile_close(&h->iob,fd,range_first,range_last-range_first);
 	  if (logging) {
 	    if (h->hdrbuf[9]=='3') {
 	      buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
@@ -1257,7 +1257,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
       range_last=ss.st_size;
     range_first=h->ftp_rest; h->ftp_rest=0;
     if (range_first>range_last) range_first=range_last;
-    iob_addfile(&b->iob,b->filefd,range_first,range_last-range_first);
+    iob_addfile_close(&b->iob,b->filefd,range_first,range_last-range_first);
     if (logging) {
       buffer_putulonglong(buffer_1,range_last-range_first);
       buffer_putspace(buffer_1);
@@ -2120,21 +2120,6 @@ static void cleanup(int64 fd) {
 #endif
     array_reset(&h->r);
     iob_reset(&h->iob);
-#ifdef DEBUG
-    if (logging) {
-      buffer_puts(buffer_1,"cleanup_filefd_close ");
-      buffer_putulong(buffer_1,fd);
-      buffer_putspace(buffer_1);
-      if (h->filefd==-1)
-	buffer_puts(buffer_1,"-1");
-      else
-	buffer_putulong(buffer_1,h->filefd);
-      buffer_putspace(buffer_1);
-      buffer_putulong(buffer_1,connections-1);
-      buffer_putnlflush(buffer_1);
-    }
-#endif
-    if (h->filefd!=-1) io_close(h->filefd);
 #ifdef SUPPORT_FTP
     free(h->ftppath);
 #endif
@@ -2932,24 +2917,7 @@ pipeline:
 		byte_copy(c,alen-l,c+l);
 		array_truncate(&H->r,1,alen-l);
 		l=header_complete(H);
-		if (l) {
-		  if (H->t==HTTPREQUEST) {
-#ifdef DEBUG
-		    if (logging) {
-		      buffer_puts(buffer_1,"pipeline_filefd_close ");
-		      buffer_putulong(buffer_1,i);
-		      buffer_putspace(buffer_1);
-		      if (H->filefd==-1)
-			buffer_puts(buffer_1,"-1");
-		      else
-			buffer_putulong(buffer_1,H->filefd);
-		      buffer_putnlflush(buffer_1);
-		    }
-#endif
-		    if (H->filefd!=-1) io_close(H->filefd);
-		  }
-		  goto pipeline;
-		}
+		if (l) goto pipeline;
 	      } else
 		array_reset(&H->r);
 	    }
