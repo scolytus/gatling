@@ -185,8 +185,8 @@ usage:
     c=host+slash;
     *c=0;
     {
-      char* tmp=alloca(strlen(host)+1);
-      strcpy(tmp,host);
+      char* tmp=alloca(str_len(host)+1);
+      tmp[fmt_str(tmp,host)]=0;
       host=tmp;
     }
     *c='/';
@@ -220,7 +220,7 @@ usage:
       }
     }
 
-    request=malloc(300+strlen(host)+strlen(c));
+    request=malloc(300+str_len(host)+str_len(c));
     if (!request) panic("malloc");
     {
       int i;
