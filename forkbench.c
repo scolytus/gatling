@@ -21,12 +21,6 @@ int main(int argc,char* argv[]) {
   struct timeval a,b;
   unsigned long d;
 
-  {
-    struct rlimit rl;
-    rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
-    setrlimit(RLIMIT_NPROC,&rl);
-  }
-
   for (;;) {
     int i;
     int c=getopt(argc,argv,"hc:");
@@ -49,6 +43,13 @@ int main(int argc,char* argv[]) {
       return 0;
     }
   }
+
+  {
+    struct rlimit rl;
+    rl.rlim_cur=count+2; rl.rlim_max=count+2;
+    setrlimit(RLIMIT_NPROC,&rl);
+  }
+
 
   {
     unsigned long i,j;
