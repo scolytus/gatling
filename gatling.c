@@ -1349,6 +1349,13 @@ nomem:
     assert(b);
     if (b) {
       iob_addbuf_free(&b->iob,array_start(&c),array_bytes(&c));
+
+#if 0
+      buffer_puts(buffer_2,"setting b->f to DOWNLOADING for ");
+      buffer_putulong(buffer_2,h->buddy);
+      buffer_putnlflush(buffer_2);
+#endif
+
       b->f=DOWNLOADING;
       h->f=WAITCONNECT;
       if (b->t==FTPSLAVE) {
@@ -1581,6 +1588,7 @@ syntaxerror:
       x->t=FTPACTIVE;
       x->destport=port;
       byte_copy(x->peerip,16,ip);
+
       io_setcookie(h->buddy,x);
     } else
       goto closeandgo;
@@ -2567,7 +2575,6 @@ pipeline:
 	H=io_getcookie(h->buddy);
 	assert(H);
 	if (socket_connect6(i,h->peerip,h->destport,h->myscope_id)==-1 && errno!=EISCONN) {
-porterror:
 	  if (logging) {
 	    buffer_puts(buffer_1,"port_connect_error ");
 	    buffer_putulong(buffer_1,i);
@@ -2581,7 +2588,6 @@ porterror:
 	  free(h);
 	  io_close(i);
 	} else {
-	  if (!io_fd(i)) goto porterror;
 	  if (logging) {
 	    char buf[IP6_FMT];
 	    buffer_puts(buffer_1,"port_connect ");
@@ -2599,6 +2605,7 @@ porterror:
 	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
 	  }
 #endif
+	  buffer_putsflush(buffer_2,h->f==DOWNLOADING?"DOWNLOADING\n":"!DOWNLOADING\n");
 	  if (h->f != DOWNLOADING)
 	    io_dontwantwrite(i);
 	  if (H->f==WAITCONNECT) {
