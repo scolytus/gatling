@@ -1,3 +1,4 @@
+#define _FILE_OFFSET_BITS 64
 #include "socket.h"
 #include "io.h"
 #include "buffer.h"
