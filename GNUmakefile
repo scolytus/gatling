@@ -99,10 +99,11 @@ $(TARGETS): libsocketkludge.a
 install: gatling
 	install -d $(BINDIR) $(man1dir)
 	install $< $(BINDIR)
+	test -f tlsgatling && install tlsgatling $(BINDIR)
 	install -m 644 gatling.1 $(man1dir)
 
 uninstall:
-	rm -f $(BINDIR)/gatling $(man1dir)/gatling.1
+	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1
 
 clean:
 	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv
