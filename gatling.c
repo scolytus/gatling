@@ -28,7 +28,7 @@
 #endif
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-#defined __broken_itojun_v6__
+#define __broken_itojun_v6__
 #endif
 #define RELEASE "Gatling/" VERSION
 
