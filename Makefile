@@ -1,3 +1,4 @@
+#DEBUG=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
@@ -5,10 +6,21 @@ all: gatling
 
 # comment out the following line if you don't want to build with the
 # diet libc (http://www.fefe.de/dietlibc/).
-DIET=/opt/diet/bin/diet -Os
+DIET=/opt/diet/bin/diet
 CC=gcc
-CFLAGS=-pipe -Wall -O2 -fomit-frame-pointer
-LDFLAGS=-s
+CFLAGS=-pipe -Wall
+LDFLAGS=
+
+ifneq ($(DEBUG),)
+CFLAGS+=-g
+LDFLAGS+=-g
+else
+CFLAGS+=-O2 -fomit-frame-pointer
+LDFLAGS+=-s
+ifneq ($(DIET),)
+DIET+=-Os
+endif
+endif
 
 gatling: gatling.o
 	$(DIET) $(CC) $(LDFLAGS) -o $@ $^ -lowfat
