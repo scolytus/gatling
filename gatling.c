@@ -55,7 +55,8 @@ struct http_data {
   io_batch iob;
   char myip[16];
   uint16 myport;
-  char* hdrbuf,* bodybuf, *mimetype;
+  char* hdrbuf,* bodybuf;
+  const char *mimetype;
   int hlen,blen;
   int keepalive;
   int filefd;
