@@ -1722,7 +1722,7 @@ void smbresponse(struct http_data* h,int64 s) {
     {
       int i,j,k;
       int ack,lvl;
-      c[3]=88+strlen(workgroup);
+      c[3]=88+str_len(workgroup);
       c[13]|=0x80;	/* set answer bit */
       j=uint16_read(c+0x25);
       ack=-1; lvl=-1;
@@ -1731,7 +1731,7 @@ void smbresponse(struct http_data* h,int64 s) {
 	  if (str_equal(c+i+1,"PC NETWORK PROGRAM 1.0") && lvl<0) { ack=k; lvl=0; } else
 	  if (str_equal(c+i+1,"LANMAN2.1") && lvl<1) { ack=k; lvl=1; } else
 	  if (str_equal(c+i+1,"NT LM 0.12") && lvl<2) { ack=k; lvl=2; }
-	  i+=2+strlen(c+i+1);
+	  i+=2+str_len(c+i+1);
 	}
       }
       switch (lvl) {
@@ -2020,7 +2020,7 @@ int main(int argc,char* argv[]) {
       if (str_len(optarg)>12)
 	buffer_putsflush(buffer_2,"gatling: workgroup name too long (12 max)\n");
       else
-	strcpy(workgroup,optarg);
+	str_copy(workgroup,optarg);
       break;
     case 'h':
 usage:
@@ -2056,12 +2056,12 @@ usage:
     iconv_t i=iconv_open("UTF-16LE","ISO-8859-1");
     size_t X,Y;
     char* x,* y;
-    X=strlen(workgroup)+1;
+    X=str_len(workgroup)+1;
     Y=sizeof(workgroup_utf16);
     x=workgroup;
     y=workgroup_utf16;
     if (iconv(i,&x,&X,&y,&Y)) panic("UTF-16 conversion of workgroup failed.\n");
-    wglen=strlen(workgroup);
+    wglen=str_len(workgroup);
     wglen16=sizeof(workgroup_utf16)-Y;
   }
   if (!directory_index)
