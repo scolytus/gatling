@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #ifdef __i386__
 #define rdtscl(low) \
@@ -44,7 +45,6 @@ int main(int argc,char* argv[]) {
       }
       break;
     case '?':
-usage:
       buffer_putsflush(buffer_2,
 		  "usage: mktestdata [-h] [-c count] filename\n"
 		  "\n"
