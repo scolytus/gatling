@@ -922,7 +922,9 @@ emerge:
 	  buffer_putnlflush(buffer_1);
 	  io_close(i);
 	}
-      }
+      } else
+	if (timeout_secs)
+	  io_timeout(i,next);
     }
   }
 }
