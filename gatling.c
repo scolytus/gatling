@@ -1859,7 +1859,6 @@ usage:
 		  "\t-n\tdo not produce logging output\n"
 		  "\t-f\tprovide FTP; next -p is meant for the FTP port (default: 21)\n"
 		  "\t-F\tdo not provide FTP\n"
-		  "\t-U\tdisallow FTP uploads\n"
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  );
