@@ -2388,6 +2388,8 @@ static void cleanup(int64 fd) {
  * socket to the grandchild back to gatling over the Unix domain socket. */
 static char fsbuf[8192];
 
+char** _envp;
+
 static const char *cgivars[] = {
   "GATEWAY_INTERFACE=",
   "SERVER_PROTOCOL=",
@@ -2599,19 +2601,19 @@ void forkslave(int fd,buffer* in) {
 		    char* argv[]={cginame,0};
 		    char** envp;
 		    int envc;
-		    for (i=envc=0; environ[i]; ++i) {
+		    for (i=envc=0; _envp[i]; ++i) {
 		      int found=0;
 		      for (j=0; cgivars[j]; ++j)
-			if (str_start(environ[i],cgivars[j])) { found=1; break; }
+			if (str_start(_envp[i],cgivars[j])) { found=1; break; }
 		      if (!found) ++envc;
 		    }
 		    envp=(char**)alloca(sizeof(char*)*envc+20);
 		    envc=0;
-		    for (i=0; environ[i]; ++i) {
+		    for (i=0; _envp[i]; ++i) {
 		      int found=0;
 		      for (j=0; cgivars[j]; ++j)
-			if (str_start(environ[i],cgivars[j])) { found=1; break; }
-		      if (!found) envp[envc++]=environ[i];
+			if (str_start(_envp[i],cgivars[j])) { found=1; break; }
+		      if (!found) envp[envc++]=_envp[i];
 		    }
 		    envp[envc++]="SERVER_SOFTWARE=" RELEASE;
 		    envp[envc++]=servername;
@@ -2701,7 +2703,7 @@ void sighandler(int sig) {
   fini=(sig==SIGINT?1:2);	/* 2 for SIGHUP */
 }
 
-int main(int argc,char* argv[]) {
+int main(int argc,char* argv[],char* envp[]) {
   int s;
   int f=-1;
 #ifdef SUPPORT_SMB
@@ -2734,6 +2736,7 @@ int main(int argc,char* argv[]) {
   uint64 prefetchquantum=0;
 
 #ifdef SUPPORT_CGI
+  _envp=envp;
   if (socketpair(AF_UNIX,SOCK_STREAM,0,forksock)==-1)
     panic("socketpair");
   switch (fork()) {
