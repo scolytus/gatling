@@ -21,6 +21,9 @@ for i in 1 2 3 4 5; do
   echo pass $i: running forkbench
   ./forkbench -c 3000 > fork-$TAG-$i.log
   sleep 1
+  echo pass $i: running forksbench
+  ./forksbench -c 3000 > forks-$TAG-$i.log
+  sleep 1
   echo pass $i: running httpbench
   ./httpbench -k -c 5000 -i 10 -s 5 http://127.0.0.1/README.httpbench > httpa-$TAG-$i.log
   sleep 1
