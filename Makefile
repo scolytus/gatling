@@ -65,7 +65,7 @@ libiconv: tryiconv.c
 	rm -f tryiconv
 
 install: gatling
-	install -D $(BINDIR)
+	install -d $(BINDIR)
 	install $@ $(BINDIR)
 
 uninstall:

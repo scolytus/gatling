@@ -92,7 +92,7 @@ LDLIBS+=`cat libsocket libiconv`
 $(TARGETS): libsocketkludge.a
 
 install: gatling
-	install -D $(BINDIR)
+	install -d $(BINDIR)
 	install $@ $(BINDIR)
 
 uninstall:
