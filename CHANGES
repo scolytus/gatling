@@ -1,5 +1,4 @@
 0.7:
-  version bump
 
 0.6:
   implement ABOR (ncftp was confused after aborting a connection)
