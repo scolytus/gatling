@@ -895,7 +895,7 @@ static int ftp_vhost(struct http_data* h) {
 
 static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,const char* what) {
   int l=h->ftppath?str_len(h->ftppath):0;
-  char* x=alloca(l+strlen(s)+5);
+  char* x=alloca(l+str_len(s)+5);
   char* y;
   int64 fd;
 
@@ -1121,7 +1121,7 @@ static void ftp_ls(array* x,const char* s,const struct stat* const ss,time_t now
 
 static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   int i,l=h->ftppath?str_len(h->ftppath):0;
-  char* x=alloca(l+strlen(s)+5);
+  char* x=alloca(l+str_len(s)+5);
   char* y;
   DIR* D;
   struct dirent* d;
@@ -1279,7 +1279,7 @@ nomem:
 
 static int ftp_cwd(struct http_data* h,char* s) {
   int l=h->ftppath?str_len(h->ftppath):0;
-  char* x=alloca(l+strlen(s)+5);
+  char* x=alloca(l+str_len(s)+5);
   char* y;
   /* first, append to path */
   if (s[0]!='/' && h->ftppath)
