@@ -2306,7 +2306,7 @@ pipeline:
 	struct http_data* H;
 	H=io_getcookie(h->buddy);
 	assert(H);
-	if (socket_connect6(i,h->peerip,h->destport,h->myscope_id)==-1) {
+	if (socket_connect6(i,h->peerip,h->destport,h->myscope_id)==-1 && errno!=EISCONN) {
 	  if (logging) {
 	    buffer_puts(buffer_1,"port_connect_error ");
 	    buffer_putulong(buffer_1,i);
