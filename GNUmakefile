@@ -3,7 +3,7 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-TARGETS=gatling httpbench bindbench mmapbench forkbench dl
+TARGETS=gatling httpbench bindbench mmapbench forkbench dl pthreadbench
 
 all: $(TARGETS)
 
@@ -52,13 +52,16 @@ endif
 
 CC:=$(DIET) $(CC)
 
+pthreadbench: pthreadbench.o
+	$(CC) $< -o $@ -I. $(CFLAGS) $(LDFLAGS) $(LDLIBS) -lpthread
+
 gatling.o: version.h
 
 version.h: CHANGES
 	(head -1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
 
 %.o: %.c
-	$(DIET) $(CC) -c $< -o $@ -I. $(CFLAGS)
+	$(CC) -c $< -o $@ -I. $(CFLAGS)
 
 install: gatling
 	install -D $(BINDIR)

@@ -1,7 +1,7 @@
 prefix=/usr/local
 BINDIR=${prefix}/bin
 
-all: gatling httpbench dl bindbench mmapbench forkbench
+all: gatling httpbench dl bindbench mmapbench forkbench pthreadbench
 
 CC=gcc
 CFLAGS=-pipe -Wall -O -g -I../libowfat/
@@ -24,6 +24,9 @@ mmapbench: mmapbench.o
 
 forkbench: forkbench.o
 	$(CC) -o $@ forkbench.o $(LDFLAGS)
+
+pthreadbench: pthreadbench.o
+	$(CC) -o $@ pthreadbench.o $(LDFLAGS) -lpthread
 
 gatling.o: version.h
 
