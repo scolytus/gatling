@@ -2588,7 +2588,10 @@ static void cleanup(int64 fd) {
 	  ) --connections;
 
 #if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
-    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE || h->t==PROXYSLAVE ||
+    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE ||
+#ifdef SUPPORT_PROXY
+	h->t==PROXYSLAVE ||
+#endif
 	h->t==HTTPREQUEST
 #ifdef SUPPORT_HTTPS
 			  || h->t==HTTPSREQUEST || h->t==HTTPSRESPONSE
