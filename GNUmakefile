@@ -55,6 +55,9 @@ httpbench: httpbench.o
 dl: dl.o
 	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
 
+bindbench: bindbench.o
+	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
+
 gatling.o: version.h
 
 version.h: CHANGES
