@@ -10,6 +10,7 @@
 #include "str.h"
 #include "scan.h"
 #include "textcode.h"
+#include "uint32.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -19,6 +20,10 @@
 #include <time.h>
 #include <signal.h>
 #include "version.h"
+
+#ifdef USE_ZLIB
+#include <zlib.h>
+#endif
 
 #define RELEASE "Gatling/" VERSION
 
@@ -311,13 +316,10 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     if (tmp) {	/* yeah this is crude, but it gets the job done */
       int end=str_chr(tmp,'\n');
       for (i=0; i+4<end; ++i)
-	if (byte_equal(tmp+i,4,"gzip")) {
+	if (byte_equal(tmp+i,4,"gzip"))
 	  doesgzip=1;
-	  break;
-	} else if (byte_equal(tmp+i,4,"bzip2")) {
+	else if (byte_equal(tmp+i,4,"bzip2"))
 	  doesbzip2=1;
-	  break;
-	}
     }
   }
 
@@ -378,6 +380,34 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
       if (!directory_index) return -1;
       if (!(d=opendir("."))) return -1;
       if (!http_dirlisting(h,d,filename,args)) return -1;
+#ifdef USE_ZLIB
+      if (doesgzip) {
+	uLongf destlen=h->blen+30+h->blen/1000;
+	char *compressed=malloc(destlen+15);
+	if (compress2(compressed+8,&destlen,h->bodybuf,h->blen,3)==Z_OK && destlen<h->blen) {
+	  /* I am absolutely _not_ sure why this works, but we
+	   * apparently have to ignore the first two and the last four
+	   * bytes of the output of compress2.  I got this from googling
+	   * for "compress2 header" and finding some obscure gzip
+	   * integration in aolserver */
+	  unsigned int crc=crc32(0,0,0);
+	  crc=crc32(crc,h->bodybuf,h->blen);
+	  free(h->bodybuf);
+	  h->bodybuf=compressed;
+	  h->encoding=GZIP;
+	  byte_zero(compressed,10);
+	  compressed[0]=0x1f; compressed[1]=0x8b;
+	  compressed[2]=8; /* deflate */
+	  compressed[3]=1; /* indicate ASCII */
+	  compressed[9]=3; /* OS = Unix */
+	  uint32_pack(compressed+10-2-4+destlen,crc);
+	  uint32_pack(compressed+14-2-4+destlen,h->blen);
+	  h->blen=destlen+10-2-4;
+	} else {
+	  free(compressed);
+	}
+      }
+#endif
       return -2;
     }
     if (doesbzip2) {
@@ -522,6 +552,10 @@ e404:
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	  c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
 	  c+=fmt_ulong(c,h->blen);
+	  if (h->encoding!=NORMAL) {
+	    c+=fmt_str(c,"\r\nContent-Encoding: ");
+	    c+=fmt_str(c,h->encoding==GZIP?"gzip":"bzip2");
+	  }
 	  c+=fmt_str(c,"\r\n\r\n");
 	  h->hlen=c-h->hdrbuf;
 	  iob_addbuf(&h->iob,h->hdrbuf,h->hlen);

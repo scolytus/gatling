@@ -1,15 +1,28 @@
 #DEBUG=1
+ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
 all: gatling
 
-# comment out the following line if you don't want to build with the
-# diet libc (http://www.fefe.de/dietlibc/).
-DIET=/opt/diet/bin/diet
 CC=gcc
 CFLAGS=-pipe -Wall
 LDFLAGS=
+
+path = $(subst :, ,$(PATH))
+diet_path = $(foreach dir,$(path),$(wildcard $(dir)/diet))
+ifneq ($(strip $(diet_path)),)
+ifeq ($(wildcard /opt/diet/bin/diet),/opt/diet/bin/diet)
+DIET=/opt/diet/bin/diet
+else
+DIET=
+endif
+else
+DIET:=$(diet_path)
+endif
+
+# to build without diet libc support, use $ make DIET=
+# see http://www.fefe.de/dietlibc/ for details about the diet libc
 
 ifneq ($(DEBUG),)
 CFLAGS+=-g
@@ -22,8 +35,13 @@ DIET+=-Os
 endif
 endif
 
+ifeq ($(ZLIB),1)
+CFLAGS+=-DUSE_ZLIB
+LDFLAGS+=-lz
+endif
+
 gatling: gatling.o
-	$(DIET) $(CC) $(LDFLAGS) -o $@ $^ -lowfat
+	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
 
 gatling.o: version.h
 
