@@ -2594,7 +2594,7 @@ pipeline:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putspace(buffer_1);
 	    buffer_put(buffer_1,buf,fmt_ip6(buf,h->peerip));
-	    buffer_puts(buffer_1,":");
+	    buffer_putspace(buffer_1);
 	    buffer_put(buffer_1,buf,fmt_ulong(buf,h->destport));
 	    buffer_putnlflush(buffer_1);
 	  }
@@ -2605,7 +2605,6 @@ pipeline:
 	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
 	  }
 #endif
-	  buffer_putsflush(buffer_2,h->f==DOWNLOADING?"DOWNLOADING\n":"!DOWNLOADING\n");
 	  if (h->f != DOWNLOADING)
 	    io_dontwantwrite(i);
 	  if (H->f==WAITCONNECT) {
