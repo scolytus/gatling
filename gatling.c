@@ -728,13 +728,11 @@ static int prepare_switch_uid(const char* new_uid) {
       unsigned long l;
       const char *c=new_uid+scan_ulong(new_uid,&l);
       if (*c && *c!=':' && *c!='.') return -1;
-      u=l;
-      if (u!=l) return -1;
+      if ((u=l)!=l) return -1; /* catch overflow */
       if (*c) {
 	++c;
 	c=c+scan_ulong(c,&l);
-	g=l;
-	if (g!=l) return -1;
+	if ((g=l)!=l) return -1; /* catch overflow */
 	if (*c) return -1;
       }
     } else {
