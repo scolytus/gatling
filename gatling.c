@@ -29,6 +29,32 @@
 #include "version.h"
 #include <assert.h>
 
+#ifdef TIMEOUT_DEBUG
+void new_io_timeout(int64 d,tai6464 t) {
+  struct taia now;
+  struct taia diff;
+  taia_now(&now);
+  taia_sub(&diff,&t,&now);
+  buffer_puts(buffer_2,"DEBUG: scheduling timeout for fd #");
+  buffer_putlonglong(buffer_2,d);
+  buffer_puts(buffer_2," in ");
+  buffer_putlonglong(buffer_2,diff.sec.x);
+  buffer_putsflush(buffer_2," seconds.\n");
+  io_timeout(d,t);
+}
+
+int64 new_io_timeouted() {
+  int64 x=io_timeouted();
+  buffer_puts(buffer_2,"DEBUG: io_timeouted called, returned ");
+  buffer_putlonglong(buffer_2,x);
+  buffer_putnlflush(buffer_2);
+  return x;
+}
+
+#define io_timeout new_io_timeout
+#define io_timeouted new_io_timeouted
+#endif
+
 static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 
 #ifdef USE_ZLIB
@@ -1146,8 +1172,6 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   byte_zero(&c,sizeof(c));
   o=n=0;
 
-  sortfun=sort_name_a;
-
   if (s[0]=='-') {
     for (++s; *s && *s!=' '; ++s) {
       switch (*s) {
@@ -1161,7 +1185,7 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   }
   {
     switch (what) {
-    case 0: sortfun=rev?sort_name_a:sort_name_d; break;
+    case 0: sortfun=rev?sort_name_d:sort_name_a; break;
     case 1: sortfun=rev?sort_size_a:sort_size_d; break;
     case 2: sortfun=rev?sort_mtime_a:sort_mtime_d; break;
     }
@@ -1966,6 +1990,8 @@ usage:
 	byte_copy(&last,sizeof(now),&now);
 	byte_copy(&next,sizeof(now),&now);
 	next.sec.x += timeout_secs;
+	byte_copy(&nextftp,sizeof(now),&now);
+	nextftp.sec.x += ftptimeout_secs;
 	byte_copy(&tick,sizeof(next),&now);
 	++tick.sec.x;
 	while ((i=io_timeouted())!=-1) {
