@@ -88,7 +88,7 @@ usage:
 	_exit(1);
       }
       gettimeofday(&b,0);
-      d=(b.tv_sec-a.tv_sec)*10000000;
+      d=(b.tv_sec-a.tv_sec)*1000000;
       d=d+b.tv_usec-a.tv_usec;
       buffer_putulong(buffer_1,d);
       buffer_puts(buffer_1,"\n");

@@ -93,7 +93,7 @@ int main(int argc,char* argv[]) {
       buffer_putulong(buffer_1,b-a);
 #else
       gettimeofday(&c,0);
-      d=(b.tv_sec-a.tv_sec)*10000000;
+      d=(b.tv_sec-a.tv_sec)*1000000;
       d=d+b.tv_usec-a.tv_usec;
       buffer_putulong(buffer_1,d);
 #endif
@@ -101,7 +101,7 @@ int main(int argc,char* argv[]) {
 #ifdef __i386__
       buffer_putulong(buffer_1,c-b);
 #else
-      d=(c.tv_sec-b.tv_sec)*10000000;
+      d=(c.tv_sec-b.tv_sec)*1000000;
       d=d+c.tv_usec-b.tv_usec;
       buffer_putulong(buffer_1,d);
 #endif

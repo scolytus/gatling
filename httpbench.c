@@ -137,7 +137,7 @@ static int readanswer(int s,int measurethroughput) {
 	  unsigned long d;
 	  unsigned long long z;
 	  gettimeofday(&b,0);
-	  d=(b.tv_sec-a.tv_sec)*10000000;
+	  d=(b.tv_sec-a.tv_sec)*1000000;
 	  d=d+b.tv_usec-a.tv_usec;
 	  buffer_puts(buffer_1,"tput ");
 	  z=1000000000ull/d;
@@ -352,7 +352,7 @@ usage:
 	    if (s==-1)
 	      panic("make_connection");
 	    gettimeofday(&b,0);
-	    d=(b.tv_sec-a.tv_sec)*10000000;
+	    d=(b.tv_sec-a.tv_sec)*1000000;
 	    d=d+b.tv_usec-a.tv_usec;
 	    x+=d;
 	  }
@@ -363,7 +363,7 @@ usage:
 	    keepalive=0;
 	  }
 	  gettimeofday(&b,0);
-	  d=(b.tv_sec-a.tv_sec)*10000000;
+	  d=(b.tv_sec-a.tv_sec)*1000000;
 	  d=d+b.tv_usec-a.tv_usec;
 	  y+=d;
 	  if (!keepalive) close(s);
@@ -382,7 +382,7 @@ usage:
       if (socks[i]==-1)
 	panic("make_connection");
       gettimeofday(&b,0);
-      d=(b.tv_sec-a.tv_sec)*10000000;
+      d=(b.tv_sec-a.tv_sec)*1000000;
       d=d+b.tv_usec-a.tv_usec;
       buffer_puts(buffer_1,"clat ");
       buffer_putulong(buffer_1,d);
