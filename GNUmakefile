@@ -92,11 +92,12 @@ LDLIBS+=`cat libsocket libiconv`
 $(TARGETS): libsocketkludge.a
 
 install: gatling
-	install -d $(BINDIR)
-	install $@ $(BINDIR)
+	install -d $(BINDIR) $(man1dir)
+	install $< $(BINDIR)
+	install -m 644 gatling.1 $(man1dir)
 
 uninstall:
-	rm -f $(BINDIR)/gatling
+	rm -f $(BINDIR)/gatling $(man1dir)/gatling.1
 
 clean:
 	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv

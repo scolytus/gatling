@@ -1,5 +1,7 @@
 prefix=/usr/local
 BINDIR=${prefix}/bin
+MANDIR=${prefix}/man
+man1dir=$(MANDIR)/man1
 
 TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
 mktestdata manymapbench ioerr forksbench
@@ -65,11 +67,12 @@ libiconv: tryiconv.c
 	rm -f tryiconv
 
 install: gatling
-	install -d $(BINDIR)
-	install $@ $(BINDIR)
+	install -d $(BINDIR) $(man1dir)
+	install $< $(BINDIR)
+	install -m 644 gatling.1 $(man1dir)
 
 uninstall:
-	rm -f $(BINDIR)/gatling
+	rm -f $(BINDIR)/gatling $(man1dir)/gatling.1
 
 clean:
 	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c
