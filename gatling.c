@@ -1344,7 +1344,10 @@ nomem:
   array_reset(&a);
   array_reset(&b);
   if (array_failed(&c)) goto nomem;
-  {
+  if (array_bytes(&c)==0) {
+    h->hdrbuf="450 no match\r\n";
+    return -1;
+  } else {
     struct http_data* b=io_getcookie(h->buddy);
     assert(b);
     if (b) {
