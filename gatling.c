@@ -46,6 +46,7 @@ struct http_data {
   char* hdrbuf,* bodybuf;
   int hlen,blen;
   int keepalive;
+  int filefd;
 };
 
 int header_complete(struct http_data* r) {
@@ -372,6 +373,7 @@ void httpresponse(struct http_data* h,int64 s) {
   const char* m;
   time_t ims=0;
   uint64 range_first,range_last;
+  h->filefd=-1;
   array_cat0(&h->r);
   c=array_start(&h->r);
   if (byte_diff(c,4,"GET ") && byte_diff(c,5,"HEAD ")) {
@@ -509,8 +511,10 @@ rangeerror:
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	  c+=fmt_str(c,"\r\n\r\n");
 	  iob_addbuf(&h->iob,h->hdrbuf,c - h->hdrbuf);
-	  if (!head)
+	  if (!head) {
 	    iob_addfile(&h->iob,fd,range_first,range_last);
+	    h->filefd=fd;
+	  }
 	  if (h->hdrbuf[9]=='3') {
 	    buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
 	  } else {
@@ -686,11 +690,11 @@ int main(int argc,char* argv[]) {
 	    if (h->hdrbuf!=oom) free(h->hdrbuf); h->hdrbuf=0;
 	    free(h->bodybuf); h->bodybuf=0;
 	  }
-	  buffer_puts(buffer_2,"io_tryread(");
-	  buffer_putulong(buffer_2,i);
-	  buffer_puts(buffer_2,"): ");
-	  buffer_puterror(buffer_2);
-	  buffer_putnlflush(buffer_2);
+	  buffer_puts(buffer_1,"io_error ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_puts(buffer_1," ");
+	  buffer_puterror(buffer_1);
+	  buffer_putnlflush(buffer_1);
 	  io_close(i);
 	} else if (l==0) {
 	  if (h) {
@@ -698,9 +702,9 @@ int main(int argc,char* argv[]) {
 	    iob_reset(&h->iob);
 	    free(h->hdrbuf); h->hdrbuf=0;
 	  }
-	  buffer_puts(buffer_2,"eof on fd #");
-	  buffer_putulong(buffer_2,i);
-	  buffer_putnlflush(buffer_2);
+	  buffer_puts(buffer_1,"close ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putnlflush(buffer_1);
 	  io_close(i);
 	} else if (l>0) {
 	  array_catb(&h->r,buf,l);
@@ -724,6 +728,7 @@ emerge:
       if (r==-1)
 	io_eagain(i);
       else if (r<=0) {
+	if (h->filefd!=-1) close(h->filefd);
 	if (r==-3) {
 	  buffer_puts(buffer_1,"socket_error ");
 	  buffer_putulong(buffer_1,i);
