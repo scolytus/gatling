@@ -74,7 +74,7 @@ int main(int argc,char* argv[]) {
   x=malloc(count*sizeof(struct entry));
 
   {
-    char ch;
+    volatile char ch;
     int64 fd;
     unsigned long i,j;
     char filename[100];
