@@ -1,6 +1,7 @@
 #include "socket.h"
 #include "io.h"
 #include "buffer.h"
+#include "ip4.h"
 #include "ip6.h"
 #include "array.h"
 #include "case.h"
@@ -38,6 +39,12 @@ static void panic(const char* routine) {
   exit(111);
 }
 
+enum encoding {
+  NORMAL,
+  GZIP,
+  BZIP2,
+};
+
 struct http_data {
   array r;
   io_batch iob;
@@ -47,6 +54,7 @@ struct http_data {
   int hlen,blen;
   int keepalive;
   int filefd;
+  enum encoding encoding;
 };
 
 int header_complete(struct http_data* r) {
@@ -132,12 +140,16 @@ const char* mimetype(const char* filename) {
   return "application/octet-stream";
 }
 
+static int tolower(char a) {
+  return a>='A' && a<='Z' ? a-'A'+'a' : a;
+}
+
 int header_diff(const char* s,const char* t) {
   /* like str_diff but s may also end with '\r' or '\n' */
   register int j;
   j=0;
   for (;;) {
-    if ((j=(*s-*t))) break; if (!*t) break; ++s; ++t;
+    if ((j=(tolower(*s)-tolower(*t)))) break; if (!*t) break; ++s; ++t;
   }
   if (*s=='\r' || *s=='\n') j=-*t;
   return j;
@@ -291,6 +303,24 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
   char* args;
   unsigned long i;
   int64 fd;
+  int doesgzip,doesbzip2;
+
+  doesgzip=0; doesbzip2=0; h->encoding=NORMAL;
+  {
+    char* tmp=http_header(h,"Accept-Encoding");
+    if (tmp) {	/* yeah this is crude, but it gets the job done */
+      int end=str_chr(tmp,'\n');
+      for (i=0; i+4<end; ++i)
+	if (byte_equal(tmp+i,4,"gzip")) {
+	  doesgzip=1;
+	  break;
+	} else if (byte_equal(tmp+i,4,"bzip2")) {
+	  doesbzip2=1;
+	  break;
+	}
+    }
+  }
+
   args=0;
   /* the file name needs to start with a / */
   if (filename[0]!='/') return -1;
@@ -310,8 +340,11 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
   if (!(s=http_header(h,"Host"))) {
     /* construct artificial Host header from IP */
     s=alloca(IP6_FMT+7);
-    i=fmt_ip6(s,h->myip);
-    i+=fmt_str(s+i,":");
+    if (byte_equal(h->myip,12,V4mappedprefix))
+      i=fmt_ip4(s,h->myip+12);
+    else
+      i=fmt_ip6(s,h->myip);
+    i+=fmt_str(s+i," ");
     i+=fmt_ulong(s+i,h->myport);
     s[i]=0;
   } else {
@@ -347,9 +380,50 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
       if (!http_dirlisting(h,d,filename,args)) return -1;
       return -2;
     }
+    if (doesbzip2) {
+      int64 gfd;
+      if (io_readfile(&gfd,filename="index.html.bz2")) {
+	io_close(fd);
+	fd=gfd;
+	h->encoding=BZIP2;
+      }
+    }
+    if (doesgzip) {
+      int64 gfd;
+      if (io_readfile(&gfd,filename="index.html.gz")) {
+	io_close(fd);
+	fd=gfd;
+	h->encoding=GZIP;
+      }
+    }
+  } else {
+    if (!io_readfile(&fd,filename+1))
+      return -1;
+    if (doesgzip || doesbzip2) {
+      int64 gfd;
+      char* tmpfilename=alloca(strlen(filename)+5);
+      if (doesbzip2) {
+	i=fmt_str(tmpfilename,filename+1);
+	i+=fmt_str(tmpfilename+i,".bz2");
+	tmpfilename[i]=0;
+	if (io_readfile(&gfd,tmpfilename)) {
+	  io_close(fd);
+	  fd=gfd;
+	  h->encoding=BZIP2;
+	}
+      }
+      if (doesgzip && h->encoding==NORMAL) {
+	i=fmt_str(tmpfilename,filename+1);
+	i+=fmt_str(tmpfilename+i,".gz");
+	tmpfilename[i]=0;
+	if (io_readfile(&gfd,tmpfilename)) {
+	  io_close(fd);
+	  fd=gfd;
+	  h->encoding=GZIP;
+	}
+      }
+    }
   }
-  if (!io_readfile(&fd,filename+1))
-    return -1;
   if (fstat(fd,ss)==-1 || S_ISDIR(ss->st_mode)) {
     io_close(fd);
     return -1;
@@ -373,6 +447,7 @@ void httpresponse(struct http_data* h,int64 s) {
   time_t ims=0;
   uint64 range_first,range_last;
   h->filefd=-1;
+
   array_cat0(&h->r);
   c=array_start(&h->r);
   if (byte_diff(c,4,"GET ") && byte_diff(c,5,"HEAD ")) {
@@ -393,13 +468,26 @@ e400:
     for (d=c; *d!=' '&&*d!='\t'&&*d!='\n'&&*d!='\r'; ++d) ;
     if (*d!=' ') goto e400;
     *d=0;
+
+    if ((m=http_header(h,"Connection"))) {
+      if (!header_diff(m,"keep-alive"))
+	h->keepalive=1;
+      else
+	h->keepalive=0;
+    } else {
+      if (byte_equal(d+1,8,"HTTP/1.0"))
+	h->keepalive=0;
+      else
+	h->keepalive=1;
+    }
+
     if (c[0]!='/') goto e404;
     fd=http_openfile(h,c,&ss);
     if (fd==-1) {
 e404:
       httperror(h,"404 Not Found","No such file or directory.");
 
-      buffer_puts(buffer_1,"error_404 ");
+      buffer_puts(buffer_1,head?"HEAD/404 ":"GET/404 ");
       buffer_putulong(buffer_1,s);
       buffer_puts(buffer_1," ");
       buffer_putlogstr(buffer_1,c);
@@ -446,17 +534,6 @@ e404:
 	  goto e404;
 	}
 	range_first=0; range_last=ss.st_size;
-	if ((m=http_header(h,"Connection"))) {
-	  if (!header_diff(m,"keep-alive"))
-	    h->keepalive=1;
-	  else
-	    h->keepalive=0;
-	} else {
-	  if (byte_equal(d+1,8,"HTTP/1.0"))
-	    h->keepalive=0;
-	  else
-	    h->keepalive=1;
-	}
 	m=mimetype(c);
 	if ((c=http_header(h,"If-Modified-Since")))
 	  if ((unsigned char)(c[scan_httpdate(c,&ims)])>' ')
@@ -493,6 +570,10 @@ rangeerror:
 	c+=fmt_ulonglong(c,range_last-range_first);
 	c+=fmt_str(c,"\r\nLast-Modified: ");
 	c+=fmt_httpdate(c,ss.st_mtime);
+	if (h->encoding!=NORMAL) {
+	  c+=fmt_str(c,"\r\nContent-Encoding: ");
+	  c+=fmt_str(c,h->encoding==GZIP?"gzip":"bzip2");
+	}
 	if (range_first || range_last!=ss.st_size) {
 	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
 	  c+=fmt_ulonglong(c,range_first);
@@ -524,6 +605,11 @@ rangeerror:
 	buffer_putulong(buffer_1,s);
 	buffer_puts(buffer_1," ");
 	buffer_putlogstr(buffer_1,filename);
+	switch (h->encoding) {
+	case GZIP: buffer_puts(buffer_1,".gz"); break;
+	case BZIP2: buffer_puts(buffer_1,".bz2");
+	case NORMAL: break;
+	}
 	buffer_puts(buffer_1," ");
 	buffer_putulong(buffer_1,range_last-range_first);
 	buffer_puts(buffer_1," ");
