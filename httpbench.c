@@ -36,6 +36,8 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   int s;
   if (v6) {
     s=socket_tcp6();
+    if (s==-1)
+      panic("socket_tcp6()");
     if (bindport) {
       for (;;) {
 	int r=socket_bind6_reuse(s,V6any,bindport,0);
@@ -52,13 +54,15 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
     }
   } else {
     s=socket_tcp4();
+    if (s==-1)
+      panic("socket_tcp4()");
     if (bindport) {
       for (;;) {
 	int r=socket_bind4_reuse(s,V6any,bindport);
 	if (++bindport<1024) bindport=1024;
 	if (r==0) break;
 	if (errno!=EADDRINUSE)
-	  panic("socket_bind6");
+	  panic("socket_bind4");
       }
     }
     if (socket_connect4(s,ip+12,port)==-1) {
