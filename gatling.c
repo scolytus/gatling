@@ -23,6 +23,8 @@
 #include <signal.h>
 #include <pwd.h>
 #include <grp.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 #include "version.h"
 
 #ifdef USE_ZLIB
@@ -1071,6 +1073,12 @@ usage:
 	      io_setcookie(n,h);
 	      if (timeout_secs)
 		io_timeout(n,next);
+#ifdef TCP_NODELAY
+	      {
+		int i=1;
+		setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&i,sizeof(i));
+	      }
+#endif
 	    } else
 	      io_close(n);
 	  } else {
