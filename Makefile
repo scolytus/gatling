@@ -12,7 +12,7 @@ LDFLAGS=
 path = $(subst :, ,$(PATH))
 diet_path = $(foreach dir,$(path),$(wildcard $(dir)/diet))
 ifeq ($(strip $(diet_path)),)
-ifneq ($(wildcard /opt/diet/bin/diet),/opt/diet/bin/diet)
+ifneq ($(wildcard /opt/diet/bin/diet),)
 DIET=/opt/diet/bin/diet
 else
 DIET=
