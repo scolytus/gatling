@@ -6,7 +6,7 @@ MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
 TARGETS=gatling httpbench bindbench mmapbench forkbench dl \
-mktestdata manymapbench ioerr forksbench pthreadbench
+mktestdata manymapbench ioerr forksbench tlsgatling pthreadbench
 
 all: $(TARGETS)
 
@@ -62,6 +62,9 @@ forksbench: forkbench.o
 	$(CC) -static -o $@ forkbench.o $(LDFLAGS) $(LDLIBS)
 
 gatling.o: version.h
+
+tlsgatling: gatling.c ssl.o
+	$(CC) -o $@ $^ -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h

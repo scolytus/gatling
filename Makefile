@@ -4,7 +4,7 @@ MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
 TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
-mktestdata manymapbench ioerr forksbench
+mktestdata manymapbench ioerr tlsgatling forksbench
 
 all: $(TARGET)
 
@@ -52,6 +52,9 @@ version.h: CHANGES
 
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
+
+tlsgatling: gatling.c ssl.o
+	$(CC) -o $@ $(CFLAGS) $^ $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 libsocket: trysocket.c
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \

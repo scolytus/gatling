@@ -111,11 +111,21 @@ char workgroup_utf16[100];
 int wglen16;
 #endif
 
+#ifdef SUPPORT_HTTPS
+/* in ssl.c */
+#include <openssl/ssl.h>
+extern int init_serverside_tls(SSL** ssl,int sock);
+extern int init_clientside_tls(SSL** ssl,int sock);
+#endif
+
 static void carp(const char* routine) {
+  buffer_putmflush(buffer_2,routine,": ",strerror(errno),"\n");
+#if 0
   buffer_puts(buffer_2,routine);
   buffer_puts(buffer_2,": ");
   buffer_puterror(buffer_2);
   buffer_putnlflush(buffer_2);
+#endif
 }
 
 static void panic(const char* routine) {
@@ -156,6 +166,14 @@ enum conntype {
   PROXYPOST,	/* while still_to_copy>0: write POST data; relay answer */
   HTTPPOST,	/* type of HTTP request until POST data is completely
 		   written; read post data and write them to proxy */
+#endif
+
+#ifdef SUPPORT_HTTPS
+  HTTPSSERVER4,	/* call socket_accept6() */
+  HTTPSSERVER6,	/* call socket_accept4() */
+  HTTPSACCEPT,	/* call SSL_accept() */
+  HTTPSREQUEST,	/* read and handle https request */
+  HTTPSRESPONSE,	/* write response to https request */
 #endif
 };
 
@@ -201,6 +219,9 @@ struct http_data {
   uint64 still_to_copy;	/* for POST requests */
   int havefirst;	/* first read contains cgi header */
   char* oldheader;	/* old, unmodified request */
+#endif
+#ifdef SUPPORT_HTTPS
+  SSL* ssl;
 #endif
 };
 
@@ -276,6 +297,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
       if (logging) {
 	char buf[IP6_FMT+10];
 	char* tmp;
+	const char* method="???";
 	{
 	  int x;
 	  x=fmt_ip6c(buf,h->myip);
@@ -285,11 +307,11 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	}
 	tmp=array_start(&d->r);
 	switch (*tmp) {
-	case 'H': buffer_puts(buffer_1,"HEAD"); break;
-	case 'G': buffer_puts(buffer_1,"GET"); break;
-	case 'P': buffer_puts(buffer_1,"POST"); break;
+	case 'H': method="HEAD"; break;
+	case 'G': method="GET"; break;
+	case 'P': method="POST"; break;
 	}
-	buffer_puts(buffer_1,x->port?"/PROXY ":"/CGI ");
+	buffer_putm(buffer_1,method,x->port?"/PROXY ":"/CGI ");
 	buffer_putulong(buffer_1,sockfd);
 	buffer_puts(buffer_1," ");
 	buffer_putlogstr(buffer_1,c);
@@ -319,6 +341,17 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	    goto punt;
 	if (logging) {
 	  char tmp[100];
+	  char bufsockfd[FMT_ULONG];
+	  char bufs[FMT_ULONG];
+	  char bufport[FMT_ULONG];
+
+	  bufsockfd[fmt_ulong(bufsockfd,sockfd)]=0;
+	  bufs[fmt_ulong(bufs,s)]=0;
+	  bufport[fmt_ulong(bufport,x->port)]=0;
+	  tmp[fmt_ip6ifc(tmp,x->ip,x->scope_id)]=0;
+
+	  buffer_putm(buffer_1,"proxy_connect ",bufsockfd," ",bufs," ",tmp," ",bufport," ");
+#if 0
 	  buffer_puts(buffer_1,"proxy_connect ");
 	  buffer_putulong(buffer_1,sockfd);
 	  buffer_putspace(buffer_1);
@@ -328,6 +361,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	  buffer_putspace(buffer_1);
 	  buffer_put(buffer_1,tmp,fmt_ulong(tmp,x->port));
 	  buffer_putspace(buffer_1);
+#endif
 	  buffer_putlogstr(buffer_1,c);
 	  buffer_putnlflush(buffer_1);
 	}
@@ -368,6 +402,16 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	}
 	h->t=PROXYPOST;
 	if (logging) {
+	  char bufsfd[FMT_ULONG];
+	  char bufs[FMT_ULONG];
+	  char bufpid[FMT_ULONG];
+
+	  bufsfd[fmt_ulong(bufsfd,sockfd)]=0;
+	  bufs[fmt_ulong(bufs,s)]=0;
+	  bufpid[fmt_ulong(bufpid,pid)]=0;
+
+	  buffer_putmflush(buffer_1,"cgi_fork ",bufsfd," ",bufs," ",bufpid,"\n");
+#if 0
 	  buffer_puts(buffer_1,"cgi_fork ");
 	  buffer_putulong(buffer_1,sockfd);
 	  buffer_putspace(buffer_1);
@@ -375,6 +419,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	  buffer_putspace(buffer_1);
 	  buffer_putulong(buffer_1,pid);
 	  buffer_putnlflush(buffer_1);
+#endif
 	}
       }
       h->buddy=sockfd;
@@ -477,9 +522,14 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
   if (i==-1) return -1;
   if (i==0) {
     if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,sockfd)]=0;
+      buffer_putmflush(buffer_1,"cgiproxy_read0 ",numbuf,"\n");
+#if 0
       buffer_puts(buffer_1,"cgiproxy_read0 ");
       buffer_putulong(buffer_1,sockfd);
       buffer_putnlflush(buffer_1);
+#endif
     }
     if (peer) {
       peer->buddy=-1;
@@ -1147,9 +1197,14 @@ e400:
     httperror(h,"400 Invalid Request","This server only understands GET and HEAD.");
 
     if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,s)]=0;
+      buffer_putmflush(buffer_1,"error_400 ",numbuf,"\n");
+#if 0
       buffer_puts(buffer_1,"error_400 ");
       buffer_putulong(buffer_1,s);
       buffer_putsflush(buffer_1,"\n");
+#endif
     }
 
   } else {
@@ -2401,6 +2456,9 @@ static void cleanup(int64 fd) {
 #ifdef SUPPORT_SMB
 	|| h->t==SMBREQUEST
 #endif
+#ifdef SUPPORT_HTTPS
+	|| h->t==HTTPSREQUEST || h->t==HTTPSACCEPT
+#endif
 	  ) --connections;
 
 #if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
@@ -2417,6 +2475,9 @@ static void cleanup(int64 fd) {
     iob_reset(&h->iob);
 #ifdef SUPPORT_FTP
     free(h->ftppath);
+#endif
+#ifdef SUPPORT_HTTPS
+    if (h->ssl) SSL_free(h->ssl);
 #endif
     free(h);
   }
@@ -2766,32 +2827,838 @@ void sighandler(int sig) {
   fini=(sig==SIGINT?1:2);	/* 2 for SIGHUP */
 }
 
-int main(int argc,char* argv[],char* envp[]) {
-  int s;
-  int f=-1;
+#ifdef SUPPORT_PROXY
+static void handle_read_proxypost(int64 i,struct http_data* H) {
+  switch (proxy_is_readable(i,H)) {
+  case -1:
+    {
+      struct http_data* h=io_getcookie(H->buddy);
+      if (logging) {
+	char numbuf[FMT_ULONG];
+	numbuf[fmt_ulong(numbuf,i)]=0;
+
+	buffer_putmflush(buffer_1,"proxy_read_error ",numbuf," ",strerror(errno),"\nclose/acceptfail ",numbuf,"\n");
+#if 0
+	buffer_puts(buffer_1,"proxy_read_error ");
+	buffer_putulong(buffer_1,i);
+	buffer_putspace(buffer_1);
+	buffer_puterror(buffer_1);
+	buffer_puts(buffer_1,"\nclose/acceptfail ");
+	buffer_putulong(buffer_1,i);
+	buffer_putnlflush(buffer_1);
+#endif
+      }
+      H->buddy=-1;
+      h->buddy=-1;
+      cleanup(i);
+    }
+    break;
+  case -3:
+    cleanup(i);
+    break;
+  }
+}
+
+static void handle_read_httppost(int64 i,struct http_data* H) {
+  /* read POST data. */
+//	printf("read POST data state for %d\n",i);
+  if (H->still_to_copy) {
+    if (array_bytes(&H->r)>0) {
+//	    printf("  but there was still data in H->r!\n");
+      io_dontwantread(i);
+      io_wantwrite(H->buddy);
+    } else if (read_http_post(i,H)==-1) {
+      if (logging) {
+	char a[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	buffer_putmflush(buffer_1,"http_postdata_read_error ",a," ",strerror(errno),"\nclose/acceptfail ",a,"\n");
+#if 0
+	buffer_puts(buffer_1,"http_postdata_read_error ");
+	buffer_putulong(buffer_1,i);
+	buffer_putspace(buffer_1);
+	buffer_puterror(buffer_1);
+	buffer_puts(buffer_1,"\nclose/acceptfail ");
+	buffer_putulong(buffer_1,i);
+	buffer_putnlflush(buffer_1);
+#endif
+      }
+      cleanup(i);
+    } else {
+//	    printf("  read something\n");
+      io_dontwantread(i);
+      io_wantwrite(H->buddy);
+    }
+  } else {
+    /* should not happen */
+    io_dontwantread(i);
+//	  printf("ARGH!!!\n");
+  }
+}
+
+static void handle_write_proxypost(int64 i,struct http_data* h) {
+  struct http_data* H=io_getcookie(h->buddy);
+  /* do we have some POST data to write? */
+//	printf("event: write POST data (%llu) to proxy on %d\n",h->still_to_copy,i);
+  if (!array_bytes(&H->r)) {
+//	  printf("  but nothing here to write!\n");
+    io_dontwantwrite(i);	/* nope */
+    io_wantread(h->buddy);
+  } else {
+//	  printf("  yeah!\n");
+    if (H) {
+      char* c=array_start(&H->r);
+      long alen=array_bytes(&H->r);
+      long l;
+//	    printf("%ld bytes still in H->r (%ld in h->r), still to copy: %lld (%lld in h)\n",alen,(long)array_bytes(&h->r),H->still_to_copy,h->still_to_copy);
+      if (alen>h->still_to_copy) alen=h->still_to_copy;
+      if (alen==0) goto nothingmoretocopy;
+      l=write(i,c,alen);
+//	    printf("wrote %ld bytes (wanted to write %ld; had %lld still to copy)\n",l,alen,H->still_to_copy);
+      if (l<1) {
+	/* ARGH!  Proxy crashed! *groan* */
+	if (logging) {
+	  buffer_puts(buffer_1,"http_postdata_write_error ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putspace(buffer_1);
+	  buffer_puterror(buffer_1);
+	  buffer_puts(buffer_1,"\nclose/acceptfail ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putnlflush(buffer_1);
+	}
+	cleanup(i);
+      } else {
+	byte_copy(c,alen-l,c+l);
+	array_truncate(&H->r,1,alen-l);
+//	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",H,H->still_to_copy,H->still_to_copy-l);
+	H->still_to_copy-=l;
+//	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-i);
+//	      h->still_to_copy-=i;
+	if (alen-l==0)
+	  io_dontwantwrite(i);
+	if (h->still_to_copy) {
+	  /* we got all we asked for */
+nothingmoretocopy:
+	  io_dontwantwrite(i);
+	  io_wantread(i);
+	  io_dontwantread(h->buddy);
+	  io_wantwrite(h->buddy);
+	}
+      }
+    }
+  }
+}
+
+static void handle_write_httppost(int64 i,struct http_data* h) {
+  struct http_data* H=io_getcookie(h->buddy);
+  /* write answers from proxy */
+  if (H && h->still_to_copy) {
+    char* c=array_start(&H->r);
+    long alen=array_bytes(&H->r);
+    long l;
+    if (alen>h->still_to_copy) alen=h->still_to_copy;
+    l=write(i,c,alen);
+    if (l<1) {
+      /* ARGH!  Client hung up on us! *groan* */
+      if (logging) {
+	buffer_puts(buffer_1,"http_postdata_writetoclient_error ");
+	buffer_putulong(buffer_1,i);
+	buffer_putspace(buffer_1);
+	buffer_puterror(buffer_1);
+	buffer_puts(buffer_1,"\nclose/acceptfail ");
+	buffer_putulong(buffer_1,i);
+	buffer_putnlflush(buffer_1);
+      }
+      cleanup(i);
+    } else {
+      byte_copy(c,alen-l,c+l);
+      array_truncate(&H->r,1,alen-l);
+//	    printf("still_to_copy HTTPPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-l);
+      h->still_to_copy-=l;
+      if (alen-l==0)
+	io_dontwantwrite(i);
+      if (!h->still_to_copy) {
+	/* we got all we asked for */
+//	      printf("  got all we asked for!\n");
+	io_dontwantwrite(i);
+	io_wantread(i);
+	io_dontwantread(h->buddy);
+	io_wantwrite(h->buddy);
+      } else {
+	io_wantread(h->buddy);
+	if (l==alen) io_dontwantwrite(i);
+      }
+    }
+  } else {
+    int buddy=h->buddy;
+    struct http_data* H=io_getcookie(buddy);
+    h->buddy=-1;
+    if (H) {
+      H->buddy=-1;
+      if (logging) {
+	buffer_puts(buffer_1,"\nclose/proxydone ");
+	buffer_putulong(buffer_1,i);
+	buffer_putnlflush(buffer_1);
+      }
+      cleanup(buddy);
+    }
+    io_dontwantwrite(i);
+  }
+}
+
+static void handle_write_proxyslave(int64 i,struct http_data* h) {
+  /* the connect() to the proxy just finished or failed */
+  struct http_data* H;
+  H=io_getcookie(h->buddy);
+  if (proxy_write_header(i,h)==-1) {
+    if (logging) {
+      buffer_puts(buffer_1,"proxy_connect_error ");
+      buffer_putulong(buffer_1,i);
+      buffer_putspace(buffer_1);
+      buffer_puterror(buffer_1);
+      buffer_puts(buffer_1,"\nclose/connectfail ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+    }
+    H->buddy=-1;
+    httperror(H,"502 Gateway Broken","Request relaying error.");
+    h->buddy=-1;
+    free(h);
+    io_close(i);
+  }
+  /* it worked.  We wrote the header.  Now see if there is
+    * POST data to write.  h->still_to_copy is Content-Length. */
+//	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
+  if (h->still_to_copy) {
+    h->t=PROXYPOST;
+    handle_write_httppost(i,H);
+    return;
+//    goto httpposthandler;
+//	  io_wantwrite(h->buddy);
+  } else {
+    io_dontwantwrite(i);
+    io_wantread(i);
+  }
+  h->t=PROXYPOST;
+}
+
+#endif
+
+#ifdef SUPPORT_FTP
+static void handle_read_ftppassive(int64 i,struct http_data* H) {
+  /* This is the server socket for a passive FTP data connections.
+    * A read event means the peer established a TCP connection.
+    * accept() it and close server connection */
+  struct http_data* h;
+  int n;
+  h=io_getcookie(H->buddy);
+  assert(h);
+  n=socket_accept6(i,H->myip,&H->myport,&H->myscope_id);
+  if (n==-1) {
+pasverror:
+    if (logging) {
+      buffer_puts(buffer_1,"pasv_accept_error ");
+      buffer_putulong(buffer_1,i);
+      buffer_putspace(buffer_1);
+      buffer_puterror(buffer_1);
+      buffer_puts(buffer_1,"\nclose/acceptfail ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+    }
+    h->buddy=-1;
+    free(H);
+    io_close(i);
+  } else {
+    if (!io_fd(n)) goto pasverror;
+    if (logging) {
+      buffer_puts(buffer_1,"pasv_accept ");
+      buffer_putulong(buffer_1,i);
+      buffer_putspace(buffer_1);
+      buffer_putulong(buffer_1,n);
+      buffer_puts(buffer_1,"\nclose/accepted ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+    }
+    h->buddy=n;
+    io_setcookie(n,H);
+    io_nonblock(n);
+    io_close(i);
+    H->t=FTPSLAVE;
+#ifdef TCP_NODELAY
+    {
+      int x=1;
+      setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
+    }
+#endif
+    if (h->f==WAITCONNECT) {
+      h->f=LOGGEDIN;
+      if (H->f==DOWNLOADING)
+	io_wantwrite(h->buddy);
+      else
+	io_wantread(h->buddy);
+    }
+  }
+}
+
+static void handle_write_ftpactive(int64 i,struct http_data* h) {
+  struct http_data* H;
+  H=io_getcookie(h->buddy);
+  assert(H);
+  if (socket_connect6(i,h->peerip,h->destport,h->myscope_id)==-1 && errno!=EISCONN) {
+    if (logging) {
+      buffer_puts(buffer_1,"port_connect_error ");
+      buffer_putulong(buffer_1,i);
+      buffer_putspace(buffer_1);
+      buffer_puterror(buffer_1);
+      buffer_puts(buffer_1,"\nclose/connectfail ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+    }
+    H->buddy=-1;
+    free(h);
+    io_close(i);
+  } else {
+    if (logging) {
+      char buf[IP6_FMT];
+      buffer_puts(buffer_1,"port_connect ");
+      buffer_putulong(buffer_1,i);
+      buffer_putspace(buffer_1);
+      buffer_put(buffer_1,buf,fmt_ip6c(buf,h->peerip));
+      buffer_putspace(buffer_1);
+      buffer_put(buffer_1,buf,fmt_ulong(buf,h->destport));
+      buffer_putnlflush(buffer_1);
+    }
+    h->t=FTPSLAVE;
+#ifdef TCP_NODELAY
+    {
+      int x=1;
+      setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
+    }
+#endif
+    if (h->f != DOWNLOADING)
+      io_dontwantwrite(i);
+    if (H->f==WAITCONNECT) {
+      H->f=LOGGEDIN;
+      if (h->f==DOWNLOADING)
+	io_wantwrite(H->buddy);
+      else
+	io_wantread(H->buddy);
+    }
+  }
+}
+#endif
+
+
+
+
+static int is_server_connection(enum conntype t) {
+  return (t==HTTPSERVER6 || t==HTTPSERVER4
+#ifdef SUPPORT_FTP
+	|| t==FTPSERVER6 || t==FTPSERVER4
+#endif
 #ifdef SUPPORT_SMB
-  int smbs=-1;
+	|| t==SMBSERVER6 || t==SMBSERVER4
+#endif
+#ifdef SUPPORT_HTTPS
+	|| t==HTTPSSERVER6 || t==HTTPSSERVER4
+#endif
+	);
+}
+
+static void accept_server_connection(int64 i,struct http_data* H,unsigned long ftptimeout_secs,tai6464 nextftp) {
+  /* This is an FTP or HTTP(S) or SMB server connection.
+    * This read event means that someone connected to us.
+    * accept() the connection, establish connection type from
+    * server connection type, and put the new connection into the
+    * state table */
+  char ip[16];
+  uint16 port;
+  uint32 scope_id;
+  int n;
+  while (1) {
+#ifdef __broken_itojun_v6__
+    if (H->t==HTTPSERVER4 || H->t==FTPSERVER4
+#ifdef SUPPORT_SMB
+					      || H->t==SMBSERVER4
+#endif
+#ifdef SUPPORT_HTTPS
+					      || H->t==HTTPSSERVER4
+#endif
+								  ) {
+      byte_copy(ip,12,V4mappedprefix);
+      scope_id=0;
+      n=socket_accept4(i,ip+12,&port);
+    } else
+#endif
+      n=socket_accept6(i,ip,&port,&scope_id);
+    if (n==-1) break;
+    ++connections;
+    {
+      char buf[IP6_FMT];
+
+      if (logging) {
+	buffer_puts(buffer_1,"accept ");
+	buffer_putulong(buffer_1,n);
+	buffer_puts(buffer_1," ");
+	buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
+	buffer_puts(buffer_1," ");
+	buffer_putulong(buffer_1,port);
+	buffer_puts(buffer_1," ");
+	buffer_putulong(buffer_1,connections-1);
+	buffer_putnlflush(buffer_1);
+      }
+    }
+
+    io_nonblock(n);
+    if (io_fd(n)) {
+      struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
+      if (h) {
+	if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
+#ifdef SUPPORT_SMB
+	  || H->t==SMBSERVER6 || H->t==SMBSERVER4
+#endif
+#ifdef SUPPORT_HTTPS
+	  || H->t==HTTPSSERVER6 || H->t==HTTPSSERVER4
+#endif
+	  )
+	  io_wantread(n);
+	else
+	  io_wantwrite(n);
+	byte_zero(h,sizeof(struct http_data));
+#ifdef __broken_itojun_v6__
+	if (i==s4 || i==f4) {
+	  byte_copy(h->myip,12,V4mappedprefix);
+	  socket_local4(n,h->myip+12,&h->myport);
+	} else
+	  socket_local6(n,h->myip,&h->myport,0);
+#else
+	socket_local6(n,h->myip,&h->myport,0);
+#endif
+	byte_copy(h->peerip,16,ip);
+	h->peerport=port;
+	h->myscope_id=scope_id;
+	if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
+	  h->t=HTTPREQUEST;
+	  if (timeout_secs)
+	    io_timeout(n,next);
+#ifdef SUPPORT_HTTPS
+	} else if (H->t==HTTPSSERVER4 || H->t==HTTPSSERVER6) {
+	  fchdir(origdir);
+	  if (init_serverside_tls(&h->ssl,n)) {
+	    if (logging) {
+	      char a[FMT_ULONG];
+	      a[fmt_ulong(a,n)]=0;
+	      buffer_putmflush(buffer_1,"ssl_setup_failed ",a," ",strerror(errno),"\nclose/readerr ",a,"\n");
+	    }
+	    cleanup(n);
+	    continue;
+	  }
+	  h->t=HTTPSACCEPT;
+	  if (timeout_secs)
+	    io_timeout(n,next);
+#endif
+#ifdef SUPPORT_SMB
+	} else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
+	  h->t=SMBREQUEST;
+	  if (timeout_secs)
+	    io_timeout(n,next);
+#endif
+#ifdef SUPPORT_FTP
+	} else {
+	  if (H->t==FTPSERVER6)
+	    h->t=FTPCONTROL6;
+	  else
+	    h->t=FTPCONTROL4;
+	  iob_addbuf(&h->iob,"220 Hi there!\r\n",15);
+	  h->keepalive=1;
+	  if (ftptimeout_secs)
+	    io_timeout(n,nextftp);
+#endif
+	}
+	h->buddy=-1;
+	h->filefd=-1;
+	io_setcookie(n,h);
+#ifdef TCP_NODELAY
+	{
+	  int i=1;
+	  setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&i,sizeof(i));
+	}
+#else
+#warning TCP_NODELAY not defined
+#endif
+      } else
+	io_close(n);
+    } else
+      io_close(n);
+  }
+  if (errno==EAGAIN)
+    io_eagain(i);
+  else
+#ifdef __broken_itojun_v6__
+    carp(H->t==HTTPSERVER4||H->t==FTPSERVER4?"socket_accept4":"socket_accept6");
+#else
+    carp("socket_accept6");
+#endif
+}
+
+#ifdef SUPPORT_HTTPS
+void handle_ssl_error_code(int sock,int code,int reading) {
+  switch (code) {
+  case SSL_ERROR_WANT_READ:
+    if (reading) return;
+    io_dontwantread(sock);
+    io_wantwrite(sock);
+    return;
+  case SSL_ERROR_WANT_WRITE:
+    if (!reading) return;
+    io_dontwantwrite(sock);
+    io_wantread(sock);
+    return;
+  case SSL_ERROR_SYSCALL:
+    if (logging) {
+      buffer_puts(buffer_1,"io_error ");
+      buffer_putulong(buffer_1,sock);
+      buffer_putspace(buffer_1);
+      buffer_puterror(buffer_1);
+      buffer_puts(buffer_1,"\nclose/readerr ");
+      buffer_putulong(buffer_1,sock);
+      buffer_putnlflush(buffer_1);
+    }
+    cleanup(sock);
+    return;
+  default:
+    if (logging) {
+      buffer_puts(buffer_1,"ssl_protocol_error ");
+      buffer_putulong(buffer_1,sock);
+      buffer_puts(buffer_1,"\nclose/readerr ");
+      buffer_putulong(buffer_1,sock);
+      buffer_putnlflush(buffer_1);
+    }
+    cleanup(sock);
+    return;
+  }
+}
+
+void do_sslaccept(int sock,struct http_data* h,int reading) {
+  int r=SSL_get_error(h->ssl,SSL_accept(h->ssl));
+  if (r==SSL_ERROR_NONE) {
+    h->t=HTTPSREQUEST;
+    if (logging) {
+      buffer_puts(buffer_1,"ssl_handshake_ok ");
+      buffer_putulong(buffer_1,sock);
+      buffer_putnlflush(buffer_1);
+    }
+    return;
+  } else
+    handle_ssl_error_code(sock,r,reading);
+}
+#endif
+
+static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeout_secs,tai6464 nextftp) {
+  /* This is a TCP client connection waiting for input, i.e.
+    *   - an HTTP connection waiting for a HTTP request, or
+    *   - an FTP connection waiting for a command, or
+    *   - an FTP upload waiting for more data, or
+    *   - an SMB connection waiting for the next command */
+  char buf[8192];
+  int l;
+#ifdef SUPPORT_HTTPS
+  if (H->t == HTTPSREQUEST || H->t == HTTPSRESPONSE) {
+    l=SSL_read(H->ssl,buf,sizeof(buf));
+    if (l==-1) {
+      l=SSL_get_error(H->ssl,l);
+      if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+	handle_ssl_error_code(i,l,1);
+	l=-1;
+      } else l=-3;
+    }
+  } else
+#endif
+  l=io_tryread(i,buf,sizeof buf);
+  if (l==-3) {
+#ifdef SUPPORT_FTP
+ioerror:
+#endif
+    if (logging) {
+      char a[FMT_ULONG];
+      a[fmt_ulong(a,i)]=0;
+      buffer_putmflush(buffer_1,"io_error ",a," ",strerror(errno),"\nclose/readerr ",a,"\n");
+#if 0
+      buffer_puts(buffer_1,"io_error ");
+      buffer_putulong(buffer_1,i);
+      buffer_puts(buffer_1," ");
+      buffer_puterror(buffer_1);
+      buffer_puts(buffer_1,"\nclose/readerr ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+#endif
+    }
+    cleanup(i);
+  } else if (l==0) {
+    if (logging) {
+      buffer_puts(buffer_1,"close/read0 ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+    }
+#ifdef SUPPORT_FTP
+    if (H->t==FTPSLAVE) {
+      /* This is an FTP upload, it just finished. */
+      struct http_data* b=io_getcookie(H->buddy);
+      assert(b);
+      b->buddy=-1;
+      iob_reset(&b->iob);
+      iob_adds(&b->iob,"226 Got it.\r\n");
+      io_dontwantread(H->buddy);
+      io_wantwrite(H->buddy);
+      if (chmoduploads)
+	fchmod(H->filefd,0644);
+      if (logging) {
+	struct stat ss;
+	if (fstat(H->filefd,&ss)==0) {
+	  char a[FMT_ULONG];
+	  char b[FMT_ULONG];
+	  a[fmt_ulong(a,i)]=0;
+	  b[fmt_ulong(b,ss.st_size)]=0;
+	  buffer_putmflush(buffer_1,"received ",a," ",b,"\n");
+#if 0
+	  buffer_puts(buffer_1,"received ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putspace(buffer_1);
+	  buffer_putulonglong(buffer_1,ss.st_size);
+	  buffer_putnlflush(buffer_1);
+#endif
+	}
+      }
+    }
+#endif
+    cleanup(i);
+  } else if (l>0) {
+    /* successfully read some data (l bytes) */
+#ifdef SUPPORT_FTP
+    if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
+      if (ftptimeout_secs)
+	io_timeout(i,nextftp);
+    } else {
+      if (timeout_secs)
+	io_timeout(i,next);
+    }
+
+    if (H->t==FTPSLAVE) {
+      /* receive an upload */
+      int r;
+      if (ftptimeout_secs)
+	io_timeout(H->buddy,nextftp);
+      if ((r=write(H->filefd,buf,l))!=l)
+	goto ioerror;
+    } else
+#endif
+    {
+      /* received a request */
+      array_catb(&H->r,buf,l);
+      if (array_failed(&H->r)) {
+	httperror(H,"500 Server Error","request too long.");
+emerge:
+	io_dontwantread(i);
+	io_wantwrite(i);
+      } else if (array_bytes(&H->r)>MAX_HEADER_SIZE) {
+	httperror(H,"500 request too long","You sent too much headers");
+	array_reset(&H->r);
+	goto emerge;
+      } else if ((l=header_complete(H))) {
+	long alen;
+pipeline:
+	if (H->t==HTTPREQUEST
+#ifdef SUPPORT_HTTPS
+	                      || H->t==HTTPSREQUEST
+#endif
+	                                           )
+	  httpresponse(H,i,l);
+#ifdef SUPPORT_SMB
+	else if (H->t==SMBREQUEST)
+	  smbresponse(H,i);
+#endif
+#ifdef SUPPORT_FTP
+	else
+	  ftpresponse(H,i);
+#endif
+#ifdef SUPPORT_PROXY
+	if (H->t != HTTPPOST && l < (alen=array_bytes(&H->r)))
+#else
+	if (l < (alen=array_bytes(&H->r)))
+#endif
+	{
+	  char* c=array_start(&H->r);
+	  byte_copy(c,alen-l,c+l);
+	  array_truncate(&H->r,1,alen-l);
+	  l=header_complete(H);
+	  if (l) goto pipeline;
+	} else
+	  array_reset(&H->r);
+      }
+    }
+  }
+}
+
+#ifdef SUPPORT_HTTPS
+int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
+  int l;
+  struct http_data* H=io_getcookie(sock);
+  if (!H) return -3;
+  l=SSL_write(H->ssl,buf,n);
+  if (l<0) {
+    l=SSL_get_error(H->ssl,l);
+    handle_ssl_error_code(sock,l,1);
+    if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE)
+      l=-1;
+    else
+      l=-3;
+  }
+  return l;
+}
+#endif
+
+static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum) {
+  int64 r;
+#ifdef SUPPORT_HTTPS
+  if (h->t == HTTPSREQUEST || h->t == HTTPSRESPONSE)
+    r=iob_write(i,&h->iob,https_write_callback);
+  else
+#endif
+  r=iob_send(i,&h->iob);
+  if (r==-1)
+    io_eagain(i);
+  else if (r<=0) {
+    if (r==-3) {
+      if (logging) {
+	char a[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	buffer_putmflush(buffer_1,"socket_error ",a," ",strerror(errno),"\nclose/writefail ",a,"\n");
+#if 0
+	buffer_puts(buffer_1,"socket_error ");
+	buffer_putulong(buffer_1,i);
+	buffer_puts(buffer_1," ");
+	buffer_puterror(buffer_1);
+	buffer_puts(buffer_1,"\nclose/writefail ");
+	buffer_putulong(buffer_1,i);
+	buffer_putnlflush(buffer_1);
+#endif
+      }
+#ifdef SUPPORT_FTP
+      if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
+	struct http_data* b=io_getcookie(h->buddy);
+	assert(b);
+	if (b) {
+	  b->buddy=-1;
+	  iob_reset(&b->iob);
+	  iob_adds(&b->iob,"554 socket error.\r\n");
+	  io_wantwrite(h->buddy);
+	}
+      }
+#endif
+      cleanup(i);
+    } else {
+#ifdef SUPPORT_PROXY
+      if (h->t == HTTPREQUEST && h->buddy!=-1) {
+	io_dontwantwrite(i);
+	io_wantread(h->buddy);
+	return;
+      }
+#endif
+      if (logging && h->t == HTTPREQUEST) {
+	buffer_puts(buffer_1,"request_done ");
+	buffer_putulong(buffer_1,i);
+	buffer_putnlflush(buffer_1);
+      }
+      array_trunc(&h->r);
+      iob_reset(&h->iob);
+      h->hdrbuf=0;
+      if (h->keepalive) {
+	iob_reset(&h->iob);
+	io_dontwantwrite(i);
+	io_wantread(i);
+      } else {
+	if (logging) {
+	  buffer_puts(buffer_1,"close/reqdone ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putnlflush(buffer_1);
+	}
+#ifdef SUPPORT_FTP
+	if (h->t==FTPSLAVE) {
+	  struct http_data* b=io_getcookie(h->buddy);
+	  if (b) {
+	    b->buddy=-1;
+	    iob_reset(&b->iob);
+	    iob_adds(&b->iob,"226 Done.\r\n");
+	    io_dontwantread(h->buddy);
+	    io_wantwrite(h->buddy);
+	  } else
+	    buffer_putsflush(buffer_2,"ARGH: no cookie or no buddy for FTP slave!\n");
+	}
+#endif
+	cleanup(i);
+      }
+    }
+  } else {
+    /* write OK, now would be a good time to do some prefetching */
+    h->sent_until+=r;
+    if (prefetchquantum) {
+      if (h->prefetched_until<h->sent_until || h->prefetched_until+prefetchquantum<h->sent_until) {
+	if (prefetchquantum) iob_prefetch(&h->iob,2*prefetchquantum);
+	h->prefetched_until+=2*prefetchquantum;
+      }
+    }
+  }
+}
+
+static void prepare_listen(int s,void* whatever) {
+  if (s!=-1) {
+    if (socket_listen(s,16)==-1)
+      panic("socket_listen");
+    io_nonblock(s);
+    if (!io_fd(s))
+      panic("io_fd");
+    io_setcookie(s,whatever);
+    io_wantread(s);
+  }
+}
+
+int main(int argc,char* argv[],char* envp[]) {
+  int s;		/* http socket */
+  int f=-1;		/* ftp socket */
+#ifdef SUPPORT_SMB
+  int smbs=-1;		/* smb socket */
   enum conntype sct=SMBSERVER6;
 #endif
-  int doftp=0;
+  int doftp=0;		/* -1 = don't, 0 = try, but don't fail if not working, 1 = do */
   int dosmb=0;
-  enum { HTTP, FTP, SMB } lastopt=HTTP;
-  enum conntype ct=HTTPSERVER6;
+  enum { HTTP, FTP, SMB, HTTPS } lastopt=HTTP;
+  enum conntype ct=HTTPSERVER6;	/* used as cookie to recognize server connections */
 #ifdef SUPPORT_FTP
-  enum conntype fct=FTPSERVER6;
+  enum conntype fct=FTPSERVER6;	/* dito */
+#endif
+#ifdef SUPPORT_HTTPS
+  int httpss=-1;	/* https socket */
+  enum conntype httpsct=HTTPSSERVER6;
+  int dohttps=0;
 #endif
 #ifdef __broken_itojun_v6__
 #warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
-  int s4;
+  int s4;		/* ipv4 http socket */
   enum conntype ct4=HTTPSERVER4;
 #ifdef SUPPORT_FTP
-  int f4;
+  int f4;		/* ipv4 ftp socket */
   enum conntype fct4=FTPSERVER4;
+#endif
+#ifdef SUPPORT_HTTPS
+  int httpss4;		/* ipv4 https socket */
+  enum conntype httpsct4=HTTPSSERVER4;
 #endif
 #endif
   uint32 scope_id;
   char ip[16];
   uint16 port,fport,sport;
+#ifdef SUPPORT_HTTPS
+  uint16 httpsport;
+#endif
   tai6464 now,last,tick,nextftp;
   unsigned long ftptimeout_secs=600;
   char* new_uid=0;
@@ -2874,7 +3741,9 @@ int main(int argc,char* argv[],char* envp[]) {
 
   s=socket_tcp6();
 #ifdef __broken_itojun_v6__
+#ifdef SUPPORT_FTP
   f4=socket_tcp4();
+#endif
   s4=socket_tcp4();
 #endif
 
@@ -2909,7 +3778,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:l");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leE");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -2950,6 +3819,10 @@ int main(int argc,char* argv[],char* envp[]) {
 	i=scan_ushort(optarg,&fport);
       else if (lastopt==SMB)
 	i=scan_ushort(optarg,&sport);
+#ifdef SUPPORT_HTTPS
+      else if (lastopt==HTTPS)
+	i=scan_ushort(optarg,&httpsport);
+#endif
       else
 	i=scan_ushort(optarg,&port);
       if (i==0) {
@@ -2969,6 +3842,10 @@ int main(int argc,char* argv[],char* envp[]) {
     case 'l':
       askforpassword=1;
       break;
+#endif
+#ifdef SUPPORT_HTTPS
+    case 'e': dohttps=1; lastopt=HTTPS; break;
+    case 'E': dohttps=-1; break;
 #endif
     case 's': dosmb=1; lastopt=SMB; break;
     case 'S': dosmb=-1; break;
@@ -3039,6 +3916,10 @@ usage:
 #ifdef SUPPORT_SMB
 		  "\t-w name\tset SMB workgroup\n"
 #endif
+#ifdef SUPPORT_HTTPS
+		  "\t-e\tprovide encryption (https://...)\n"
+		  "\t-E\tdo not provide encryption\n"
+#endif
 		  );
       return 0;
     case '?':
@@ -3078,20 +3959,28 @@ usage:
     ++tick.sec.x;
   }
 
-  if (port==0)
-    port=geteuid()?8000:80;
-  if (fport==0)
-    fport=geteuid()?2121:21;
+  {
+    uid_t euid=geteuid();
+    if (port==0)
+      port=euid?8000:80;
+    if (fport==0)
+      fport=euid?2121:21;
 #ifdef SUPPORT_SMB
-  if (sport==0)
-    sport=445;
+    if (sport==0)
+      sport=445;
 #endif
+#ifdef SUPPORT_HTTPS
+    if (httpsport==0)
+      httpsport=euid?4433:443;
+#endif
+  }
 #ifdef __broken_itojun_v6__
   if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
     if (byte_equal(ip,16,V6any)) {
-      f=socket_tcp6();
       if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
 	panic("socket_bind6_reuse for http");
+#ifdef SUPPORT_FTP
+      f=socket_tcp6();
       if (doftp>=0)
 	if (socket_bind6_reuse(f,ip,fport,scope_id)==-1) {
 	  if (doftp==1)
@@ -3099,11 +3988,13 @@ usage:
 	  buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
 	  io_close(f); f=-1;
 	}
+#endif
     } else {
       io_close(s); s=-1;
     }
     if (socket_bind4_reuse(s4,ip+12,port)==-1)
       panic("socket_bind4_reuse");
+#ifdef SUPPORT_FTP
     if (doftp>=0)
       if (socket_bind4_reuse(f4,ip+12,port)==-1) {
 	if (doftp==1)
@@ -3111,10 +4002,12 @@ usage:
 	buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
 	io_close(f4); f4=-1;
       }
+#endif
   } else {
     if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
       panic("socket_bind6_reuse");
     s4=-1;
+#ifdef SUPPORT_FTP
     if (doftp>=0)
       if (socket_bind6_reuse(f,ip,port,scope_id)==-1) {
 	if (doftp==1)
@@ -3123,12 +4016,14 @@ usage:
 	io_close(f); f=-1;
       }
     f4=-1;
+#endif
   }
   buffer_putsflush(buffer_2,"WARNING: We are taking heavy losses working around itojun KAME madness here.\n"
 		            "         Please consider using an operating system with real IPv6 support instead!\n");
 #else
   if (socket_bind6_reuse(s,ip,port,0)==-1)
     panic("socket_bind6_reuse");
+#ifdef SUPPORT_FTP
   if (doftp>=0) {
     f=socket_tcp6();
     if (socket_bind6_reuse(f,ip,fport,scope_id)==-1) {
@@ -3138,6 +4033,7 @@ usage:
       io_close(f); f=-1;
     }
   }
+#endif
 #ifdef SUPPORT_SMB
   if (dosmb>=0) {
     smbs=socket_tcp6();
@@ -3146,6 +4042,17 @@ usage:
 	panic("socket_bind6_reuse");
       buffer_putsflush(buffer_2,"warning: could not bind to SMB port; SMB will be unavailable.\n");
       io_close(smbs); smbs=-1;
+    }
+  }
+#endif
+#ifdef SUPPORT_HTTPS
+  if (dohttps>=0) {
+    httpss=socket_tcp6();
+    if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1) {
+      if (dohttps==1)
+	panic("socket_bind6_reuse");
+      buffer_putsflush(buffer_2,"warning: could not bind to HTTPS port; HTTPS will be unavailable.\n");
+      io_close(httpss); httpss=-1;
     }
   }
 #endif
@@ -3188,74 +4095,32 @@ usage:
       buffer_putnlflush(buffer_1);
     }
 #endif
+#ifdef SUPPORT_HTTPS
+    if (httpss!=-1) {
+      buffer_puts(buffer_1,"start_https 0 ");
+      buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
+      buffer_puts(buffer_1," ");
+      buffer_putulong(buffer_1,httpsport);
+      buffer_putnlflush(buffer_1);
+    }
+#endif
   }
 
 #ifdef __broken_itojun_v6__
-  if (s!=-1) {
-    if (socket_listen(s,16)==-1)
-      panic("socket_listen");
-    io_nonblock(s);
-    if (!io_fd(s))
-      panic("io_fd");
-    io_setcookie(s,&ct);
-    io_wantread(s);
-  }
-  if (s4!=-1) {
-    if (socket_listen(s4,16)==-1)
-      panic("socket_listen");
-    io_nonblock(s4);
-    if (!io_fd(s4))
-      panic("io_fd");
-    io_setcookie(s4,&ct4);
-    io_wantread(s4);
-  }
-  if (f!=-1) {
-    if (socket_listen(f,16)==-1)
-      panic("socket_listen");
-    io_nonblock(f);
-    if (!io_fd(f))
-      panic("io_fd");
-    io_setcookie(f,&fct);
-    io_wantread(f);
-  }
-  if (f4!=-1) {
-    if (socket_listen(f4,16)==-1)
-      panic("socket_listen");
-    io_nonblock(f4);
-    if (!io_fd(f4))
-      panic("io_fd");
-    io_setcookie(f4,&fct4);
-    io_wantread(f4);
-  }
+  prepare_listen(s,&ct);
+  prepare_listen(s4,&ct4);
+  prepare_listen(f,&fct);
+  prepare_listen(f4,&fct4);
 #else
-  if (socket_listen(s,16)==-1)
-    panic("socket_listen");
-  io_nonblock(s);
-  if (!io_fd(s))
-    panic("io_fd");
-  io_setcookie(s,&ct);
-  io_wantread(s);
+  prepare_listen(s,&ct);
 #ifdef SUPPORT_FTP
-  if (f!=-1) {
-    if (socket_listen(f,16)==-1)
-      panic("socket_listen");
-    io_nonblock(f);
-    if (!io_fd(f))
-      panic("io_fd");
-    io_setcookie(f,&fct);
-    io_wantread(f);
-  }
+  prepare_listen(f,&fct);
 #endif
 #ifdef SUPPORT_SMB
-  if (smbs!=-1) {
-    if (socket_listen(smbs,16)==-1)
-      panic("socket_listen");
-    io_nonblock(smbs);
-    if (!io_fd(smbs))
-      panic("io_fd");
-    io_setcookie(smbs,&sct);
-    io_wantread(smbs);
-  }
+  prepare_listen(smbs,&sct);
+#endif
+#ifdef SUPPORT_HTTPS
+  prepare_listen(httpss,&httpsct);
 #endif
 #endif
 
@@ -3307,11 +4172,16 @@ usage:
 	++tick.sec.x;
 	while ((i=io_timeouted())!=-1) {
 	  if (logging) {
+	    char numbuf[FMT_ULONG];
+	    numbuf[fmt_ulong(numbuf,i)]=0;
+	    buffer_putmflush(buffer_1,"timeout ",numbuf,"\nclose/timeout ",numbuf,"\n");
+#if 0
 	    buffer_puts(buffer_1,"timeout ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_puts(buffer_1,"\nclose/timeout ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
+#endif
 	  }
 	  cleanup(i);
 	}
@@ -3326,353 +4196,33 @@ usage:
 	return 111;
       }
       H->sent_until=H->prefetched_until=0;
+
 #ifdef SUPPORT_PROXY
-      if (H->t==PROXYPOST) {
-	switch (proxy_is_readable(i,H)) {
-	case -1:
-	  {
-	    struct http_data* h=io_getcookie(H->buddy);
-	    if (logging) {
-	      buffer_puts(buffer_1,"proxy_read_error ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putspace(buffer_1);
-	      buffer_puterror(buffer_1);
-	      buffer_puts(buffer_1,"\nclose/acceptfail ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putnlflush(buffer_1);
-	    }
-	    H->buddy=-1;
-	    h->buddy=-1;
-	    cleanup(i);
-	  }
-	  break;
-	case -3:
-	  cleanup(i);
-	  break;
-	}
-      } else if (H->t==HTTPPOST) {
-	/* read POST data. */
-//	printf("read POST data state for %d\n",i);
-	if (H->still_to_copy) {
-	  if (array_bytes(&H->r)>0) {
-//	    printf("  but there was still data in H->r!\n");
-	    io_dontwantread(i);
-	    io_wantwrite(H->buddy);
-	  } else if (read_http_post(i,H)==-1) {
-	    if (logging) {
-	      buffer_puts(buffer_1,"http_postdata_read_error ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putspace(buffer_1);
-	      buffer_puterror(buffer_1);
-	      buffer_puts(buffer_1,"\nclose/acceptfail ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putnlflush(buffer_1);
-	    }
-	    cleanup(i);
-	  } else {
-//	    printf("  read something\n");
-	    io_dontwantread(i);
-	    io_wantwrite(H->buddy);
-	  }
-	} else {
-	  /* should not happen */
-	  io_dontwantread(i);
-//	  printf("ARGH!!!\n");
-	}
-      } else
+      if (H->t==PROXYPOST)
+	handle_read_proxypost(i,H);
+      else if (H->t==HTTPPOST)
+	handle_read_httppost(i,H);
+      else
 #endif
 #ifdef SUPPORT_FTP
-      if (H->t==FTPPASSIVE) {
-	/* This is the server socket for a passive FTP data connections.
-	 * A read event means the peer established a TCP connection.
-	 * accept() it and close server connection */
-	struct http_data* h;
-	int n;
-	h=io_getcookie(H->buddy);
-	assert(h);
-	n=socket_accept6(i,H->myip,&H->myport,&H->myscope_id);
-	if (n==-1) {
-pasverror:
-	  if (logging) {
-	    buffer_puts(buffer_1,"pasv_accept_error ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putspace(buffer_1);
-	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose/acceptfail ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-	  }
-	  h->buddy=-1;
-	  free(H);
-	  io_close(i);
-	} else {
-	  if (!io_fd(n)) goto pasverror;
-	  if (logging) {
-	    buffer_puts(buffer_1,"pasv_accept ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putspace(buffer_1);
-	    buffer_putulong(buffer_1,n);
-	    buffer_puts(buffer_1,"\nclose/accepted ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-	  }
-	  h->buddy=n;
-	  io_setcookie(n,H);
-	  io_nonblock(n);
-	  io_close(i);
-	  H->t=FTPSLAVE;
-#ifdef TCP_NODELAY
-	  {
-	    int x=1;
-	    setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
-	  }
+      if (H->t==FTPPASSIVE)
+	handle_read_ftppassive(i,H);
+      else
 #endif
-	  if (h->f==WAITCONNECT) {
-	    h->f=LOGGEDIN;
-	    if (H->f==DOWNLOADING)
-	      io_wantwrite(h->buddy);
-	    else
-	      io_wantread(h->buddy);
-	  }
-	}
-      } else
+#ifdef SUPPORT_HTTPS
+      if (H->t==HTTPSACCEPT)
+	do_sslaccept(i,H,1);
+      else
 #endif
-      if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
-#ifdef SUPPORT_FTP
-	|| H->t==FTPSERVER6 || H->t==FTPSERVER4
-#endif
-#ifdef SUPPORT_SMB
-	|| H->t==SMBSERVER6 || H->t==SMBSERVER4
-#endif
-	  ) {
-	/* This is an FTP or HTTP or SMB server connection.
-	 * This read event means that someone connected to us.
-	 * accept() the connection, establish connection type from
-	 * server connection type, and put the new connection into the
-	 * state table */
-	int n;
-	while (1) {
-#ifdef __broken_itojun_v6__
-	  if (H->t==HTTPSERVER4 || H->t==FTPSERVER4
-#ifdef SUPPORT_SMB
-	                                            || H->t==SMBSERVER4
-#endif
-	                                                               ) {
-	    byte_copy(ip,12,V4mappedprefix);
-	    scope_id=0;
-	    n=socket_accept4(i,ip+12,&port);
-	  } else
-#endif
-	    n=socket_accept6(i,ip,&port,&scope_id);
-	  if (n==-1) break;
-	  ++connections;
-	  {
-	    char buf[IP6_FMT];
-
-	    if (logging) {
-	      buffer_puts(buffer_1,"accept ");
-	      buffer_putulong(buffer_1,n);
-	      buffer_puts(buffer_1," ");
-	      buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
-	      buffer_puts(buffer_1," ");
-	      buffer_putulong(buffer_1,port);
-	      buffer_puts(buffer_1," ");
-	      buffer_putulong(buffer_1,connections-1);
-	      buffer_putnlflush(buffer_1);
-	    }
-	  }
-
-	  io_nonblock(n);
-	  if (io_fd(n)) {
-	    struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
-	    if (h) {
-	      if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
-#ifdef SUPPORT_SMB
-		|| H->t==SMBSERVER6 || H->t==SMBSERVER4
-#endif
-		)
-		io_wantread(n);
-	      else
-		io_wantwrite(n);
-	      byte_zero(h,sizeof(struct http_data));
-#ifdef __broken_itojun_v6__
-	      if (i==s4 || i==f4) {
-		byte_copy(h->myip,12,V4mappedprefix);
-		socket_local4(n,h->myip+12,&h->myport);
-	      } else
-		socket_local6(n,h->myip,&h->myport,0);
-#else
-	      socket_local6(n,h->myip,&h->myport,0);
-#endif
-	      byte_copy(h->peerip,16,ip);
-	      h->peerport=port;
-	      h->myscope_id=scope_id;
-	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
-		h->t=HTTPREQUEST;
-		if (timeout_secs)
-		  io_timeout(n,next);
-#ifdef SUPPORT_SMB
-	      } else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
-		h->t=SMBREQUEST;
-		if (timeout_secs)
-		  io_timeout(n,next);
-#endif
-#ifdef SUPPORT_FTP
-	      } else {
-		if (H->t==FTPSERVER6)
-		  h->t=FTPCONTROL6;
-		else
-		  h->t=FTPCONTROL4;
-		iob_addbuf(&h->iob,"220 Hi there!\r\n",15);
-		h->keepalive=1;
-		if (ftptimeout_secs)
-		  io_timeout(n,nextftp);
-#endif
-	      }
-	      h->buddy=-1;
-	      h->filefd=-1;
-	      io_setcookie(n,h);
-#ifdef TCP_NODELAY
-	      {
-		int i=1;
-		setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&i,sizeof(i));
-	      }
-#else
-#warning TCP_NODELAY not defined
-#endif
-	    } else
-	      io_close(n);
-	  } else
-	    io_close(n);
-	}
-	if (errno==EAGAIN)
-	  io_eagain(i);
-	else
-#ifdef __broken_itojun_v6__
-	  carp(H->t==HTTPSERVER4||H->t==FTPSERVER4?"socket_accept4":"socket_accept6");
-#else
-	  carp("socket_accept6");
-#endif
-      } else {
-	/* This is a TCP client connection waiting for input, i.e.
-	 *   - an HTTP connection waiting for a HTTP request, or
-	 *   - an FTP connection waiting for a command, or
-	 *   - an FTP upload waiting for more data, or
-	 *   - an SMB connection waiting for the next command */
-	char buf[8192];
-	int l=io_tryread(i,buf,sizeof buf);
-	if (l==-3) {
-#ifdef SUPPORT_FTP
-ioerror:
-#endif
-	  if (logging) {
-	    buffer_puts(buffer_1,"io_error ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_puts(buffer_1," ");
-	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose/readerr ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-	  }
-	  cleanup(i);
-	} else if (l==0) {
-	  if (logging) {
-	    buffer_puts(buffer_1,"close/read0 ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-	  }
-#ifdef SUPPORT_FTP
-	  if (H->t==FTPSLAVE) {
-	    /* This is an FTP upload, it just finished. */
-	    struct http_data* b=io_getcookie(H->buddy);
-	    assert(b);
-	    b->buddy=-1;
-	    iob_reset(&b->iob);
-	    iob_adds(&b->iob,"226 Got it.\r\n");
-	    io_dontwantread(H->buddy);
-	    io_wantwrite(H->buddy);
-	    if (chmoduploads)
-	      fchmod(H->filefd,0644);
-	    if (logging) {
-	      struct stat ss;
-	      if (fstat(H->filefd,&ss)==0) {
-		buffer_puts(buffer_1,"received ");
-		buffer_putulong(buffer_1,i);
-		buffer_putspace(buffer_1);
-		buffer_putulonglong(buffer_1,ss.st_size);
-		buffer_putnlflush(buffer_1);
-	      }
-	    }
-	  }
-#endif
-	  cleanup(i);
-	} else if (l>0) {
-	  /* successfully read some data (l bytes) */
-#ifdef SUPPORT_FTP
-	  if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
-	    if (ftptimeout_secs)
-	      io_timeout(i,nextftp);
-	  } else {
-	    if (timeout_secs)
-	      io_timeout(i,next);
-	  }
-
-	  if (H->t==FTPSLAVE) {
-	    /* receive an upload */
-	    int r;
-	    if (ftptimeout_secs)
-	      io_timeout(H->buddy,nextftp);
-	    if ((r=write(H->filefd,buf,l))!=l)
-	      goto ioerror;
-	  } else
-#endif
-	  {
-	    /* received a request */
-	    array_catb(&H->r,buf,l);
-	    if (array_failed(&H->r)) {
-	      httperror(H,"500 Server Error","request too long.");
-emerge:
-	      io_dontwantread(i);
-	      io_wantwrite(i);
-	    } else if (array_bytes(&H->r)>MAX_HEADER_SIZE) {
-	      httperror(H,"500 request too long","You sent too much headers");
-	      array_reset(&H->r);
-	      goto emerge;
-	    } else if ((l=header_complete(H))) {
-	      long alen;
-pipeline:
-	      if (H->t==HTTPREQUEST)
-		httpresponse(H,i,l);
-#ifdef SUPPORT_SMB
-	      else if (H->t==SMBREQUEST)
-		smbresponse(H,i);
-#endif
-#ifdef SUPPORT_FTP
-	      else
-		ftpresponse(H,i);
-#endif
-#ifdef SUPPORT_PROXY
-	      if (H->t != HTTPPOST && l < (alen=array_bytes(&H->r))) {
-#else
-	      if (l < (alen=array_bytes(&H->r))) {
-#endif
-		char* c=array_start(&H->r);
-		byte_copy(c,alen-l,c+l);
-		array_truncate(&H->r,1,alen-l);
-		l=header_complete(H);
-		if (l) goto pipeline;
-	      } else
-		array_reset(&H->r);
-	    }
-	  }
-	}
-      }
+      if (is_server_connection(H->t))
+	accept_server_connection(i,H,ftptimeout_secs,nextftp);
+      else
+	handle_read_misc(i,H,ftptimeout_secs,nextftp);
     }
 
     /* HANDLE WRITABLE EVENTS */
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
-      int64 r;
 
 #ifdef SUPPORT_FTP
       if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
@@ -3688,278 +4238,27 @@ pipeline:
       if (timeout_secs)
 	io_timeout(i,next);
 #endif
+
 #ifdef SUPPORT_PROXY
-      if (h->t==PROXYSLAVE) {
-	/* the connect() to the proxy just finished or failed */
-	struct http_data* H;
-	H=io_getcookie(h->buddy);
-	if (proxy_write_header(i,h)==-1) {
-	  if (logging) {
-	    buffer_puts(buffer_1,"proxy_connect_error ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putspace(buffer_1);
-	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose/connectfail ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-	  }
-	  H->buddy=-1;
-	  httperror(H,"502 Gateway Broken","Request relaying error.");
-	  h->buddy=-1;
-	  free(h);
-	  io_close(i);
-	}
-	/* it worked.  We wrote the header.  Now see if there is
-	 * POST data to write.  h->still_to_copy is Content-Length. */
-//	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
-	if (h->still_to_copy) {
-	  h->t=PROXYPOST;
-	  goto httpposthandler;
-//	  io_wantwrite(h->buddy);
-	} else {
-	  io_dontwantwrite(i);
-	  io_wantread(i);
-	}
-	h->t=PROXYPOST;
-      } else if (h->t==PROXYPOST) {
-	struct http_data* H=io_getcookie(h->buddy);
-	/* do we have some POST data to write? */
-//	printf("event: write POST data (%llu) to proxy on %d\n",h->still_to_copy,i);
-	if (!array_bytes(&H->r)) {
-//	  printf("  but nothing here to write!\n");
-	  io_dontwantwrite(i);	/* nope */
-	  io_wantread(h->buddy);
-	} else {
-//	  printf("  yeah!\n");
-	  if (H) {
-	    char* c=array_start(&H->r);
-	    long alen=array_bytes(&H->r);
-	    long l;
-//	    printf("%ld bytes still in H->r (%ld in h->r), still to copy: %lld (%lld in h)\n",alen,(long)array_bytes(&h->r),H->still_to_copy,h->still_to_copy);
-	    if (alen>h->still_to_copy) alen=h->still_to_copy;
-	    if (alen==0) goto nothingmoretocopy;
-	    l=write(i,c,alen);
-//	    printf("wrote %ld bytes (wanted to write %ld; had %lld still to copy)\n",l,alen,H->still_to_copy);
-	    if (l<1) {
-	      /* ARGH!  Proxy crashed! *groan* */
-	      if (logging) {
-		buffer_puts(buffer_1,"http_postdata_write_error ");
-		buffer_putulong(buffer_1,i);
-		buffer_putspace(buffer_1);
-		buffer_puterror(buffer_1);
-		buffer_puts(buffer_1,"\nclose/acceptfail ");
-		buffer_putulong(buffer_1,i);
-		buffer_putnlflush(buffer_1);
-	      }
-	      cleanup(i);
-	    } else {
-	      byte_copy(c,alen-l,c+l);
-	      array_truncate(&H->r,1,alen-l);
-//	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",H,H->still_to_copy,H->still_to_copy-l);
-	      H->still_to_copy-=l;
-//	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-i);
-//	      h->still_to_copy-=i;
-	      if (alen-l==0)
-		io_dontwantwrite(i);
-	      if (h->still_to_copy) {
-		/* we got all we asked for */
-nothingmoretocopy:
-		io_dontwantwrite(i);
-		io_wantread(i);
-		io_dontwantread(h->buddy);
-		io_wantwrite(h->buddy);
-	      }
-	    }
-	  }
-	}
-      } else if (h->t==HTTPPOST)
-httpposthandler:
-      {
-	struct http_data* H=io_getcookie(h->buddy);
-	/* write answers from proxy */
-	if (H && h->still_to_copy) {
-	  char* c=array_start(&H->r);
-	  long alen=array_bytes(&H->r);
-	  long l;
-	  if (alen>h->still_to_copy) alen=h->still_to_copy;
-	  l=write(i,c,alen);
-	  if (l<1) {
-	    /* ARGH!  Client hung up on us! *groan* */
-	    if (logging) {
-	      buffer_puts(buffer_1,"http_postdata_writetoclient_error ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putspace(buffer_1);
-	      buffer_puterror(buffer_1);
-	      buffer_puts(buffer_1,"\nclose/acceptfail ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putnlflush(buffer_1);
-	    }
-	    cleanup(i);
-	  } else {
-	    byte_copy(c,alen-l,c+l);
-	    array_truncate(&H->r,1,alen-l);
-//	    printf("still_to_copy HTTPPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-l);
-	    h->still_to_copy-=l;
-	    if (alen-l==0)
-	      io_dontwantwrite(i);
-	    if (!h->still_to_copy) {
-	      /* we got all we asked for */
-//	      printf("  got all we asked for!\n");
-	      io_dontwantwrite(i);
-	      io_wantread(i);
-	      io_dontwantread(h->buddy);
-	      io_wantwrite(h->buddy);
-	    } else {
-	      io_wantread(h->buddy);
-	      if (l==alen) io_dontwantwrite(i);
-	    }
-	  }
-	} else {
-	  int buddy=h->buddy;
-	  struct http_data* H=io_getcookie(buddy);
-	  h->buddy=-1;
-	  if (H) {
-	    H->buddy=-1;
-	    if (logging) {
-	      buffer_puts(buffer_1,"\nclose/proxydone ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putnlflush(buffer_1);
-	    }
-	    cleanup(buddy);
-	  }
-	  io_dontwantwrite(i);
-	}
-      } else
+      if (h->t==PROXYSLAVE)
+	handle_write_proxyslave(i,h);
+      else if (h->t==PROXYPOST)
+	handle_write_proxypost(i,h);
+      else if (h->t==HTTPPOST)
+	handle_write_httppost(i,h);
+      else
+#endif
+#ifdef SUPPORT_HTTPS
+      if (h->t==HTTPSACCEPT)
+	do_sslaccept(i,h,0);
+      else
 #endif
 #ifdef SUPPORT_FTP
-      if (h->t==FTPACTIVE) {
-	struct http_data* H;
-	H=io_getcookie(h->buddy);
-	assert(H);
-	if (socket_connect6(i,h->peerip,h->destport,h->myscope_id)==-1 && errno!=EISCONN) {
-	  if (logging) {
-	    buffer_puts(buffer_1,"port_connect_error ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putspace(buffer_1);
-	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose/connectfail ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-	  }
-	  H->buddy=-1;
-	  free(h);
-	  io_close(i);
-	} else {
-	  if (logging) {
-	    char buf[IP6_FMT];
-	    buffer_puts(buffer_1,"port_connect ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putspace(buffer_1);
-	    buffer_put(buffer_1,buf,fmt_ip6c(buf,h->peerip));
-	    buffer_putspace(buffer_1);
-	    buffer_put(buffer_1,buf,fmt_ulong(buf,h->destport));
-	    buffer_putnlflush(buffer_1);
-	  }
-	  h->t=FTPSLAVE;
-#ifdef TCP_NODELAY
-	  {
-	    int x=1;
-	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
-	  }
+      if (h->t==FTPACTIVE)
+	handle_write_ftpactive(i,h);
+      else
 #endif
-	  if (h->f != DOWNLOADING)
-	    io_dontwantwrite(i);
-	  if (H->f==WAITCONNECT) {
-	    H->f=LOGGEDIN;
-	    if (h->f==DOWNLOADING)
-	      io_wantwrite(H->buddy);
-	    else
-	      io_wantread(H->buddy);
-	  }
-	}
-      } else
-#endif
-	     {
-	r=iob_send(i,&h->iob);
-	if (r==-1)
-	  io_eagain(i);
-	else if (r<=0) {
-	  if (r==-3) {
-	    if (logging) {
-	      buffer_puts(buffer_1,"socket_error ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_puts(buffer_1," ");
-	      buffer_puterror(buffer_1);
-	      buffer_puts(buffer_1,"\nclose/writefail ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putnlflush(buffer_1);
-	    }
-#ifdef SUPPORT_FTP
-	    if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
-	      struct http_data* b=io_getcookie(h->buddy);
-	      assert(b);
-	      if (b) {
-		b->buddy=-1;
-		iob_reset(&b->iob);
-		iob_adds(&b->iob,"554 socket error.\r\n");
-		io_wantwrite(h->buddy);
-	      }
-	    }
-#endif
-	    cleanup(i);
-	  } else {
-#ifdef SUPPORT_PROXY
-	    if (h->t == HTTPREQUEST && h->buddy!=-1) {
-	      io_dontwantwrite(i);
-	      io_wantread(h->buddy);
-	      continue;
-	    }
-#endif
-	    if (logging && h->t == HTTPREQUEST) {
-	      buffer_puts(buffer_1,"request_done ");
-	      buffer_putulong(buffer_1,i);
-	      buffer_putnlflush(buffer_1);
-	    }
-	    array_trunc(&h->r);
-	    iob_reset(&h->iob);
-	    h->hdrbuf=0;
-	    if (h->keepalive) {
-	      iob_reset(&h->iob);
-	      io_dontwantwrite(i);
-	      io_wantread(i);
-	    } else {
-	      if (logging) {
-		buffer_puts(buffer_1,"close/reqdone ");
-		buffer_putulong(buffer_1,i);
-		buffer_putnlflush(buffer_1);
-	      }
-#ifdef SUPPORT_FTP
-	      if (h->t==FTPSLAVE) {
-		struct http_data* b=io_getcookie(h->buddy);
-		if (b) {
-		  b->buddy=-1;
-		  iob_reset(&b->iob);
-		  iob_adds(&b->iob,"226 Done.\r\n");
-		  io_dontwantread(h->buddy);
-		  io_wantwrite(h->buddy);
-		} else
-		  buffer_putsflush(buffer_2,"ARGH: no cookie or no buddy for FTP slave!\n");
-	      }
-#endif
-	      cleanup(i);
-	    }
-	  }
-	} else {
-	  /* write OK, now would be a good time to do some prefetching */
-	  h->sent_until+=r;
-	  if (prefetchquantum) {
-	    if (h->prefetched_until<h->sent_until || h->prefetched_until+prefetchquantum<h->sent_until) {
-	      if (prefetchquantum) iob_prefetch(&h->iob,2*prefetchquantum);
-	      h->prefetched_until+=2*prefetchquantum;
-	    }
-	  }
-	}
-      }
+	handle_write_misc(i,h,prefetchquantum);
     }
   }
   io_finishandshutdown();
