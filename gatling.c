@@ -1143,6 +1143,9 @@ emerge:
 	  iob_reset(&h->iob);
 	  h->hdrbuf=0;
 	  if (h->keepalive) {
+	    array_reset(&h->r);
+	    iob_reset(&h->iob);
+	    if (h->filefd!=-1) { io_close(h->filefd); h->filefd=-1; }
 	    io_dontwantwrite(i);
 	    io_wantread(i);
 	  } else {
