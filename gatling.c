@@ -253,6 +253,7 @@ struct cgi_proxy* last;
 #ifdef SUPPORT_CGI
 static int add_cgi(const char* c) {
   struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
+  if (!x) return -1;
   byte_zero(x,sizeof(struct cgi_proxy));
   if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) {
     free(x);
@@ -270,6 +271,7 @@ static int add_cgi(const char* c) {
 static int add_proxy(const char* c) {
   struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
   int i;
+  if (!x) return -1;
   byte_zero(x,sizeof(struct cgi_proxy));
   i=scan_ip6if(c,x->ip,&x->scope_id);
   if (c[i]!='/') { nixgut: free(x); return -1; }
