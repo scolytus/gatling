@@ -2704,7 +2704,18 @@ void forkslave(int fd,buffer* in) {
 		    dup2(sock[1],2);
 		    close(sock[0]); close(sock[1]); close(fd);
 
-		    execve(cginame,argv,envp);
+		    {
+		      char* path,* file;
+		      path=cginame;
+		      file=strrchr(path,'/');
+		      if (file) {
+			*file=0;
+			++file;
+			chdir(path);
+			cginame=file;
+		      }
+		      execve(cginame,argv,envp);
+		    }
 		  }
 		  exit(127);
 		} else {
