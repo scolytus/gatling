@@ -350,7 +350,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	s=socket_tcp6();
 	if (s==-1) return -1;
 	if (!io_fd(s)) {
-  punt:
+punt:
 	  free(h);
 	  io_close(s);
 	  return -1;
@@ -418,6 +418,13 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	  s=io_receivefd(forksock[0]);
 	  if (s==-1) {
 	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
+	    free(h);
+	    return -1;
+	  }
+	  if (!io_fd(s)) {
+	    httperror(d,"502 Gateway Broken",c);
+	    io_close(s);
+	    free(h);
 	    return -1;
 	  }
 	}
@@ -4615,3 +4622,5 @@ usage:
   io_finishandshutdown();
   return 0;
 }
+
+int epoll_create(int i) { return -1; }
