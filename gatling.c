@@ -118,6 +118,7 @@ int wglen16;
 #ifdef SUPPORT_HTTPS
 /* in ssl.c */
 #include <openssl/ssl.h>
+#include <openssl/err.h>
 extern int init_serverside_tls(SSL** ssl,int sock);
 extern int init_clientside_tls(SSL** ssl,int sock);
 #endif
@@ -226,6 +227,7 @@ struct http_data {
 #endif
 #ifdef SUPPORT_HTTPS
   SSL* ssl;
+  int writefail;
 #endif
 #ifdef SUPPORT_SMB
   enum { PCNET10, LANMAN21, NTLM012 } smbdialect;
@@ -3592,19 +3594,19 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 
 #ifdef SUPPORT_HTTPS
 void handle_ssl_error_code(int sock,int code,int reading) {
+//  printf("handle_ssl_error_code(sock %d,code %d,reading %d)\n",sock,code,reading);
   switch (code) {
   case SSL_ERROR_WANT_READ:
-    if (reading) return;
-    io_dontwantread(sock);
-    io_wantwrite(sock);
+    io_wantread(sock);
+    io_dontwantwrite(sock);
     return;
   case SSL_ERROR_WANT_WRITE:
-    if (!reading) return;
-    io_dontwantwrite(sock);
-    io_wantread(sock);
+    io_wantwrite(sock);
+    io_dontwantread(sock);
     return;
   case SSL_ERROR_SYSCALL:
     if (logging) {
+      int olderrno=errno;
       buffer_puts(buffer_1,"io_error ");
       buffer_putulong(buffer_1,sock);
       buffer_putspace(buffer_1);
@@ -3612,8 +3614,8 @@ void handle_ssl_error_code(int sock,int code,int reading) {
       buffer_puts(buffer_1,"\nclose/readerr ");
       buffer_putulong(buffer_1,sock);
       buffer_putnlflush(buffer_1);
+      errno=olderrno;
     }
-    cleanup(sock);
     return;
   default:
     if (logging) {
@@ -3623,14 +3625,15 @@ void handle_ssl_error_code(int sock,int code,int reading) {
       buffer_putulong(buffer_1,sock);
       buffer_putnlflush(buffer_1);
     }
-    cleanup(sock);
     return;
   }
 }
 
 void do_sslaccept(int sock,struct http_data* h,int reading) {
   int r=SSL_get_error(h->ssl,SSL_accept(h->ssl));
+//  printf("do_sslaccept -> %d\n",r);
   if (r==SSL_ERROR_NONE) {
+    h->writefail=1;
     h->t=HTTPSREQUEST;
     if (logging) {
       buffer_puts(buffer_1,"ssl_handshake_ok ");
@@ -3655,8 +3658,10 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
   assert(H->t != HTTPSRESPONSE);
   if (H->t == HTTPSREQUEST) {
     l=SSL_read(H->ssl,buf,sizeof(buf));
+//    printf("SSL_read(sock %d,buf %p,n %d) -> %d\n",i,buf,sizeof(buf),l);
     if (l==-1) {
       l=SSL_get_error(H->ssl,l);
+//      printf("  error %d %s\n",l,ERR_error_string(l,0));
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
 	handle_ssl_error_code(i,l,1);
 	l=-1;
@@ -3803,13 +3808,16 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
   int l;
   struct http_data* H=io_getcookie(sock);
   if (!H) return -3;
+  H->writefail=!H->writefail;
+  if (H->writefail) { errno=EAGAIN; return -1; }
+  if (n>65536) n=65536;
   l=SSL_write(H->ssl,buf,n);
   if (l<0) {
     l=SSL_get_error(H->ssl,l);
-    handle_ssl_error_code(sock,l,1);
-    if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE)
-      l=-1;
-    else
+    handle_ssl_error_code(sock,l,0);
+    if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+      l=-1; errno=EAGAIN;
+    } else
       l=-3;
   }
   return l;
@@ -3973,6 +3981,10 @@ int main(int argc,char* argv[],char* envp[]) {
   char* new_uid=0;
   char* chroot_to=0;
   uint64 prefetchquantum=0;
+
+#ifdef SUPPORT_HTTPS
+  SSL_load_error_strings();
+#endif
 
 #ifdef SUPPORT_CGI
   _envp=envp;
