@@ -7,8 +7,8 @@ mktestdata manymapbench ioerr forksbench
 all: $(TARGET)
 
 CC=gcc
-CFLAGS=-pipe -Wall -O -g -I../libowfat/
-LDFLAGS=-g -L../libowfat/ -lowfat
+CFLAGS=-pipe -Wall -Os -I../libowfat/
+LDFLAGS=-s -L../libowfat/ -lowfat
 
 gatling: gatling.o libsocket libiconv
 	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket libiconv`
@@ -72,4 +72,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a
+	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c
