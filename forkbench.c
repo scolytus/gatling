@@ -97,10 +97,11 @@ usage:
       buffer_putulong(buffer_1,d);
       buffer_puts(buffer_1,"\n");
     }
+    buffer_flush(buffer_1);
+    buffer_putsflush(buffer_2,"killing children\n");
     for (i=0; i<count; ++i)
       kill(p[i],SIGTERM);
   }
 
-  buffer_flush(buffer_1);
   return 0;
 }
