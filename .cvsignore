@@ -4,3 +4,4 @@ httpbench
 forkbench
 mmapbench
 dl
+bindbench
