@@ -101,7 +101,7 @@ int main(int argc,char* argv[]) {
       gettimeofday(&b,0);
       d=(b.tv_sec-a.tv_sec)*1000000;
       d=d+b.tv_usec-a.tv_usec;
-      buffer_putulong(buffer_1,x[j].p);
+      buffer_putulong(buffer_1,x[j].t);
       buffer_putspace(buffer_1);
       buffer_putulong(buffer_1,d);
       buffer_puts(buffer_1,"\n");
