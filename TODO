@@ -1,0 +1,7 @@
+
+  - http ranges (resume)
+  - http pipelining
+  - HEAD
+  - transparent .gz and .png substitution
+  - a benchmark program
+  - ftp
