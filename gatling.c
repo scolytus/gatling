@@ -1,11 +1,11 @@
 // #define SUPPORT_SMB
-/* #define SUPPORT_FTP */
-/* #define SUPPORT_PROXY */
+#define SUPPORT_FTP
+#define SUPPORT_PROXY
 /* #define DEBUG to enable more verbose debug messages for tracking fd
  * leaks */
 /* #define DEBUG */
-/* #define SUPPORT_CGI */
-/* #define SUPPORT_HTACCESS */
+#define SUPPORT_CGI
+#define SUPPORT_HTACCESS
 
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
