@@ -801,6 +801,8 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "js",	"application/x-javascript" },
   { "tar",	"application/x-tar" },
   { "zip",	"application/zip" },
+  { "rar",	"application/x-rar-compressed" },
+  { "7z",	"application/x-7z-compressed" },
   { "dtd",	"text/xml" },
   { "xml",	"text/xml" },
   { "xbm",	"image/x-xbitmap" },
