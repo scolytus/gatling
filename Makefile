@@ -1,7 +1,10 @@
 prefix=/usr/local
 BINDIR=${prefix}/bin
 
-all: gatling httpbench dl bindbench mmapbench forkbench pthreadbench
+TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
+mktestdata manymapbench
+
+all: $(TARGET)
 
 CC=gcc
 CFLAGS=-pipe -Wall -O -g -I../libowfat/
@@ -28,6 +31,12 @@ forkbench: forkbench.o
 pthreadbench: pthreadbench.o
 	$(CC) -o $@ pthreadbench.o $(LDFLAGS) -lpthread
 
+mktestdata: mktestdata.o
+	$(CC) -o $@ mktestdata.o $(LDFLAGS)
+
+manymapbench: manymapbench.o
+	$(CC) -o $@ manymapbench.o $(LDFLAGS)
+
 gatling.o: version.h
 
 version.h: CHANGES
@@ -44,4 +53,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling httpbench mmapbench bindbench forkbench dl *.o version.h core *.core
+	rm -f $(TARGET) *.o version.h core *.core

@@ -3,7 +3,8 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-TARGETS=gatling httpbench bindbench mmapbench forkbench dl pthreadbench
+TARGETS=gatling httpbench bindbench mmapbench forkbench dl pthreadbench \
+mktestdata manymapbench
 
 all: $(TARGETS)
 
@@ -71,4 +72,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling httpbench bindbench mmapbench forkbench dl *.o version.h core *.core
+	rm -f $(TARGETS) *.o version.h core *.core
