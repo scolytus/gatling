@@ -67,9 +67,18 @@ usage:
   buffer_putsflush(buffer_2," KB)...\n");
   {
     unsigned long i;
-    char buf[100];
+    char* p;
+    volatile char c;
+    p = mmap(NULL, count*8192, PROT_READ, MAP_SHARED, fd, 0);
+    if (p==MAP_FAILED) {
+      buffer_puts(buffer_2,"mmap failed: ");
+      buffer_puterror(buffer_2);
+      buffer_putnlflush(buffer_2);
+      return 111;
+    }
     for (i=0; i<count; ++i)
-      pread(fd,buf,100,i*8192);
+      c += p[i*8192];
+    munmap(p,count*8192);
   }
 
   {
@@ -91,6 +100,7 @@ usage:
 	buffer_puts(buffer_2,"mmap failed: ");
 	buffer_puterror(buffer_2);
 	buffer_putnlflush(buffer_2);
+	return 111;
       }
 #ifdef __i386__
       rdtscl(b);
