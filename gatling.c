@@ -1483,7 +1483,7 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
     buffer_putspace(buffer_1);
     buffer_putulong(buffer_1,sock);
     buffer_putspace(buffer_1);
-    buffer_putlogstr(buffer_1,x[1]?x+1:"/");
+    buffer_putlogstr(buffer_1,x[1]?x:"/");
     buffer_putspace(buffer_1);
   }
   return fd;
