@@ -55,7 +55,7 @@ struct http_data {
   io_batch iob;
   char myip[16];
   uint16 myport;
-  char* hdrbuf,* bodybuf;
+  char* hdrbuf,* bodybuf, *mimetype;
   int hlen,blen;
   int keepalive;
   int filefd;
@@ -375,6 +375,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
   if (filename[(i=strlen(filename))-1] == '/') {
     /* Damn.  Directory. */
     if (filename[1] && chdir(filename+1)==-1) return -1;
+    h->mimetype="text/html";
     if (!io_readfile(&fd,filename="index.html")) {
       DIR* d;
       if (!directory_index) return -1;
@@ -427,6 +428,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
       }
     }
   } else {
+    h->mimetype=mimetype(filename);
     if (!io_readfile(&fd,filename+1))
       return -1;
     if (doesgzip || doesbzip2) {
@@ -568,7 +570,6 @@ e404:
 	  goto e404;
 	}
 	range_first=0; range_last=ss.st_size;
-	m=mimetype(c);
 	if ((c=http_header(h,"If-Modified-Since")))
 	  if ((unsigned char)(c[scan_httpdate(c,&ims)])>' ')
 	    ims=0;
@@ -599,7 +600,7 @@ rangeerror:
 	  c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
 
 	c+=fmt_str(c,"\r\nContent-Type: ");
-	c+=fmt_str(c,m);
+	c+=fmt_str(c,h->mimetype);
 	c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
 	c+=fmt_ulonglong(c,range_last-range_first);
 	c+=fmt_str(c,"\r\nLast-Modified: ");
