@@ -848,9 +848,6 @@ usage:
     ++tick.sec.x;
   }
 
-  if (!io_readfile(&origdir,".")) panic("open()");
-  /* get fd for . so we can always fchdir back */
-
   if (port==0)
     port=geteuid()?8000:80;
 #ifdef __broken_itojun_v6__
@@ -890,6 +887,9 @@ usage:
   }
   if (new_uid && switch_uid()==-1)
     panic("switch_uid");
+
+  if (!io_readfile(&origdir,".")) panic("open()");
+  /* get fd for . so we can always fchdir back */
 
   {
     char buf[IP6_FMT];
