@@ -1515,6 +1515,7 @@ syntaxerror:
       buffer_putulong(buffer_1,port);
       buffer_putnlflush(buffer_1);
     }
+    io_dontwantread(h->buddy);
     io_wantwrite(h->buddy);
   } else if (case_equals(c,"PWD") || case_equals(c,"XPWD") /* fsck windoze */) {
     c=h->ftppath; if (!c) c="/";
@@ -2016,7 +2017,7 @@ usage:
 	  if (logging) {
 	    buffer_puts(buffer_1,"timeout ");
 	    buffer_putulong(buffer_1,i);
-	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_puts(buffer_1,"\nclose/timeout ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
@@ -2043,7 +2044,7 @@ usage:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putspace(buffer_1);
 	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_puts(buffer_1,"\nclose/acceptfail ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
@@ -2056,7 +2057,7 @@ usage:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putspace(buffer_1);
 	    buffer_putulong(buffer_1,n);
-	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_puts(buffer_1,"\nclose/accepted ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
@@ -2069,49 +2070,6 @@ usage:
 	  {
 	    int x=1;
 	    setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
-	  }
-#endif
-	  if (h->f==WAITCONNECT) {
-	    h->f=LOGGEDIN;
-	    if (H->f==DOWNLOADING)
-	      io_wantwrite(h->buddy);
-	    else
-	      io_wantread(h->buddy);
-	  }
-	}
-      } else if (H->t==FTPACTIVE) {
-	struct http_data* h;
-	h=io_getcookie(H->buddy);
-	assert(h);
-	if (socket_connect6(i,H->peerip,H->destport,H->myscope_id)==-1) {
-	  if (logging) {
-	    buffer_puts(buffer_1,"port_connect_error ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putspace(buffer_1);
-	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-	  }
-	  h->buddy=-1;
-	  free(H);
-	  io_close(i);
-	} else {
-	  if (logging) {
-	    char buf[IP6_FMT];
-	    buffer_puts(buffer_1,"port_connect ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putspace(buffer_1);
-	    buffer_put(buffer_1,buf,fmt_ip6(buf,H->peerip));
-	    buffer_puts(buffer_1,":");
-	    buffer_put(buffer_1,buf,fmt_ulong(buf,H->destport));
-	    buffer_putnlflush(buffer_1);
-	  }
-	  H->t=FTPSLAVE;
-#ifdef TCP_NODELAY
-	  {
-	    int x=1;
-	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
 	  }
 #endif
 	  if (h->f==WAITCONNECT) {
@@ -2216,14 +2174,14 @@ ioerror:
 	    buffer_putulong(buffer_1,i);
 	    buffer_puts(buffer_1," ");
 	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_puts(buffer_1,"\nclose/readerr ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
 	  cleanup(i);
 	} else if (l==0) {
 	  if (logging) {
-	    buffer_puts(buffer_1,"close ");
+	    buffer_puts(buffer_1,"close/read0 ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
@@ -2308,63 +2266,109 @@ pipeline:
 	  io_timeout(h->buddy,nextftp);
 	}
       }
-      r=iob_send(i,&h->iob);
-      if (r==-1)
-	io_eagain(i);
-      else if (r<=0) {
-	if (r==-3) {
+      if (h->t==FTPACTIVE) {
+	struct http_data* H;
+	H=io_getcookie(h->buddy);
+	assert(H);
+	if (socket_connect6(i,h->peerip,h->destport,h->myscope_id)==-1) {
 	  if (logging) {
-	    buffer_puts(buffer_1,"socket_error ");
+	    buffer_puts(buffer_1,"port_connect_error ");
 	    buffer_putulong(buffer_1,i);
-	    buffer_puts(buffer_1," ");
+	    buffer_putspace(buffer_1);
 	    buffer_puterror(buffer_1);
-	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_puts(buffer_1,"\nclose/connectfail ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
-	  if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
-	    struct http_data* b=io_getcookie(h->buddy);
-	    assert(b);
-	    if (b) {
-	      b->buddy=-1;
-	      iob_reset(&b->iob);
-	      iob_adds(&b->iob,"554 socket error.\r\n");
-	      io_wantwrite(h->buddy);
-	    }
-	  }
-	  cleanup(i);
+	  H->buddy=-1;
+	  free(h);
+	  io_close(i);
 	} else {
-	  if (logging && h->t == HTTPREQUEST) {
-	    buffer_puts(buffer_1,"request_done ");
+	  if (logging) {
+	    char buf[IP6_FMT];
+	    buffer_puts(buffer_1,"port_connect ");
 	    buffer_putulong(buffer_1,i);
+	    buffer_putspace(buffer_1);
+	    buffer_put(buffer_1,buf,fmt_ip6(buf,h->peerip));
+	    buffer_puts(buffer_1,":");
+	    buffer_put(buffer_1,buf,fmt_ulong(buf,h->destport));
 	    buffer_putnlflush(buffer_1);
 	  }
-	  array_trunc(&h->r);
-	  iob_reset(&h->iob);
-	  h->hdrbuf=0;
-	  if (h->keepalive) {
-	    iob_reset(&h->iob);
-	    if (h->filefd!=-1) { io_close(h->filefd); h->filefd=-1; }
-	    io_dontwantwrite(i);
-	    io_wantread(i);
-	  } else {
+	  h->t=FTPSLAVE;
+#ifdef TCP_NODELAY
+	  {
+	    int x=1;
+	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
+	  }
+#endif
+	  io_dontwantwrite(i);
+	  if (H->f==WAITCONNECT) {
+	    H->f=LOGGEDIN;
+	    if (h->f==DOWNLOADING)
+	      io_wantwrite(H->buddy);
+	    else
+	      io_wantread(H->buddy);
+	  }
+	}
+      } else {
+	r=iob_send(i,&h->iob);
+	if (r==-1)
+	  io_eagain(i);
+	else if (r<=0) {
+	  if (r==-3) {
 	    if (logging) {
-	      buffer_puts(buffer_1,"close ");
+	      buffer_puts(buffer_1,"socket_error ");
+	      buffer_putulong(buffer_1,i);
+	      buffer_puts(buffer_1," ");
+	      buffer_puterror(buffer_1);
+	      buffer_puts(buffer_1,"\nclose/writefail ");
 	      buffer_putulong(buffer_1,i);
 	      buffer_putnlflush(buffer_1);
 	    }
-	    if (h->t==FTPSLAVE) {
+	    if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
 	      struct http_data* b=io_getcookie(h->buddy);
+	      assert(b);
 	      if (b) {
 		b->buddy=-1;
 		iob_reset(&b->iob);
-		iob_adds(&b->iob,"226 Done.\r\n");
-		io_dontwantread(h->buddy);
+		iob_adds(&b->iob,"554 socket error.\r\n");
 		io_wantwrite(h->buddy);
-	      } else
-		buffer_putsflush(buffer_2,"ARGH: no cookie or no buddy for FTP slave!\n");
+	      }
 	    }
 	    cleanup(i);
+	  } else {
+	    if (logging && h->t == HTTPREQUEST) {
+	      buffer_puts(buffer_1,"request_done ");
+	      buffer_putulong(buffer_1,i);
+	      buffer_putnlflush(buffer_1);
+	    }
+	    array_trunc(&h->r);
+	    iob_reset(&h->iob);
+	    h->hdrbuf=0;
+	    if (h->keepalive) {
+	      iob_reset(&h->iob);
+	      if (h->filefd!=-1) { io_close(h->filefd); h->filefd=-1; }
+	      io_dontwantwrite(i);
+	      io_wantread(i);
+	    } else {
+	      if (logging) {
+		buffer_puts(buffer_1,"close/reqdone ");
+		buffer_putulong(buffer_1,i);
+		buffer_putnlflush(buffer_1);
+	      }
+	      if (h->t==FTPSLAVE) {
+		struct http_data* b=io_getcookie(h->buddy);
+		if (b) {
+		  b->buddy=-1;
+		  iob_reset(&b->iob);
+		  iob_adds(&b->iob,"226 Done.\r\n");
+		  io_dontwantread(h->buddy);
+		  io_wantwrite(h->buddy);
+		} else
+		  buffer_putsflush(buffer_2,"ARGH: no cookie or no buddy for FTP slave!\n");
+	      }
+	      cleanup(i);
+	    }
 	  }
 	}
       }
