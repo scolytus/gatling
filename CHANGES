@@ -9,6 +9,8 @@
   support POST for CGI proxy
   fix HEAD fd leak (oops)
   experimental CGI support
+  add -l option to make FTP server ask for password
+    (works around buggy proxy servers, e.g. Genugate)
 
 0.4:
   add primitive FTP support (default: enabled; disable with -F!)

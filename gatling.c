@@ -168,6 +168,8 @@ enum ftpstate {
   DOWNLOADING,
   UPLOADING,
 };
+
+int askforpassword;
 #endif
 
 struct http_data {
@@ -1908,10 +1910,17 @@ void ftpresponse(struct http_data* h,int64 s) {
     h->keepalive=0;
   } else if (case_starts(c,"USER ")) {
     c+=5;
-    if (case_equals(c,"ftp") || case_equals(c,"anonymous"))
-      h->hdrbuf="230 No need for passwords, you're logged in now.\r\n";
-    else
-      h->hdrbuf="230 I only serve anonymous users.  But I'll make an exception.\r\n";
+    if (case_equals(c,"ftp") || case_equals(c,"anonymous")) {
+      if (askforpassword)
+	h->hdrbuf="331 User name OK, please use your email address as password.\r\n";
+      else
+	h->hdrbuf="230 No need for passwords, you're logged in now.\r\n";
+    } else {
+      if (askforpassword)
+	h->hdrbuf="230 I only serve anonymous users.  But I'll make an exception.\r\n";
+      else
+	h->hdrbuf="331 I only serve anonymous users.  But I'll make an exception.\r\n";
+    }
     h->f=LOGGEDIN;
   } else if (case_starts(c,"PASS ")) {
     h->hdrbuf="230 If you insist...\r\n";
@@ -2846,7 +2855,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:l");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -2900,8 +2909,13 @@ int main(int argc,char* argv[],char* envp[]) {
     case 't': transproxy=1; break;
     case 'd': directory_index=1; break;
     case 'D': directory_index=-1; break;
+#ifdef SUPPORT_FTP
     case 'f': doftp=1; lastopt=FTP; break;
     case 'F': doftp=-1; break;
+    case 'l':
+      askforpassword=1;
+      break;
+#endif
     case 's': dosmb=1; lastopt=SMB; break;
     case 'S': dosmb=-1; break;
     case 'T':
@@ -2961,6 +2975,7 @@ usage:
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  "\t-P n\tenable experimental prefetching code (may actually be slower)\n"
+		  "\t-l\task for password (FTP server; work around buggy proxies)\n"
 #ifdef SUPPORT_CGI
 		  "\t-C regex\tregex for local CGI execution (\"\\.cgi\")\n"
 #endif
