@@ -48,10 +48,12 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   return s;
 }
 
-static int readanswer(int s) {
+static int readanswer(int s,int measurethroughput) {
   char buf[8192];
   int i,j,body=-1,r;
   unsigned long rest;
+  unsigned long done;
+  struct timeval a,b;
   i=0;
   while ((r=read(s,buf+i,sizeof(buf)-i)) > 0) {
     i+=r;
@@ -82,6 +84,10 @@ static int readanswer(int s) {
     }
     ++j;
   }
+  if (measurethroughput) {
+    gettimeofday(&a,0);
+    done=r-body;
+  }
   rest-=(r-body);
   while (rest) {
     r=read(s,buf,rest>sizeof(buf)?sizeof(buf):rest);
@@ -93,6 +99,27 @@ static int readanswer(int s) {
 	buffer_putulong(buffer_2,rest);
 	buffer_putsflush(buffer_2,"more bytes!\n");
 	return -1;
+      }
+    } else {
+      rest-=r;
+      if (measurethroughput) {
+	unsigned long x=done/1000000;
+	unsigned long y;
+	done+=r;
+	y=done/1000000;
+	if (x!=y) {
+	  unsigned long d;
+	  unsigned long long z;
+	  gettimeofday(&b,0);
+	  d=(b.tv_sec-a.tv_sec)*10000000;
+	  d=d+b.tv_usec-a.tv_usec;
+	  buffer_puts(buffer_1,"tput ");
+	  z=1000000000ull/d;
+	  buffer_putulong(buffer_1,z);
+	  buffer_putnlflush(buffer_1);
+
+	  byte_copy(&a,sizeof(a),&b);
+	}
       }
     }
   }
@@ -163,7 +190,8 @@ usage:
 		  "\t-i n\tevery n connections, measure the latency (default: 10)\n"
 		  "\t-s n\tlatency == average of time to fetch an URL n times (default: 5)\n"
 		  "\t-k\tenable HTTP keep-alive\n"
-		  );
+		  "Setting the number of connections to 1 measures the throughput\n"
+		  "instead of the latency (give URL to a large file).\n");
       return 0;
     }
   }
@@ -265,8 +293,10 @@ usage:
       return 1;
   }
   if (write(s,request,rlen)!=rlen) panic("write");
-  if (readanswer(s)==-1) exit(1);
+  if (readanswer(s,count==1)==-1) exit(1);
   close(s);
+  if (count==1)
+    return 0;
 
   {
     long i;
@@ -294,7 +324,7 @@ usage:
 	  }
 	  gettimeofday(&a,0);
 	  write(s,request,rlen);
-	  if (readanswer(s)==-1) {
+	  if (readanswer(s,0)==-1) {
 	    ++err;
 	    keepalive=0;
 	  }
