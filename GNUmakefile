@@ -3,7 +3,7 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-all: gatling httpbench dl
+all: gatling httpbench dl bindbench
 
 CC=gcc
 CFLAGS=-pipe -Wall
