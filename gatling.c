@@ -515,10 +515,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
   if (!(s=http_header(h,"Host"))) {
     /* construct artificial Host header from IP */
     s=alloca(IP6_FMT+7);
-    if (byte_equal(h->myip,12,V4mappedprefix))
-      i=fmt_ip4(s,h->myip+12);
-    else
-      i=fmt_ip6(s,h->myip);
+    i=fmt_ip6c(s,h->myip);
     i+=fmt_str(s+i,":");
     i+=fmt_ulong(s+i,h->myport);
     s[i]=0;
@@ -698,10 +695,7 @@ e404:
       if (logging) {
 	char buf[IP6_FMT+10];
 	int x;
-	if (byte_equal(h->myip,12,V4mappedprefix))
-	  x=fmt_ip4(buf,h->myip+12);
-	else
-	  x=fmt_ip6(buf,h->myip);
+	x=fmt_ip6c(buf,h->myip);
 	x+=fmt_str(buf+x,"/");
 	x+=fmt_ulong(buf+x,h->myport);
 	buf[x]=0;
@@ -730,10 +724,7 @@ e404:
 	  if (logging) {
 	    char buf[IP6_FMT+10];
 	    int x;
-	    if (byte_equal(h->myip,12,V4mappedprefix))
-	      x=fmt_ip4(buf,h->myip+12);
-	    else
-	      x=fmt_ip6(buf,h->myip);
+	    x=fmt_ip6c(buf,h->myip);
 	    x+=fmt_str(buf+x,"/");
 	    x+=fmt_ulong(buf+x,h->myport);
 	    buf[x]=0;
@@ -856,10 +847,7 @@ rangeerror:
 	if (logging) {
 	  char buf[IP6_FMT+10];
 	  int x;
-	  if (byte_equal(h->myip,12,V4mappedprefix))
-	    x=fmt_ip4(buf,h->myip+12);
-	  else
-	    x=fmt_ip6(buf,h->myip);
+	  x=fmt_ip6c(buf,h->myip);
 	  x+=fmt_str(buf+x,"/");
 	  x+=fmt_ulong(buf+x,h->myport);
 	  buf[x]=0;
@@ -900,10 +888,7 @@ static int ftp_vhost(struct http_data* h) {
 
   /* construct artificial Host header from IP */
   y=alloca(IP6_FMT+7);
-  if (byte_equal(h->myip,12,V4mappedprefix))
-    i=fmt_ip4(y,h->myip+12);
-  else
-    i=fmt_ip6(y,h->myip);
+  i=fmt_ip6c(y,h->myip);
   i+=fmt_str(y+i,":");
   i+=fmt_ulong(y+i,h->myport);
   y[i]=0;
@@ -967,10 +952,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
 
   char buf[IP6_FMT+10];
   int x;
-  if (byte_equal(h->myip,12,V4mappedprefix))
-    x=fmt_ip4(buf,h->myip+12);
-  else
-    x=fmt_ip6(buf,h->myip);
+  x=fmt_ip6c(buf,h->myip);
   x+=fmt_str(buf+x,"/");
   x+=fmt_ulong(buf+x,h->myport);
   buf[x]=0;
@@ -1335,10 +1317,7 @@ nomem:
     {
       char buf[IP6_FMT+10];
       int x;
-      if (byte_equal(h->myip,12,V4mappedprefix))
-	x=fmt_ip4(buf,h->myip+12);
-      else
-	x=fmt_ip6(buf,h->myip);
+      x=fmt_ip6c(buf,h->myip);
       x+=fmt_str(buf+x,"/");
       x+=fmt_ulong(buf+x,h->myport);
       buffer_put(buffer_1,buf,x);
@@ -1792,16 +1771,8 @@ int main(int argc,char* argv[]) {
       chroot_to=optarg;
       break;
     case 'i':
-      i=scan_ip6(optarg,ip);
-      if (optarg[i]=='%') {
-	/* allow "fe80::220:e0ff:fe69:ad92%eth0" */
-	scope_id=socket_getifidx(optarg+i+1);
-	if (scope_id==0) {
-	  buffer_puts(buffer_2,"gatling: warning: network interface ");
-	  buffer_puts(buffer_2,optarg+i+1);
-	  buffer_putsflush(buffer_2," not found.\n");
-	}
-      } else if (optarg[i]!=0) {
+      i=scan_ip6if(optarg,ip,&scope_id);
+      if (optarg[i]!=0) {
 	buffer_puts(buffer_2,"gatling: warning: could not parse IP address ");
 	buffer_puts(buffer_2,optarg+i+1);
 	buffer_putsflush(buffer_2,".\n");
