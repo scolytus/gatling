@@ -14,10 +14,10 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <stdlib.h>
+#include <sys/wait.h>
 
 int main(int argc,char* argv[]) {
   unsigned long count=1000;
-  int64 fd;
   struct timeval a,b;
   unsigned long d;
 
@@ -41,7 +41,6 @@ int main(int argc,char* argv[]) {
       }
       break;
     case 'h':
-usage:
       buffer_putsflush(buffer_2,
 		  "usage: forkbench [-h] [-c count]\n"
 		  "\n"
@@ -55,8 +54,11 @@ usage:
     unsigned long i,j;
     int pfd[2];
     char buf[100];
-    pid_t *p=malloc(count*sizeof(char*));
-    if (!p) {
+    struct entry {
+      pid_t p;
+      unsigned long t;
+    } *x=malloc(count*sizeof(struct entry));
+    if (!x) {
       buffer_puts(buffer_2,"out of memory!\n");
       exit(1);
     }
@@ -67,12 +69,12 @@ usage:
     }
     for (i=0; i<count; ++i) {
       gettimeofday(&a,0);
-      switch (p[i]=fork()) {
+      switch (x[i].p=fork()) {
       case -1:
 	buffer_puts(buffer_2,"fork failed: ");
 	buffer_puterror(buffer_2);
 	buffer_putnlflush(buffer_2);
-	for (j=0; j<i; ++j) kill(p[j],SIGTERM);
+	for (j=0; j<i; ++j) kill(x[j].p,SIGTERM);
 	_exit(1);
       case 0: /* child */
 	{
@@ -84,19 +86,27 @@ usage:
       }
       if (read(pfd[0],buf,1)!=1) {
 	buffer_putsflush(buffer_2,"child did not write into pipe?!\n");
-	for (j=0; j<i; ++j) kill(p[j],SIGTERM);
+	for (j=0; j<i; ++j) kill(x[j].p,SIGTERM);
 	_exit(1);
       }
       gettimeofday(&b,0);
       d=(b.tv_sec-a.tv_sec)*1000000;
       d=d+b.tv_usec-a.tv_usec;
+      x[i].t=d;
+    }
+    for (j=0; j<i; ++j) {
+      gettimeofday(&a,0);
+      kill(x[j].p,SIGTERM);
+      waitpid(x[j].p,0,0);
+      gettimeofday(&b,0);
+      d=(b.tv_sec-a.tv_sec)*1000000;
+      d=d+b.tv_usec-a.tv_usec;
+      buffer_putulong(buffer_1,x[j].p);
+      buffer_putspace(buffer_1);
       buffer_putulong(buffer_1,d);
       buffer_puts(buffer_1,"\n");
     }
     buffer_flush(buffer_1);
-    buffer_putsflush(buffer_2,"killing children\n");
-    for (i=0; i<count; ++i)
-      kill(p[i],SIGTERM);
   }
 
   return 0;
