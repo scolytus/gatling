@@ -85,7 +85,7 @@ static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nCo
 
 void httperror(struct http_data* r,const char* title,const char* message) {
   char* c;
-  c=r->hdrbuf=(char*)malloc(strlen(message)+str_len(title)+250);
+  c=r->hdrbuf=(char*)malloc(str_len(message)+str_len(title)+250);
   if (!c) {
     r->hdrbuf=oom;
     r->hlen=str_len(r->hdrbuf);
