@@ -243,7 +243,7 @@ usage:
 		       "	-n	only fetch file if it is newer than local copy\n"
 		       "	-r	resume\n"
 		       "	-4	use PORT and PASV instead of EPRT and EPSV\n"
-		       "	-o	use PORT and EPRT instead of EPRT and EPSV\n"
+		       "	-o	use PORT and EPRT instead of PASV and EPSV\n"
 		       "	-v	be verbose\n");
       return 0;
     }
