@@ -15,6 +15,7 @@
 #include <sys/resource.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "havealloca.h"
 
 static void carp(const char* routine) {
   buffer_puts(buffer_2,"ioerr: ");
