@@ -11,6 +11,7 @@
 #include "scan.h"
 #include "textcode.h"
 #include "uint32.h"
+#include "uint16.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -29,6 +30,7 @@
 #include "version.h"
 #include <assert.h>
 #include <fnmatch.h>
+#include <iconv.h>
 
 #ifdef TIMEOUT_DEBUG
 void new_io_timeout(int64 d,tai6464 t) {
@@ -75,6 +77,11 @@ int nouploads;
 int chmoduploads;
 int64 origdir;
 
+char workgroup[20]="FNORD";
+int wglen;
+char workgroup_utf16[100];
+int wglen16;
+
 static void carp(const char* routine) {
   buffer_puts(buffer_2,routine);
   buffer_puts(buffer_2,": ");
@@ -97,6 +104,7 @@ enum conntype {
   HTTPSERVER6,	/* call socket_accept6() */
   HTTPSERVER4,	/* call socket_accept4() */
   HTTPREQUEST,	/* read and handle http request */
+
   FTPSERVER6,	/* call socket_accept6() */
   FTPSERVER4,	/* call socket_accept4() */
   FTPCONTROL6,	/* read and handle ftp commands */
@@ -104,6 +112,10 @@ enum conntype {
   FTPPASSIVE,	/* accept a slave connection */
   FTPACTIVE,	/* still need to connect slave connection */
   FTPSLAVE,	/* send/receive files */
+
+  SMBSERVER6,	/* call socket_accept6() */
+  SMBSERVER4,	/* call socket_accept4() */
+  SMBREQUEST,	/* read and handle SMB request */
 };
 
 enum ftpstate {
@@ -209,6 +221,15 @@ int header_complete(struct http_data* r) {
 	  c[i+2]=='\r' && c[i+3]=='\n')
 	return i+4;
     }
+  } else if (r->t==SMBREQUEST) {
+    /* SMB */
+    /* first four bytes are the NetBIOS session;
+     * byte 0: 0 ("session message"),
+     * bytes 1-3: message length (big endian) */
+    uint32 len;
+    if (c[0]!=0) return 1;
+    len=uint32_read_big(c) & 0x00ffffff;
+    if (l==len+4) return len+4;
   } else {
     /* FTP */
     for (i=0; i<l; ++i)
@@ -253,6 +274,18 @@ void httperror(struct http_data* r,const char* title,const char* message) {
     iob_addbuf_free(&r->iob,r->hdrbuf,r->hlen);
   }
 }
+
+
+
+
+#if 0
+ _     _   _
+| |__ | |_| |_ _ __
+| '_ \| __| __| '_ \
+| | | | |_| |_| |_) |
+|_| |_|\__|\__| .__/
+              |_|
+#endif
 
 static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "html",	"text/html" },
@@ -882,7 +915,14 @@ fini:
 
 
 
-/* FTP */
+/*
+  __ _
+ / _| |_ _ __
+| |_| __| '_ \
+|  _| |_| |_) |
+|_|  \__| .__/
+        |_|
+*/
 
 static int ftp_vhost(struct http_data* h) {
   char* y;
@@ -1641,6 +1681,136 @@ ABEND:
   io_wantwrite(s);
 }
 
+
+
+
+#if 0
+               _
+ ___ _ __ ___ | |__
+/ __| '_ ` _ \| '_ \
+\__ \ | | | | | |_) |
+|___/_| |_| |_|_.__/
+#endif
+
+static uint16 mksmbdate(int day,int month,int year) {
+  return (year<<(5+4)) + (month<<5) + day;
+}
+
+static uint16 mksmbtime(int h,int m,int s) {
+  return (h<<(5+6)) + (m<<5) + (s>>1);
+}
+
+
+void smbresponse(struct http_data* h,int64 s) {
+  char* c=array_start(&h->r);
+  int len;
+  /* is it SMB? */
+  if (byte_diff(c+4,4,"\xffSMB")) {
+    /* uh, what does an error look like? */
+    /* dunno, samba doesn't say anything, it just ignores the packet. */
+    /* if it's good enough for samba, it's good enough for me. */
+    return;
+  }
+  /* is it a request?  Discard replies. */
+  if (c[13]&0x80) return;
+  len=uint32_read_big(c)&0xffffff;
+  /* what kind of request is it? */
+  switch (c[8]) {
+  case 0x72:
+    /* protocol negotiation request */
+    {
+      int i,j,k;
+      int ack,lvl;
+      c[3]=88+strlen(workgroup);
+      c[13]|=0x80;	/* set answer bit */
+      j=uint16_read(c+0x25);
+      ack=-1; lvl=-1;
+      for (k=0,i=0x27; i<0x27+j; ++k) {
+	if (c[i]==2) {
+	  if (str_equal(c+i+1,"PC NETWORK PROGRAM 1.0") && lvl<0) { ack=k; lvl=0; } else
+	  if (str_equal(c+i+1,"LANMAN2.1") && lvl<1) { ack=k; lvl=1; } else
+	  if (str_equal(c+i+1,"NT LM 0.12") && lvl<2) { ack=k; lvl=2; }
+	  i+=2+strlen(c+i+1);
+	}
+      }
+      switch (lvl) {
+      case -1: case 0:
+	c[0x24]=1;
+	c[0x25]=ack; c[0x26]=0;
+	c[0x27]=0; c[0x28]=0;
+	uint16_pack(c+2,0x29-4);
+	write(s,c,0x29);
+	return;
+      case 1:
+	c[0x24]=13;
+	uint16_pack(c+0x25,ack);
+	uint16_pack(c+0x27,0);
+	uint16_pack(c+0x29,16*1024);
+	uint16_pack(c+0x2B,1);
+	uint16_pack(c+0x2D,1);
+	uint16_pack(c+0x2F,0);
+	uint32_pack(c+0x31,0);
+	{
+	  struct tm* t;
+	  time_t now;
+	  now=time(0);
+	  t=localtime(&now);
+	  uint16_pack(c+0x35,mksmbdate(t->tm_mday,t->tm_mon+1,t->tm_year+1900));
+	  uint16_pack(c+0x37,mksmbtime(t->tm_hour,t->tm_min,t->tm_sec));
+	  uint16_pack(c+0x39,t->tm_gmtoff);
+	  byte_zero(c+0x3b,4);
+	  c[0x3f]=0; c[0x40]=wglen16;	/* byte count */
+	  byte_copy(c+0x41,wglen16,workgroup_utf16);
+	}
+	uint16_pack(c+2,0x41+wglen16-4);
+	write(s,c,0x41+wglen16);
+	return;
+      case 2:
+	c[0x24]=17;
+	uint16_pack(c+0x25,ack);
+	c[0x27]=0;
+	uint16_pack(c+0x28,1);
+	uint16_pack(c+0x2a,1);
+	uint32_pack(c+0x2c,16384);
+	uint32_pack(c+0x30,16384);
+	uint32_pack(c+0x34,0);
+	uint32_pack(c+0x38,4+8+0x4000);
+	c[0x46]=0;
+	uint16_pack(c+0x47,wglen16);
+	byte_copy(c+0x49,wglen16,workgroup_utf16);
+
+	{
+	  struct timeval t;
+	  struct timezone tz;
+	  unsigned long long ntdate;
+	  gettimeofday(&t,&tz);
+	  ntdate=10000000ll * ( t.tv_sec + 11644473600ll ) + t.tv_usec * 10ll;
+	  uint32_pack(c+0x3c,ntdate&0xffffffff);
+	  uint32_pack(c+0x40,ntdate>>32);
+	  uint16_pack(c+0x44,tz.tz_minuteswest);
+	}
+	uint16_pack_big(c+2,0x49+wglen16-4);
+	write(s,c,0x49+wglen16);
+	return;
+      }
+    }
+    break;
+  case 0x73:
+    /* Session Setup AndX Request */
+  case 0x75:
+    /* Tree Connect AndX Request */
+  case 0x10:
+    /* Check Directory Request */
+  case 0x2d:
+    /* Open AndX Request */
+  case 0x2e:
+    /* Read AndX Request */
+  case 0x04:
+    /* Close Request */
+  }
+}
+
+
 static uid_t __uid;
 static gid_t __gid;
 
@@ -1724,9 +1894,13 @@ void sighandler(int sig) {
 int main(int argc,char* argv[]) {
   int s=socket_tcp6();
   int f=-1;
+  int smbs=-1;
   int doftp=0;
+  int dosmb=0;
+  enum { HTTP, FTP, SMB } lastopt=HTTP;
   enum conntype ct=HTTPSERVER6;
   enum conntype fct=FTPSERVER6;
+  enum conntype sct=SMBSERVER6;
 #ifdef __broken_itojun_v6__
 #warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
   int s4=socket_tcp4();
@@ -1736,7 +1910,7 @@ int main(int argc,char* argv[]) {
 #endif
   uint32 scope_id;
   char ip[16];
-  uint16 port,fport;
+  uint16 port,fport,sport;
   tai6464 now,last,next,tick,nextftp;
   unsigned long timeout_secs=23;
   unsigned long ftptimeout_secs=600;
@@ -1768,13 +1942,13 @@ int main(int argc,char* argv[]) {
   }
 
   byte_zero(ip,16);
-  port=0; fport=0; scope_id=0;
+  port=0; fport=0; sport=0; scope_id=0;
 
   logging=1;
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Ua");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sS");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -1811,8 +1985,10 @@ int main(int argc,char* argv[]) {
       }
       break;
     case 'p':
-      if (doftp==1)
+      if (lastopt==FTP)
 	i=scan_ushort(optarg,&fport);
+      else if (lastopt==SMB)
+	i=scan_ushort(optarg,&sport);
       else
 	i=scan_ushort(optarg,&port);
       if (i==0) {
@@ -1821,27 +1997,15 @@ int main(int argc,char* argv[]) {
 	buffer_putsflush(buffer_2,".\n");
       }
       break;
-    case 'v':
-      virtual_hosts=1;
-      break;
-    case 'V':
-      virtual_hosts=-1;
-      break;
-    case 't':
-      transproxy=1;
-      break;
-    case 'd':
-      directory_index=1;
-      break;
-    case 'D':
-      directory_index=-1;
-      break;
-    case 'f':
-      doftp=1;
-      break;
-    case 'F':
-      doftp=-1;
-      break;
+    case 'v': virtual_hosts=1; break;
+    case 'V': virtual_hosts=-1; break;
+    case 't': transproxy=1; break;
+    case 'd': directory_index=1; break;
+    case 'D': directory_index=-1; break;
+    case 'f': doftp=1; lastopt=FTP; break;
+    case 'F': doftp=-1; break;
+    case 's': dosmb=1; lastopt=SMB; break;
+    case 'S': dosmb=-1; break;
     case 'T':
       i=scan_ulong(optarg,doftp?&ftptimeout_secs:&timeout_secs);
       if (i==0) {
@@ -1850,11 +2014,17 @@ int main(int argc,char* argv[]) {
 	buffer_putsflush(buffer_2,".\n");
       }
       break;
+    case 'w':
+      if (str_len(optarg)>12)
+	buffer_putsflush(buffer_2,"gatling: workgroup name too long (12 max)\n");
+      else
+	strcpy(workgroup,optarg);
+      break;
     case 'h':
 usage:
       buffer_putsflush(buffer_2,
 		  "usage: gatling [-hnvVtdD] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
-		  "               [-u uid] [-c dir]\n"
+		  "               [-u uid] [-c dir] [-w workgroup]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -1873,11 +2043,24 @@ usage:
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  "\t-P\tdisable experimental prefetching code (may actually be slower)\n"
+		  "\t-w name\tset SMB workgroup\n"
 		  );
       return 0;
     case '?':
       break;
     }
+  }
+  {
+    iconv_t i=iconv_open("UTF-16LE","ISO-8859-1");
+    size_t X,Y;
+    char* x,* y;
+    X=strlen(workgroup)+1;
+    Y=sizeof(workgroup_utf16);
+    x=workgroup;
+    y=workgroup_utf16;
+    if (iconv(i,&x,&X,&y,&Y)) panic("UTF-16 conversion of workgroup failed.\n");
+    wglen=strlen(workgroup);
+    wglen16=sizeof(workgroup_utf16)-Y;
   }
   if (!directory_index)
     directory_index=virtual_hosts<1;
@@ -1898,6 +2081,8 @@ usage:
     port=geteuid()?8000:80;
   if (fport==0)
     fport=geteuid()?2121:21;
+  if (sport==0)
+    sport=445;
 #ifdef __broken_itojun_v6__
   if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
     if (byte_equal(ip,16,V6any)) {
@@ -1950,6 +2135,15 @@ usage:
       io_close(f); f=-1;
     }
   }
+  if (dosmb>=0) {
+    smbs=socket_tcp6();
+    if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1) {
+      if (dosmb==1)
+	panic("socket_bind6_reuse");
+      buffer_putsflush(buffer_2,"warning: could not bind to SMB port; SMB will be unavailable.\n");
+      io_close(smbs); smbs=-1;
+    }
+  }
 #endif
 
   if (prepare_switch_uid(new_uid)==-1)
@@ -1978,6 +2172,13 @@ usage:
       buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
       buffer_puts(buffer_1," ");
       buffer_putulong(buffer_1,fport);
+      buffer_putnlflush(buffer_1);
+    }
+    if (smbs!=-1) {
+      buffer_puts(buffer_1,"start_smb 0 ");
+      buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
+      buffer_puts(buffer_1," ");
+      buffer_putulong(buffer_1,sport);
       buffer_putnlflush(buffer_1);
     }
   }
@@ -2036,6 +2237,15 @@ usage:
     io_setcookie(f,&fct);
     io_wantread(f);
   }
+  if (smbs!=-1) {
+    if (socket_listen(smbs,16)==-1)
+      panic("socket_listen");
+    io_nonblock(smbs);
+    if (!io_fd(smbs))
+      panic("io_fd");
+    io_setcookie(smbs,&sct);
+    io_wantread(smbs);
+  }
 #endif
 
   for (;;) {
@@ -2074,6 +2284,7 @@ usage:
       }
     }
 
+    /* HANDLE READ EVENTS */
     while ((i=io_canread())!=-1) {
       struct http_data* H=io_getcookie(i);
       if (!H) {
@@ -2082,6 +2293,9 @@ usage:
       }
       H->sent_until=H->prefetched_until=0;
       if (H->t==FTPPASSIVE) {
+	/* This is the server socket for a passive FTP data connections.
+	 * A read event means the peer established a TCP connection.
+	 * accept() it and close server connection */
 	struct http_data* h;
 	int n;
 	h=io_getcookie(H->buddy);
@@ -2129,11 +2343,18 @@ usage:
 	      io_wantread(h->buddy);
 	  }
 	}
-      } else if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4 || H->t==FTPSERVER6 || H->t==FTPSERVER4) {
+      } else if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4 ||
+		 H->t==FTPSERVER6 || H->t==FTPSERVER4 ||
+		 H->t==SMBSERVER6 || H->t==SMBSERVER4) {
+	/* This is an FTP or HTTP or SMB server connection.
+	 * This read event means that someone connected to us.
+	 * accept() the connection, establish connection type from
+	 * server connection type, and put the new connection into the
+	 * state table */
 	int n;
 	while (1) {
 #ifdef __broken_itojun_v6__
-	  if (H->t==HTTPSERVER4 || H->t==FTPSERVER4) {
+	  if (H->t==HTTPSERVER4 || H->t==FTPSERVER4 || H->t==SMBSERVER4) {
 	    byte_copy(ip,12,V4mappedprefix);
 	    scope_id=0;
 	    n=socket_accept4(i,ip+12,&port);
@@ -2159,7 +2380,7 @@ usage:
 	  if (io_fd(n)) {
 	    struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
 	    if (h) {
-	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6)
+	      if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4 || H->t==SMBSERVER6 || H->t==SMBSERVER4)
 		io_wantread(n);
 	      else
 		io_wantwrite(n);
@@ -2177,6 +2398,10 @@ usage:
 	      h->myscope_id=scope_id;
 	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
 		h->t=HTTPREQUEST;
+		if (timeout_secs)
+		  io_timeout(n,next);
+	      } else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
+		h->t=SMBREQUEST;
 		if (timeout_secs)
 		  io_timeout(n,next);
 	      } else {
@@ -2214,6 +2439,11 @@ usage:
 	  carp("socket_accept6");
 #endif
       } else {
+	/* This is a TCP client connection waiting for input, i.e.
+	 *   - an HTTP connection waiting for a HTTP request, or
+	 *   - an FTP connection waiting for a command, or
+	 *   - an FTP upload waiting for more data, or
+	 *   - an SMB connection waiting for the next command */
 	char buf[8192];
 	int l=io_tryread(i,buf,sizeof buf);
 	if (l==-3) {
@@ -2235,6 +2465,7 @@ ioerror:
 	    buffer_putnlflush(buffer_1);
 	  }
 	  if (H->t==FTPSLAVE) {
+	    /* This is an FTP upload, it just finished. */
 	    struct http_data* b=io_getcookie(H->buddy);
 	    assert(b);
 	    b->buddy=-1;
@@ -2257,6 +2488,7 @@ ioerror:
 	  }
 	  cleanup(i);
 	} else if (l>0) {
+	  /* successfully read some data (l bytes) */
 	  if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
 	    if (ftptimeout_secs)
 	      io_timeout(i,nextftp);
@@ -2273,6 +2505,7 @@ ioerror:
 	    if ((r=write(H->filefd,buf,l))!=l)
 	      goto ioerror;
 	  } else {
+	    /* received a request */
 	    array_catb(&H->r,buf,l);
 	    if (array_failed(&H->r)) {
 	      httperror(H,"500 Server Error","request too long.");
@@ -2288,6 +2521,8 @@ emerge:
 pipeline:
 	      if (H->t==HTTPREQUEST)
 		httpresponse(H,i);
+	      else if (H->t==SMBREQUEST)
+		smbresponse(H,i);
 	      else
 		ftpresponse(H,i);
 	      if (l < (alen=array_bytes(&H->r))) {
@@ -2303,6 +2538,8 @@ pipeline:
 	}
       }
     }
+
+    /* HANDLE WRITABLE EVENTS */
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
       int64 r;
