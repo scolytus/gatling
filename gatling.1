@@ -2,7 +2,7 @@
 .SH NAME
 gatling \- high performance file server
 .SH SYNOPSIS
-.B gatling [-hnvVtdDfFUa] [-i bind-to-ip] [-p bind-to-port] [-T seconds]
+.B gatling [-hnvVtdDfFUla] [-i bind-to-ip] [-p bind-to-port] [-T seconds]
         \fB[-u uid] [-c dir] [-w workgroup] [-P bytes] [-O ip/port/regex]\fR
 .SH DESCRIPTION
 gatling is a HTTP and FTP server.  It will export the current working
@@ -37,6 +37,10 @@ directories to prevent accidental upload permission, and the files will
 not be world readable (use \fB-a\fR if you want them world readable).
 Gatling will only allow downloads of world readable files, that's why
 this switch is important.
+
+Use \fB-l\fR to make gatling always ask for FTP passwords.  Normally
+gatling does not, which confuses some stupid clients.  This option makes
+gatling ask for (and ignore) a password.
 
 Use \fB-d\fR to enable directory index generation for HTTP (listing
 directories is always possible in FTP), \fB-D\fR to disable.  It is
