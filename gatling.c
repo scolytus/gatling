@@ -377,7 +377,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     /* Damn.  Directory. */
     if (filename[1] && chdir(filename+1)==-1) return -1;
     h->mimetype="text/html";
-    if (!io_readfile(&fd,filename="index.html")) {
+    if (!io_readfile(&fd,"index.html")) {
       DIR* d;
       if (!directory_index) return -1;
       if (!(d=opendir("."))) return -1;
@@ -414,7 +414,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     }
     if (doesbzip2) {
       int64 gfd;
-      if (io_readfile(&gfd,filename="index.html.bz2")) {
+      if (io_readfile(&gfd,"index.html.bz2")) {
 	io_close(fd);
 	fd=gfd;
 	h->encoding=BZIP2;
@@ -422,7 +422,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     }
     if (doesgzip) {
       int64 gfd;
-      if (io_readfile(&gfd,filename="index.html.gz")) {
+      if (io_readfile(&gfd,"index.html.gz")) {
 	io_close(fd);
 	fd=gfd;
 	h->encoding=GZIP;
