@@ -637,7 +637,7 @@ rangeerror:
 	if (ss.st_mtime<=ims) {
 	  c+=fmt_str(c,"HTTP/1.1 304 Not Changed");
 	  head=1;
-	  io_close(fd);
+	  io_close(fd); fd=-1;
 	} else
 	  c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
 
