@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <utime.h>
 #include <sys/uio.h>
+#include <sys/stat.h>
+#include "havealloca.h"
 
 static void carp(const char* routine) {
   buffer_puts(buffer_2,"dl: ");
@@ -131,13 +133,14 @@ static stralloc ftpresponse;
 
 static int readftpresponse(buffer* b) {
   char c;
-  int i,res,cont=0,num=0;
+  int i,res,cont=0,num;
   if (!stralloc_copys(&ftpresponse,"")) panic("malloc");
   for (i=res=0; i<3; ++i) {
     if (buffer_getc(b,&c)!=1) panic("ftp command response read error");
     if (c<'0' || c>'9') panic("invalid ftp command response\n");
     res=res*10+c-'0';
   }
+  num=3;
   for (i=3; ; ++i) {
     if (buffer_getc(b,&c)!=1) panic("ftp command response read error");
     if (!stralloc_append(&ftpresponse,&c)) panic("malloc");
