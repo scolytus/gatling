@@ -5,12 +5,13 @@ all: gatling
 
 # comment out the following line if you don't want to build with the
 # diet libc (http://www.fefe.de/dietlibc/).
-DIET=/opt/diet/bin/diet #-Os
+DIET=/opt/diet/bin/diet -Os
 CC=gcc
-CFLAGS=-pipe -Wall -g #-O2 -fomit-frame-pointer
+CFLAGS=-pipe -Wall -O2 -fomit-frame-pointer
+LDFLAGS=-s
 
 gatling: gatling.o
-	$(DIET) $(CC) -o $@ $^ -lowfat
+	$(DIET) $(CC) $(LDFLAGS) -o $@ $^ -lowfat
 
 %.o: %.c
 	$(DIET) $(CC) -c $< -o $@ -I. $(CFLAGS)

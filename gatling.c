@@ -455,7 +455,7 @@ int main(int argc,char* argv[]) {
       directory_index=1;
       break;
     case 'h':
-      buffer_puts(buffer_2,
+      buffer_putsflush(buffer_2,
 		  "usage: gatling [-hvVtdD] [-i bind-to-ip] [-p bind-to-port]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
@@ -467,6 +467,7 @@ int main(int argc,char* argv[]) {
 		  "\t-D\tdo not generate directory index\n"
 		  "\t\t(default is -d unless in virtual hosting mode)\n"
 		  );
+      return 0;
     case '?':
       break;
     }
