@@ -237,7 +237,7 @@ usage:
     {
       int i;
       i=fmt_str(request,"GET ");
-      i+=fmt_urlencoded(request+i,c,strlen(c));
+      i+=fmt_urlencoded(request+i,c,str_len(c));
       i+=fmt_str(request+i," HTTP/1.0\r\nHost: ");
       i+=fmt_str(request+i,host);
       i+=fmt_str(request+i,":");
