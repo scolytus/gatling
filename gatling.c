@@ -4,7 +4,7 @@
 /* #define DEBUG to enable more verbose debug messages for tracking fd
  * leaks */
 /* #define DEBUG */
-/* #define FORKSLAVE */
+#define SUPPORT_CGI
 
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
@@ -42,6 +42,7 @@
 #include "version.h"
 #include <assert.h>
 #include <fnmatch.h>
+#include <sys/wait.h>
 #ifdef SUPPORT_SMB
 #include <iconv.h>
 #endif
@@ -85,7 +86,7 @@ static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 #include <zlib.h>
 #endif
 
-#ifdef FORKSLAVE
+#ifdef SUPPORT_CGI
 static int forksock[2];
 #endif
 
@@ -177,7 +178,7 @@ struct http_data {
   io_batch iob;
   unsigned char myip[16];	/* this is needed for virtual hosting */
   uint32 myscope_id;		/* in the absence of a Host header */
-  uint16 myport;
+  uint16 myport,peerport;
   uint16 destport;	/* port on remote system, used for active FTP */
   char* hdrbuf,* bodybuf;
   const char *mimetype;
@@ -195,10 +196,12 @@ struct http_data {
   uint64 sent_until,prefetched_until;
 #ifdef SUPPORT_PROXY
   uint64 still_to_copy;	/* for POST requests */
+  int havefirst;	/* first read contains cgi header */
+  char* oldheader;	/* old, unmodified request */
 #endif
 };
 
-#ifdef SUPPORT_PROXY
+#if defined(SUPPORT_PROXY) || defined(SUPPORT_CGI)
 /* You configure a list of regular expressions, and if a request matches
  * one of them, the request is forwarded to some other IP:port.  You can
  * run another httpd there that can handle CGI, PHP, JSP and whatnot. */
@@ -211,7 +214,27 @@ struct cgi_proxy {
 }* cgis;
 struct cgi_proxy* last;
 
+/* if port==0 then execute the CGI locally */
+#endif
+
+#ifdef SUPPORT_CGI
 static int add_cgi(const char* c) {
+  struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
+  byte_zero(x,sizeof(struct cgi_proxy));
+  if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) {
+    free(x);
+    return -1;
+  }
+  if (!last)
+    cgis=last=x;
+  else
+    last->next=x; last=x;
+  return 0;
+}
+#endif
+
+#ifdef SUPPORT_PROXY
+static int add_proxy(const char* c) {
   struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
   int i;
   byte_zero(x,sizeof(struct cgi_proxy));
@@ -231,46 +254,127 @@ static int add_cgi(const char* c) {
 
 static char* http_header(struct http_data* r,char* h);
 int buffer_putlogstr(buffer* b,const char* s);
+void httperror(struct http_data* r,const char* title,const char* message);
 
-static int proxy_connection(int sockfd,const char* c) {
+static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d) {
   struct cgi_proxy* x=cgis;
   struct stat ss;
   if (stat(".proxy",&ss)==-1) return -3;
   while (x) {
     if (regexec(&x->r,c,0,0,0)==0) {
+      /* if the port is zero, then use local execution proxy mode instead */
       int s;
       struct http_data* h;
 
       if (!(h=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
-      s=socket_tcp6();
-      if (s==-1) return -1;
-      if (!io_fd(s)) {
-punt:
-	free(h);
-	io_close(s);
-	return -1;
-      }
-      io_eagain(s);
-      if (socket_connect6(s,x->ip,x->port,x->scope_id)==-1)
-	if (errno!=EINPROGRESS)
-	  goto punt;
-      if (logging) {
-	char tmp[100];
-	buffer_puts(buffer_1,"proxy_connect ");
-	buffer_putulong(buffer_1,sockfd);
-	buffer_putspace(buffer_1);
-	buffer_putulong(buffer_1,s);
-	buffer_putspace(buffer_1);
-	buffer_put(buffer_1,tmp,fmt_ip6ifc(tmp,x->ip,x->scope_id));
-	buffer_putspace(buffer_1);
-	buffer_put(buffer_1,tmp,fmt_ulong(tmp,x->port));
-	buffer_putspace(buffer_1);
-	buffer_putlogstr(buffer_1,c);
-	buffer_putnlflush(buffer_1);
-      }
       byte_zero(h,sizeof(struct http_data));
-      h->t=PROXYSLAVE;
+
+      if (logging) {
+	char buf[IP6_FMT+10];
+	char* tmp;
+	{
+	  int x;
+	  x=fmt_ip6c(buf,h->myip);
+	  x+=fmt_str(buf+x,"/");
+	  x+=fmt_ulong(buf+x,h->myport);
+	  buf[x]=0;
+	}
+	tmp=array_start(&d->r);
+	switch (*tmp) {
+	case 'H': buffer_puts(buffer_1,"HEAD"); break;
+	case 'G': buffer_puts(buffer_1,"GET"); break;
+	case 'P': buffer_puts(buffer_1,"POST"); break;
+	}
+	buffer_puts(buffer_1,x->port?"/PROXY ":"/CGI ");
+	buffer_putulong(buffer_1,sockfd);
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,c);
+	buffer_puts(buffer_1," 0 ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(d,"User-Agent"))?tmp:"[no_user_agent]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(d,"Referer"))?tmp:"[no_referrer]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(d,"Host"))?tmp:buf);
+	buffer_putsflush(buffer_1,"\n");
+      }
+
+      if (x->port) {
+	/* proxy mode */
+	h->t=PROXYSLAVE;
+	s=socket_tcp6();
+	if (s==-1) return -1;
+	if (!io_fd(s)) {
+  punt:
+	  free(h);
+	  io_close(s);
+	  return -1;
+	}
+	io_eagain(s);
+	if (socket_connect6(s,x->ip,x->port,x->scope_id)==-1)
+	  if (errno!=EINPROGRESS)
+	    goto punt;
+	if (logging) {
+	  char tmp[100];
+	  buffer_puts(buffer_1,"proxy_connect ");
+	  buffer_putulong(buffer_1,sockfd);
+	  buffer_putspace(buffer_1);
+	  buffer_putulong(buffer_1,s);
+	  buffer_putspace(buffer_1);
+	  buffer_put(buffer_1,tmp,fmt_ip6ifc(tmp,x->ip,x->scope_id));
+	  buffer_putspace(buffer_1);
+	  buffer_put(buffer_1,tmp,fmt_ulong(tmp,x->port));
+	  buffer_putspace(buffer_1);
+	  buffer_putlogstr(buffer_1,c);
+	  buffer_putnlflush(buffer_1);
+	}
+	io_wantwrite(s);
+      } else {
+	/* local CGI mode */
+	uint32 a,len; uint16 b;
+	pid_t pid;
+	char* req=array_start(&d->r); /* "GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n"; */
+	char ra[IP6_FMT];
+	req[strlen(req)]=' ';
+	d->keepalive=0;
+	ra[fmt_ip6c(ra,d->peerip)]=0;
+	a=strlen(req); write(forksock[0],&a,4);
+	a=strlen(dir); write(forksock[0],&a,4);
+	a=strlen(ra); write(forksock[0],&a,4);
+	write(forksock[0],req,strlen(req));
+	write(forksock[0],dir,strlen(dir));
+	write(forksock[0],ra,strlen(ra));
+	b=d->peerport; write(forksock[0],&b,2);
+	b=d->myport; write(forksock[0],&b,2);
+
+	read(forksock[0],&a,4);		/* code; 0 means OK */
+	read(forksock[0],&len,4);	/* length of error message */
+	read(forksock[0],&pid,sizeof(pid));
+	if (len) {
+	  char* c=alloca(len+1);
+	  read(forksock[0],c,len);
+	  httperror(d,"502 Gateway Broken",c);
+	  free(h);
+	  return -1;
+	} else {
+	  s=io_receivefd(forksock[0]);
+	  if (s==-1) {
+	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
+	    return -1;
+	  }
+	}
+	h->t=PROXYPOST;
+	if (logging) {
+	  buffer_puts(buffer_1,"cgi_fork ");
+	  buffer_putulong(buffer_1,sockfd);
+	  buffer_putspace(buffer_1);
+	  buffer_putulong(buffer_1,s);
+	  buffer_putspace(buffer_1);
+	  buffer_putulong(buffer_1,pid);
+	  buffer_putnlflush(buffer_1);
+	}
+      }
       h->buddy=sockfd;
+      d->buddy=s;
       io_setcookie(s,h);
       {
 	struct http_data* x=io_getcookie(sockfd);
@@ -283,11 +387,16 @@ punt:
 	  x->still_to_copy=0;
 //	  printf("still_to_copy init: %p %llu <-> %p %llu\n",x,x->still_to_copy,h,h->still_to_copy);
 	  byte_copy(h->peerip,16,x->peerip);
+	  if (!h->still_to_copy && h->t==PROXYPOST) {
+	    io_wantread(s);
+	    io_dontwantwrite(s);
+	    io_dontwantread(sockfd);
+	    io_dontwantwrite(sockfd);
+	  }
 	}
       }
       if (timeout_secs)
 	io_timeout(s,next);
-      io_wantwrite(s);
       return s;
     }
     x=x->next;
@@ -326,6 +435,8 @@ int proxy_write_header(int sockfd,struct http_data* h) {
   return 0;
 }
 
+static void cleanup(int64 fd);
+
 int proxy_is_readable(int sockfd,struct http_data* H) {
   char buf[8192];
   int i;
@@ -335,12 +446,40 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
   i=read(sockfd,buf,sizeof(buf));
   if (i==-1) return -1;
   if (i==0) {
-    if (peer) peer->buddy=-1;
+    if (logging) {
+      buffer_puts(buffer_1,"cgiproxy_read0 ");
+      buffer_putulong(buffer_1,sockfd);
+      buffer_putnlflush(buffer_1);
+    }
+    if (peer) {
+      peer->buddy=-1;
+      if (peer->iob.bytesleft==0) {
+	cleanup(sockfd);
+	return -3;
+      }
+    }
     H->buddy=-1;
-    res=-3;
+    io_wantwrite(H->buddy);
+    io_close(sockfd);
+    return -3;
   } else {
-    x=malloc(i);
-    byte_copy(x,i,buf);
+    int needheader=0;
+    if (!H->havefirst) {
+      H->havefirst=1;
+      if (byte_diff(buf,5,"HTTP/"))
+	/* No "HTTP/1.0 200 OK", need to write our own header. */
+	needheader=1;
+    }
+    if (needheader) {
+      int j;
+      x=malloc(i+100);
+      j=fmt_str(x,"HTTP/1.0 200 Here you go\r\nServer: " RELEASE "\r\n");
+      byte_copy(x+j,i,buf);
+      i+=j;
+    } else {
+      x=malloc(i);
+      byte_copy(x,i,buf);
+    }
     if (peer) iob_addbuf_free(&peer->iob,x,i);
   }
   io_dontwantread(sockfd);
@@ -737,11 +876,14 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
 }
 
 int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd) {
+  char* dir=0;
   char* s;
   char* args;
   unsigned long i;
   int64 fd;
   int doesgzip,doesbzip2;
+
+  char* Filename;
 
   doesgzip=0; doesbzip2=0; h->encoding=NORMAL;
   {
@@ -759,18 +901,22 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   args=0;
   /* the file name needs to start with a / */
   if (filename[0]!='/') return -1;
+
+
   /* first, we need to strip "?.*" from the end */
   i=str_chr(filename,'?');
-  if (filename[i]=='?') { filename[i]=0; args=filename+i+1; }
+  Filename=alloca(i+5);	/* enough space for .gz and .bz2 */
+  byte_copy(Filename,i+1,filename);
+  if (Filename[i]=='?') { Filename[i]=0; args=filename+i+1; }
   /* second, we need to un-urlencode the file name */
   /* we can do it in-place, the decoded string can never be longer */
-  scan_urlencoded(filename,filename,&i);
-  filename[i]=0;
+  scan_urlencoded(Filename,Filename,&i);
+  Filename[i]=0;
   /* third, change /. to /: so .procmailrc is visible in ls as
    * :procmailrc, and it also thwarts most web root escape attacks */
-  for (i=0; filename[i]; ++i)
-    if (filename[i]=='/' && filename[i+1]=='.')
-      filename[i+1]=':';
+  for (i=0; Filename[i]; ++i)
+    if (Filename[i]=='/' && Filename[i+1]=='.')
+      Filename[i+1]=':';
   /* fourth, try to do some el-cheapo virtual hosting */
   if (!(s=http_header(h,"Host"))) {
     /* construct artificial Host header from IP */
@@ -797,14 +943,15 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   }
   fchdir(origdir);
   if (virtual_hosts>=0) {
-    if (chdir(s)==-1)
-      if (chdir("default")==-1)
+    if (chdir(dir=s)==-1)
+      if (chdir(dir="default")==-1)
 	if (virtual_hosts==1)
 	  return -1;
   }
-  while (filename[1]=='/') ++filename;
+  while (Filename[1]=='/') ++Filename;
+
 #ifdef SUPPORT_PROXY
-  switch ((i=proxy_connection(sockfd,filename))) {
+  switch ((i=proxy_connection(sockfd,Filename,dir,h))) {
   case -3: break;
   case -1: return -1;
   default:
@@ -816,15 +963,15 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 #else
   (void)sockfd;		/* shut up gcc warning about unused variable */
 #endif
-  if (filename[(i=str_len(filename))-1] == '/') {
+  if (Filename[(i=str_len(Filename))-1] == '/') {
     /* Damn.  Directory. */
-    if (filename[1] && chdir(filename+1)==-1) return -1;
+    if (Filename[1] && chdir(Filename+1)==-1) return -1;
     h->mimetype="text/html";
     if (!open_for_reading(&fd,"index.html",ss)) {
       DIR* d;
       if (!directory_index) return -1;
       if (!(d=opendir("."))) return -1;
-      if (!http_dirlisting(h,d,filename,args)) return -1;
+      if (!http_dirlisting(h,d,Filename,args)) return -1;
 #ifdef USE_ZLIB
       if (doesgzip) {
 	uLongf destlen=h->blen+30+h->blen/1000;
@@ -872,12 +1019,12 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       }
     }
   } else {
-    h->mimetype=mimetype(filename);
-    if (!open_for_reading(&fd,filename+1,ss)) {
+    h->mimetype=mimetype(Filename);
+    if (!open_for_reading(&fd,Filename+1,ss)) {
       if (errno==ENOENT) {
 	char buf[2048];
 	int i;
-	if ((i=readlink(filename+1,buf,sizeof(buf)))!=-1) {
+	if ((i=readlink(Filename+1,buf,sizeof(buf)))!=-1) {
 	  buf[i]=0;
 	  if (strstr(buf,"://")) {
 	    h->bodybuf=malloc(strlen(buf)+300);
@@ -912,33 +1059,30 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       buffer_putspace(buffer_1);
       buffer_putulong(buffer_1,fd);
       buffer_putspace(buffer_1);
-      buffer_puts(buffer_1,filename);
+      buffer_puts(buffer_1,Filename);
       buffer_putnlflush(buffer_1);
     }
 #endif
     if (doesgzip || doesbzip2) {
       int64 gfd;
-      char* tmpfilename=alloca(str_len(filename)+5);
+      i=str_len(Filename);
       if (doesbzip2) {
-	i=fmt_str(tmpfilename,filename+1);
-	i+=fmt_str(tmpfilename+i,".bz2");
-	tmpfilename[i]=0;
-	if (open_for_reading(&gfd,tmpfilename,ss)) {
+	Filename[i+fmt_str(Filename+i,".bz2")]=0;
+	if (open_for_reading(&gfd,Filename,ss)) {
 	  io_close(fd);
 	  fd=gfd;
 	  h->encoding=BZIP2;
 	}
       }
       if (doesgzip && h->encoding==NORMAL) {
-	i=fmt_str(tmpfilename,filename+1);
-	i+=fmt_str(tmpfilename+i,".gz");
-	tmpfilename[i]=0;
-	if (open_for_reading(&gfd,tmpfilename,ss)) {
+	Filename[i+fmt_str(Filename+i,".gz")]=0;
+	if (open_for_reading(&gfd,Filename,ss)) {
 	  io_close(fd);
 	  fd=gfd;
 	  h->encoding=GZIP;
 	}
       }
+      Filename[i]=0;
     }
   }
   if (S_ISDIR(ss->st_mode)) {
@@ -1690,9 +1834,9 @@ nomem:
     {
       char buf[IP6_FMT+10];
       int x;
-      x=fmt_ip6c(buf,h->myip);
+      x=fmt_ip6c(buf,h->peerip);
       x+=fmt_str(buf+x,"/");
-      x+=fmt_ulong(buf+x,h->myport);
+      x+=fmt_ulong(buf+x,h->peerport);
       buffer_put(buffer_1,buf,x);
     }
     buffer_putnlflush(buffer_1);
@@ -2232,7 +2376,7 @@ static void cleanup(int64 fd) {
   }
 }
 
-#ifdef FORKSLAVE
+#ifdef SUPPORT_CGI
 /* gatling is expected to have 10000 file descriptors open.
  * so forking off CGIs is bound to be expensive because after the fork
  * all the file descriptors have to be closed.  So this code makes
@@ -2301,21 +2445,36 @@ void forkslave(int fd,buffer* in) {
       char* remoteaddr=alloca(ralen+1);
       char* servername,* httpversion,* httpaccept,* authtype,* contenttype,* contentlength;
       char* path_translated;
+
       if (buffer_get(in,httpreq,reqlen) == reqlen &&
 	  buffer_get(in,path,dirlen) == dirlen &&
 	  buffer_get(in,remoteaddr,ralen) == ralen &&
 	  buffer_get(in,(char*)&port,2) == 2 &&
 	  buffer_get(in,(char*)&myport,2) == 2) {
+
 	httpreq[reqlen]=0;
 	path[dirlen]=0;
 	remoteaddr[ralen]=0;
+
+#if 0
+	buffer_puts(buffer_2,"httpreq: ");
+	buffer_put(buffer_2,httpreq,reqlen);
+	buffer_puts(buffer_2,"\n\npath: ");
+	buffer_put(buffer_2,path,dirlen);
+	buffer_puts(buffer_2,"\nremoteip: ");
+	buffer_put(buffer_2,remoteaddr,ralen);
+	buffer_putnlflush(buffer_2);
+#endif
+
 	if (dirlen==0 || chdir(path)==0) {
 	  /* now find cgi */
 	  char* cginame;
+
 	  cginame=httpreq+5+(httpreq[0]=='P');
 	  while (*cginame=='/') ++cginame;
 	  for (i=0; cginame+i<httpreq+reqlen; ++i)
 	    if (cginame[i]==' ' || cginame[i]=='\r' || cginame[i]=='\n') break;
+
 	  if (cginame[i]==' ') {
 	    char* args,* pathinfo;
 	    int j,k;
@@ -2409,6 +2568,7 @@ void forkslave(int fd,buffer* in) {
 		contenttype[i+j]=0;
 	      } else
 		contenttype=0;
+
 	      x=http_header_blob(httpreq,reqlen,"Content-Length");
 	      if (x) {
 		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
@@ -2428,9 +2588,12 @@ void forkslave(int fd,buffer* in) {
 		  msg="vfork failed!";
 		else if (r==0) {
 		  /* child */
+		  pid_t pid;
 		  code=0;
 		  write(fd,&code,4);
 		  write(fd,&code,4);
+		  pid=getpid();
+		  write(fd,&pid,sizeof(pid));
 		  if (io_passfd(fd,sock[0])==0) {
 		    char* argv[]={cginame,0};
 		    char** envp;
@@ -2523,6 +2686,10 @@ error:
   write(fd,&code,4);
   code=strlen(msg);
   write(fd,&code,4);
+  {
+    pid_t pid=0;
+    write(fd,&pid,sizeof(pid));
+  }
   write(fd,msg,code);
 }
 #endif
@@ -2565,16 +2732,13 @@ int main(int argc,char* argv[]) {
   char* chroot_to=0;
   uint64 prefetchquantum=0;
 
-#ifdef FORKSLAVE
+#ifdef SUPPORT_CGI
   if (socketpair(AF_UNIX,SOCK_STREAM,0,forksock)==-1)
     panic("socketpair");
   switch (fork()) {
   case -1:
     panic("fork");
   case 0:
-    close(forksock[1]);
-    break;
-  default:
     close(forksock[0]);
     {
       int64 savedir;
@@ -2582,17 +2746,25 @@ int main(int argc,char* argv[]) {
       if (!io_readfile(&savedir,".")) panic("open()");
       buffer_init(&fsb,read,forksock[1],fsbuf,sizeof fsbuf);
       while (1) {
+	pid_t r;
+	do {
+	  r=waitpid(-1,0,WNOHANG);
+	} while (r!=0 && r!=-1);
 	forkslave(forksock[1],&fsb);
 	fchdir(savedir);
       }
     }
+    break;
+  default:
+    close(forksock[1]);
+    break;
   }
 
 #if 0
   {	/* debug test for the forkslave code */
     int64 fd;
     uint32 a; uint16 b;
-    char* req="GET /t2.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n";
+    char* req="GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n";
     char* dir="default";
     char* ra="127.0.0.1";
     a=strlen(req); write(forksock[0],&a,4);
@@ -2616,6 +2788,7 @@ int main(int argc,char* argv[]) {
       buffer_put(buffer_1,c,a);
       buffer_putnlflush(buffer_1);
     } else {
+      read(forksock[0],&a,4); /* PID */
       fd=io_receivefd(forksock[0]);
       if (fd==-1)
 	buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
@@ -2669,7 +2842,7 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -2743,12 +2916,21 @@ int main(int argc,char* argv[]) {
 	str_copy(workgroup,optarg);
       break;
 #endif
-#ifdef SUPPORT_PROXY
-    case 'O':
+#ifdef SUPPORT_CGI
+    case 'C':
       if (add_cgi(optarg)) {
 	buffer_puts(buffer_2,"gatling: could not parse `");
 	buffer_puts(buffer_2,optarg);
-	buffer_putsflush(buffer_2,"´: expected something like `127.0.0.1/8001/cgi$´\n");
+	buffer_putsflush(buffer_2,"': expected something like `\\.cgi$'\n");
+      }
+      break;
+#endif
+#ifdef SUPPORT_PROXY
+    case 'O':
+      if (add_proxy(optarg)) {
+	buffer_puts(buffer_2,"gatling: could not parse `");
+	buffer_puts(buffer_2,optarg);
+	buffer_putsflush(buffer_2,"': expected something like `127.0.0.1/8001/\\.jsp$'\n");
       }
       break;
 #endif
@@ -2775,8 +2957,11 @@ usage:
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  "\t-P n\tenable experimental prefetching code (may actually be slower)\n"
+#ifdef SUPPORT_CGI
+		  "\t-C regex\tregex for local CGI execution (\"\\.cgi\")\n"
+#endif
 #ifdef SUPPORT_PROXY
-		  "\t-O ip/port/regex\tPROXY proxy\n"
+		  "\t-O ip/port/regex\tregex for proxy mode (\"127.0.0.1/8001/\\.jsp$\")\n"
 #endif
 #ifdef SUPPORT_SMB
 		  "\t-w name\tset SMB workgroup\n"
@@ -2910,13 +3095,13 @@ usage:
   {
     char buf[IP6_FMT];
     buffer_puts(buffer_1,"starting_up 0 ");
-    buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
+    buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
     buffer_puts(buffer_1," ");
     buffer_putulong(buffer_1,port);
     buffer_putnlflush(buffer_1);
     if (f!=-1) {
       buffer_puts(buffer_1,"start_ftp 0 ");
-      buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
+      buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
       buffer_puts(buffer_1," ");
       buffer_putulong(buffer_1,fport);
       buffer_putnlflush(buffer_1);
@@ -2924,7 +3109,7 @@ usage:
 #ifdef SUPPORT_SMB
     if (smbs!=-1) {
       buffer_puts(buffer_1,"start_smb 0 ");
-      buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
+      buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
       buffer_puts(buffer_1," ");
       buffer_putulong(buffer_1,sport);
       buffer_putnlflush(buffer_1);
@@ -3215,7 +3400,7 @@ pasverror:
 	      buffer_puts(buffer_1,"accept ");
 	      buffer_putulong(buffer_1,n);
 	      buffer_puts(buffer_1," ");
-	      buffer_put(buffer_1,buf,byte_equal(ip,12,V4mappedprefix)?fmt_ip4(buf,ip+12):fmt_ip6(buf,ip));
+	      buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
 	      buffer_puts(buffer_1," ");
 	      buffer_putulong(buffer_1,port);
 	      buffer_puts(buffer_1," ");
@@ -3247,6 +3432,7 @@ pasverror:
 	      socket_local6(n,h->myip,&h->myport,0);
 #endif
 	      byte_copy(h->peerip,16,ip);
+	      h->peerport=port;
 	      h->myscope_id=scope_id;
 	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
 		h->t=HTTPREQUEST;
@@ -3414,6 +3600,7 @@ pipeline:
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
       int64 r;
+
 #ifdef SUPPORT_FTP
       if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
 	if (ftptimeout_secs)
@@ -3476,6 +3663,7 @@ pipeline:
 	    long alen=array_bytes(&H->r);
 	    long l;
 	    if (alen>H->still_to_copy) alen=H->still_to_copy;
+	    if (alen==0) goto nothingmoretocopy;
 	    l=write(i,c,alen);
 	    if (l<1) {
 	      /* ARGH!  Proxy crashed! *groan* */
@@ -3500,6 +3688,7 @@ pipeline:
 		io_dontwantwrite(i);
 	      if (h->still_to_copy) {
 		/* we got all we asked for */
+nothingmoretocopy:
 		io_dontwantwrite(i);
 		io_wantread(i);
 		io_dontwantread(h->buddy);
@@ -3590,7 +3779,7 @@ httpposthandler:
 	    buffer_puts(buffer_1,"port_connect ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putspace(buffer_1);
-	    buffer_put(buffer_1,buf,fmt_ip6(buf,h->peerip));
+	    buffer_put(buffer_1,buf,fmt_ip6c(buf,h->peerip));
 	    buffer_putspace(buffer_1);
 	    buffer_put(buffer_1,buf,fmt_ulong(buf,h->destport));
 	    buffer_putnlflush(buffer_1);
@@ -3643,7 +3832,7 @@ httpposthandler:
 	  } else {
 #ifdef SUPPORT_PROXY
 	    if (h->t == HTTPREQUEST && h->buddy!=-1) {
-	      io_dontwantwrite(s);
+	      io_dontwantwrite(i);
 	      io_wantread(h->buddy);
 	      continue;
 	    }

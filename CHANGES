@@ -8,6 +8,7 @@
   add resume support to dl
   support POST for CGI proxy
   fix HEAD fd leak (oops)
+  experimental CGI support
 
 0.4:
   add primitive FTP support (default: enabled; disable with -F!)
