@@ -1,3 +1,6 @@
+0.5:
+  FastCGI
+
 0.4:
   add primitive FTP support (default: enabled; disable with -F!)
   add pipelining support (for both FTP and HTTP)
