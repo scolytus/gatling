@@ -117,6 +117,7 @@ static int open_for_reading(int64* fd,const char* name) {
     struct stat ss;
     if (fstat(*fd,&ss)==-1 || !(ss.st_mode&S_IROTH)) {
       close(*fd);
+      *fd=-1;
       return 0;
     }
     return 1;
@@ -914,11 +915,11 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
 
   if (ftp_vhost(h)) return -1;
 
-  errno=0; fd=-1; h->hdrbuf="550 Not a regular file.\r\n";
-  if (x[1])
-    if (!(forreading?open_for_reading(&fd,x+1):open_for_writing(&fd,x+1)))
-      if (errno!=EISDIR)
-	h->hdrbuf=forreading?"425 File not found.\r\n":"425 You can't upload here!\r\n";
+  errno=0; fd=-1;
+  h->hdrbuf=forreading?"550 File not found.\r\n":"550 You can't upload here!\r\n";
+  if (x[1]) {
+    if (forreading) open_for_reading(&fd,x+1); else open_for_writing(&fd,x+1);
+  }
 
   if (logging && what) {
     buffer_puts(buffer_1,what);
@@ -929,7 +930,6 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
     buffer_putlogstr(buffer_1,x[1]?x+1:"/");
     buffer_putspace(buffer_1);
   }
-
   return fd;
 }
 
@@ -955,14 +955,12 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
   if (b->filefd!=-1) { io_close(b->filefd); b->filefd=-1; }
   b->filefd=ftp_open(h,s,forwriting^1,sock,forwriting?"STOR":"RETR");
   if (b->filefd==-1) {
-
     if (logging) {
       buffer_putulonglong(buffer_1,0);
       buffer_putspace(buffer_1);
       buffer_putlogstr(buffer_1,buf);
       buffer_putnlflush(buffer_1);
     }
-
     return -1;
   }
 
@@ -1301,7 +1299,7 @@ static int ftp_cwd(struct http_data* h,char* s) {
     return -1;
 
   if (x[1] && chdir(x+1)) {
-    h->hdrbuf="425 directory not found.\r\n";
+    h->hdrbuf="525 directory not found.\r\n";
     return -1;
   }
   y=realloc(h->ftppath,l+1);
@@ -1449,7 +1447,7 @@ syntaxerror:
       if (c[r=scan_ulong(c,&l)]!=',' || l>255) goto syntaxerror;
       c+=r+1;
       port=l<<8;
-      if (c[r=scan_ulong(c,&l)]!='\r' || l>255) goto syntaxerror;
+      r=scan_ulong(c,&l); if (l>255) goto syntaxerror;
       port+=l;
     }
     h->buddy=socket_tcp6();
@@ -2211,9 +2209,10 @@ ioerror:
 	  if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
 	    if (ftptimeout_secs)
 	      io_timeout(i,nextftp);
-	  } else
+	  } else {
 	    if (timeout_secs)
 	      io_timeout(i,next);
+	  }
 
 	  if (H->t==FTPSLAVE) {
 	    /* receive an upload */
@@ -2256,10 +2255,14 @@ pipeline:
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
       int64 r;
-      if (timeout_secs) {
+      if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
+	if (ftptimeout_secs)
+	  io_timeout(i,nextftp);
+      } else if (timeout_secs) {
 	io_timeout(i,next);
-	if (h->t==FTPSLAVE)
+	if (h->t==FTPSLAVE) {
 	  io_timeout(h->buddy,nextftp);
+	}
       }
       r=iob_send(i,&h->iob);
       if (r==-1)
