@@ -602,7 +602,9 @@ e404:
 	  c+=fmt_str(c,"\r\n\r\n");
 	  h->hlen=c-h->hdrbuf;
 	  iob_addbuf_free(&h->iob,h->hdrbuf,h->hlen);
-	  if (!head)
+	  if (head)
+	    free(h->bodybuf);
+	  else
 	    iob_addbuf_free(&h->iob,h->bodybuf,h->blen);
 	}
       } else {
@@ -610,6 +612,7 @@ e404:
 	  io_close(fd);
 	  goto e404;
 	}
+	h->filefd=fd;
 	range_first=0; range_last=ss.st_size;
 	if ((c=http_header(h,"If-Modified-Since")))
 	  if ((unsigned char)(c[scan_httpdate(c,&ims)])>' ')
@@ -628,11 +631,18 @@ e404:
 	      }
 	    } else {
 rangeerror:
+	      io_close(h->filefd); h->filefd=-1;
 	      httperror(h,"416 Bad Range","The requested range can not be satisfied.");
 	      goto fini;
 	    }
 	  }
 	}
+	if (range_last<range_first) {
+	  /* rfc2616, page 123 */
+	  range_first=0; range_last=ss.st_size;
+	}
+	if (range_last>ss.st_size) range_last=ss.st_size;
+
 	c=h->hdrbuf=(char*)malloc(500);
 	if (ss.st_mtime<=ims) {
 	  c+=fmt_str(c,"HTTP/1.1 304 Not Changed");
@@ -662,7 +672,7 @@ rangeerror:
 	  c+=fmt_str(c,"/");
 	  c+=fmt_ulonglong(c,ss.st_size);
 	}
-	if (range_last<range_first) {
+	if (range_first>ss.st_size) {
 	  free(c);
 	  httperror(h,"416 Bad Range","The requested range can not be satisfied.");
 	  buffer_puts(buffer_1,"error_416 ");
@@ -673,7 +683,6 @@ rangeerror:
 	  iob_addbuf_free(&h->iob,h->hdrbuf,c - h->hdrbuf);
 	  if (!head)
 	    iob_addfile(&h->iob,fd,range_first,range_last-range_first);
-	  h->filefd=fd;
 	  if (logging) {
 	    if (h->hdrbuf[9]=='3') {
 	      buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
