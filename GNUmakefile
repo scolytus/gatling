@@ -3,7 +3,7 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-all: gatling httpbench dl bindbench
+all: gatling httpbench dl bindbench mmapbench
 
 CC=gcc
 CFLAGS=-pipe -Wall
@@ -58,6 +58,9 @@ dl: dl.o
 bindbench: bindbench.o
 	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
 
+mmapbench: mmapbench.o
+	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
+
 gatling.o: version.h
 
 version.h: CHANGES
@@ -74,4 +77,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling httpbench dl *.o version.h
+	rm -f gatling httpbench bindbench mmapbench dl *.o version.h
