@@ -49,6 +49,7 @@
 #ifdef SUPPORT_PROXY
 #include <regex.h>
 #endif
+#include <limits.h>
 #include "havealloca.h"
 
 unsigned long timeout_secs=23;
