@@ -1161,6 +1161,11 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   array a,b,c;
   de* ab;
 
+  if (h->buddy==-1 || !io_getcookie(h->buddy)) {
+    h->hdrbuf="425 Need data connection!?\r\n";
+    return -1;
+  }
+
   i=str_len(s);
   if (i>1) {
     if (s[i-1]=='\n') --i;
@@ -1264,6 +1269,7 @@ nomem:
   if (array_failed(&c)) goto nomem;
   {
     struct http_data* b=io_getcookie(h->buddy);
+    assert(b);
     if (b) {
       iob_addbuf_free(&b->iob,array_start(&c),array_bytes(&c));
       b->f=DOWNLOADING;
