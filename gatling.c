@@ -198,6 +198,28 @@ int sort_mtime_d(de* x,de* y) { return y->ss.st_mtime-x->ss.st_mtime; }
 int sort_size_a(de* x,de* y) { return x->ss.st_size-y->ss.st_size; }
 int sort_size_d(de* x,de* y) { return y->ss.st_size-x->ss.st_size; }
 
+static inline int issafe(unsigned char c) {
+  return (c!='"' && c>=' ');
+}
+
+unsigned long fmt_urlencoded(char* dest,const char* src,unsigned long len) {
+  register const unsigned char* s=(const unsigned char*) src;
+  unsigned long written=0,i;
+  for (i=0; i<len; ++i) {
+    if (!issafe(s[i])) {
+      if (dest) {
+	dest[written]='%';
+	dest[written+1]=fmt_tohex(s[i]>>4);
+	dest[written+2]=fmt_tohex(s[i]&15);
+      }
+      written+=3;
+    } else {
+      if (dest) dest[written]=s[i]; ++written;
+    }
+  }
+  return written;
+}
+
 void catencoded(array* a,char* s) {
   unsigned int len=str_len(s);
   char* buf=alloca(fmt_urlencoded(0,s,len));
