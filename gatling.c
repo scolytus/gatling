@@ -165,6 +165,12 @@ int sort_size_d(de* x,de* y) { return y->ss.st_size-x->ss.st_size; }
 
 void catencoded(array* a,char* s) {
   unsigned int len=strlen(s);
+  char* buf=alloca(fmt_urlencoded(0,s,len));
+  array_catb(a,buf,fmt_urlencoded(buf,s,len));
+}
+
+void cathtml(array* a,char* s) {
+  unsigned int len=strlen(s);
   char* buf=alloca(fmt_html(0,s,len));
   array_catb(a,buf,fmt_html(buf,s,len));
 }
@@ -224,14 +230,22 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
   array_cats(&c,"\">Size</a>\n");
   ab=array_start(&a);
   for (i=0; i<n; ++i) {
+    char* name=base+ab[i].name;
     char buf[31];
     int j;
     struct tm* x=localtime(&ab[i].ss.st_mtime);
     static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    if (name[0]=='.') {
+      if (name[1]==0) continue; /* skip "." */
+      if (name[1]!='.' || name[2]!=0)	/* skip dot-files */
+	continue;
+    }
+    if (name[0]==':') name[0]='.';
     array_cats(&c,"<tr><td><a href=\"");
     catencoded(&c,base+ab[i].name);
+    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
     array_cats(&c,"\">");
-    array_cats(&c,base+ab[i].name);
+    cathtml(&c,base+ab[i].name);
     array_cats(&c,"</a><td>");
 
     j=fmt_2digits(buf,x->tm_mday);
