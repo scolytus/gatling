@@ -501,7 +501,7 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     j+=fmt_2digits(buf+j,x->tm_min);
 
     array_catb(&c,buf,j);
-    array_cats(&c,"<td>");
+    array_cats(&c,"<td align=right>");
     array_catb(&c,buf,fmt_humank(buf,ab[i].ss.st_size));
   }
   array_cats(&c,"</table>");
