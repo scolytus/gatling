@@ -12,3 +12,9 @@ cakey.key
 cakey.csr
 server.pem
 cakey.pem
+getrusage
+default
+tlsgatling
+smb
+logs
+results
