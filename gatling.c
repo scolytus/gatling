@@ -1030,6 +1030,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
       i=fmt_str(h->hdrbuf,"150 listening (");
     i+=fmt_ulonglong(h->hdrbuf+i,ss.st_size);
     i+=fmt_str(h->hdrbuf+i," bytes)\r\n");
+    h->hdrbuf[i]=0;
   }
 
   return 0;
@@ -1452,7 +1453,7 @@ freecloseabort:
       } else if (c[1]=='2') {
 	if (c[3+(i=scan_ip6(c+3,ip))]!=sep || !i) goto syntaxerror;
       } else goto syntaxerror;
-      c+=i+3;
+      c+=i+4;
       if (c[i=scan_ushort(c,&port)]!=sep || !i) goto syntaxerror;
     } else {
       /* 10,0,0,1,4,1 -> 10.0.0.1:1025 */
@@ -1516,6 +1517,7 @@ syntaxerror:
       c+=fmt_str(c,"257 \"");
       c+=fmt_str(c,h->ftppath?h->ftppath:"/");
       c+=fmt_str(c,"\" \r\n");
+      *c=0;
     } else
       h->hdrbuf="500 out of memory\r\n";
   } else if (case_starts(c,"CWD ")) {
@@ -1582,8 +1584,10 @@ ABEND:
     char* d=array_start(&h->r);
     if (c>=d && c<=d+array_bytes(&h->r))
       iob_addbuf(&h->iob,h->hdrbuf,str_len(h->hdrbuf));
-    else
+    else {
+//      printf("iob_addbuf_free -> %s\n",h->hdrbuf);
       iob_addbuf_free(&h->iob,h->hdrbuf,str_len(h->hdrbuf));
+    }
   }
   io_dontwantread(s);
   io_wantwrite(s);
