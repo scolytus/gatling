@@ -72,6 +72,9 @@ void httperror(struct http_data* r,const char* title,const char* message) {
   if (!c) {
     r->hdrbuf=oom;
     r->hlen=strlen(r->hdrbuf);
+
+    buffer_putsflush(buffer_1,"error_oom\n");
+
   } else {
     i=fmt_str(c,"HTTP/1.0 ");
     c+=fmt_str(c,title);
@@ -225,13 +228,20 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
   array_cats(&c,path);
   array_cats(&c,"</title>\n<h1>Index of ");
   array_cats(&c,path);
-  array_cats(&c,"</h1>\n<table><tr><th><a href=\"?N=");
-  array_cats(&c,sortfun==sort_name_a?"D":"A");
-  array_cats(&c,"\">Name</a><th><a href=\"?M=");
-  array_cats(&c,sortfun==sort_mtime_a?"D":"A");
-  array_cats(&c,"\">Last Modified</a><th><a href=\"?S=");
-  array_cats(&c,sortfun==sort_size_a?"D":"A");
-  array_cats(&c,"\">Size</a>\n");
+  {
+    char* tmp=http_header(h,"User-Agent");
+    if (tmp && byte_equal(tmp,5,"Wget/"))
+      array_cats(&c,"</h1>\n<table><tr><th>Name<th>Last Modified<th>Size\n");
+    else {
+      array_cats(&c,"</h1>\n<table><tr><th><a href=\"?N=");
+      array_cats(&c,sortfun==sort_name_a?"D":"A");
+      array_cats(&c,"\">Name</a><th><a href=\"?M=");
+      array_cats(&c,sortfun==sort_mtime_a?"D":"A");
+      array_cats(&c,"\">Last Modified</a><th><a href=\"?S=");
+      array_cats(&c,sortfun==sort_size_a?"D":"A");
+      array_cats(&c,"\">Size</a>\n");
+    }
+  }
   ab=array_start(&a);
   for (i=0; i<n; ++i) {
     char* name=base+ab[i].name;
@@ -279,7 +289,7 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
 int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
   char* s;
   char* args;
-  unsigned int i;
+  unsigned long i;
   int64 fd;
   args=0;
   /* the file name needs to start with a / */
@@ -310,11 +320,12 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
       int j=str_chr(s,'\r');
       /* replace port in Host: with actual port */
       if (!s[i=str_chr(s,':')] || i>j || !transproxy) {	/* add :port */
+	if (i>j) i=j;
 	tmp=alloca(i+7);
 	byte_copy(tmp,i,s);
 	tmp[i]=':'; ++i;
 	i+=fmt_ulong(tmp+i,h->myport);
-	s[i]=0;
+	tmp[i]=0;
 	s=tmp;
       }
     }
@@ -346,6 +357,15 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
   return fd;
 }
 
+int buffer_putlogstr(buffer* b,const char* s) {
+  unsigned long l=strlen(s);
+  char* x;
+  for (l=0; s[l] && s[l]!='\r' && s[l]!='\n'; ++l) ;
+  if (!l) return 0;
+  x=alloca(l);
+  return buffer_put(b,x,fmt_foldwhitespace(x,s,l));
+}
+
 void httpresponse(struct http_data* h,int64 s) {
   int head;
   char* c;
@@ -357,27 +377,58 @@ void httpresponse(struct http_data* h,int64 s) {
   if (byte_diff(c,4,"GET ") && byte_diff(c,5,"HEAD ")) {
 e400:
     httperror(h,"400 Invalid Request","This server only understands GET and HEAD.");
+
+    buffer_puts(buffer_1,"error_400 ");
+    buffer_putulong(buffer_1,s);
+    buffer_putsflush(buffer_1,"\n");
+
   } else {
     char *d;
     int64 fd;
-    struct stat s;
+    struct stat ss;
+    char* tmp;
     head=c[0]=='H';
     c+=head?5:4;
     for (d=c; *d!=' '&&*d!='\t'&&*d!='\n'&&*d!='\r'; ++d) ;
     if (*d!=' ') goto e400;
     *d=0;
     if (c[0]!='/') goto e404;
-    fd=http_openfile(h,c,&s);
+    fd=http_openfile(h,c,&ss);
     if (fd==-1) {
 e404:
       httperror(h,"404 Not Found","No such file or directory.");
+
+      buffer_puts(buffer_1,"error_404 ");
+      buffer_putulong(buffer_1,s);
+      buffer_puts(buffer_1," ");
+      buffer_putlogstr(buffer_1,c);
+      buffer_puts(buffer_1," 0 ");
+      buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+      buffer_puts(buffer_1," ");
+      buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+      buffer_putsflush(buffer_1,"\n");
+
     } else {
+      char* filename=c;
       if (fd==-2) {
 	char* c;
 	c=h->hdrbuf=(char*)malloc(250);
 	if (!c)
 	  httperror(h,"500 Sorry","Out of Memory.");
 	else {
+
+	  buffer_puts(buffer_1,head?"HEAD ":"GET ");
+	  buffer_putulong(buffer_1,s);
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,filename);
+	  buffer_puts(buffer_1," ");
+	  buffer_putulong(buffer_1,h->blen);
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	  buffer_putsflush(buffer_1,"\n");
+
 	  c+=fmt_str(c,"HTTP/1.1 200 Here you go\r\nContent-Type: text/html\r\nConnection: ");
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	  c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
@@ -389,11 +440,11 @@ e404:
 	    iob_addbuf(&h->iob,h->bodybuf,h->blen);
 	}
       } else {
-	if (fstat(fd,&s)==-1) {
+	if (fstat(fd,&ss)==-1) {
 	  io_close(fd);
 	  goto e404;
 	}
-	range_first=0; range_last=s.st_size;
+	range_first=0; range_last=ss.st_size;
 	if ((m=http_header(h,"Connection"))) {
 	  if (!header_diff(m,"keep-alive"))
 	    h->keepalive=1;
@@ -429,31 +480,54 @@ rangeerror:
 	  }
 	}
 	c=h->hdrbuf=(char*)malloc(500);
-	if (s.st_mtime<=ims) {
+	if (ss.st_mtime<=ims) {
 	  c+=fmt_str(c,"HTTP/1.1 304 Not Changed");
 	  head=1;
 	} else
 	  c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
+
 	c+=fmt_str(c,"\r\nContent-Type: ");
 	c+=fmt_str(c,m);
 	c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
 	c+=fmt_ulonglong(c,range_last-range_first);
 	c+=fmt_str(c,"\r\nLast-Modified: ");
-	c+=fmt_httpdate(c,s.st_mtime);
-	if (range_first || range_last!=s.st_size) {
+	c+=fmt_httpdate(c,ss.st_mtime);
+	if (range_first || range_last!=ss.st_size) {
 	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
 	  c+=fmt_ulonglong(c,range_first);
 	  c+=fmt_str(c,"-");
 	  c+=fmt_ulonglong(c,range_last);
 	  c+=fmt_str(c,"/");
-	  c+=fmt_ulonglong(c,s.st_size);
+	  c+=fmt_ulonglong(c,ss.st_size);
 	}
-	c+=fmt_str(c,"\r\nConnection: ");
-	c+=fmt_str(c,h->keepalive?"keep-alive":"close");
-	c+=fmt_str(c,"\r\n\r\n");
-	iob_addbuf(&h->iob,h->hdrbuf,c - h->hdrbuf);
-	if (!head)
-	  iob_addfile(&h->iob,fd,range_first,range_last);
+	if (range_last<range_first) {
+	  free(c);
+	  httperror(h,"416 Bad Range","The requested range can not be satisfied.");
+	  buffer_puts(buffer_1,"error_416 ");
+	} else {
+	  c+=fmt_str(c,"\r\nConnection: ");
+	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
+	  c+=fmt_str(c,"\r\n\r\n");
+	  iob_addbuf(&h->iob,h->hdrbuf,c - h->hdrbuf);
+	  if (!head)
+	    iob_addfile(&h->iob,fd,range_first,range_last);
+	  if (h->hdrbuf[9]=='3') {
+	    buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
+	  } else {
+	    buffer_puts(buffer_1,head?"HEAD ":"GET ");
+	  }
+	}
+
+	buffer_putulong(buffer_1,s);
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,filename);
+	buffer_puts(buffer_1," ");
+	buffer_putulong(buffer_1,range_last-range_first);
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	buffer_putsflush(buffer_1,"\n");
       }
     }
   }
@@ -547,12 +621,19 @@ int main(int argc,char* argv[]) {
     if (socket_bind6_reuse(s,ip,port=80,0)==-1)
       if (socket_bind6_reuse(s,ip,port=8000,0)==-1)
 	panic("socket_bind6_reuse");
-    buffer_puts(buffer_2,"using port ");
-    buffer_putulong(buffer_2,port);
-    buffer_putnlflush(buffer_2);
   } else
     if (socket_bind6_reuse(s,ip,8000,0)==-1)
       panic("socket_bind6_reuse");
+
+  {
+    char buf[IP6_FMT];
+    buffer_puts(buffer_1,"starting_up 0 ");
+    buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
+    buffer_puts(buffer_1," ");
+    buffer_putulong(buffer_1,port);
+    buffer_putnlflush(buffer_1);
+  }
+
   if (socket_listen(s,16)==-1)
     panic("socket_listen");
   io_nonblock(s);
@@ -567,13 +648,15 @@ int main(int argc,char* argv[]) {
 	int n;
 	while ((n=socket_accept6(s,ip,&port,&scope_id))!=-1) {
 	  char buf[IP6_FMT];
-	  buffer_puts(buffer_2,"accepted new connection from ");
-	  buffer_put(buffer_2,buf,fmt_ip6(buf,ip));
-	  buffer_puts(buffer_2,":");
-	  buffer_putulong(buffer_2,port);
-	  buffer_puts(buffer_2," (fd ");
-	  buffer_putulong(buffer_2,n);
-	  buffer_puts(buffer_2,")");
+
+	  buffer_puts(buffer_1,"accept ");
+	  buffer_putulong(buffer_1,n);
+	  buffer_puts(buffer_1," ");
+	  buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
+	  buffer_puts(buffer_1,":");
+	  buffer_putulong(buffer_1,port);
+	  buffer_putnlflush(buffer_1);
+
 	  io_nonblock(n);
 	  if (io_fd(n)) {
 	    struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
@@ -585,10 +668,8 @@ int main(int argc,char* argv[]) {
 	    } else
 	      io_close(n);
 	  } else {
-	    buffer_puts(buffer_2,", but io_fd failed.");
 	    io_close(n);
 	  }
-	  buffer_putnlflush(buffer_2);
 	}
 	if (errno==EAGAIN)
 	  io_eagain(s);
@@ -643,19 +724,29 @@ emerge:
       if (r==-1)
 	io_eagain(i);
       else if (r<=0) {
-	buffer_puts(buffer_2,"error on fd #");
-	buffer_putulong(buffer_2,i);
-	buffer_puts(buffer_2,": ");
-	buffer_puterror(buffer_2);
-	buffer_putsflush(buffer_2,", hanging up.\n");
+	if (r==-3) {
+	  buffer_puts(buffer_1,"socket_error ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_puts(buffer_1," ");
+	  buffer_puterror(buffer_1);
+	  buffer_putnlflush(buffer_1);
+	} else {
+	  buffer_puts(buffer_1,"request_done ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putnlflush(buffer_1);
+	}
 	array_trunc(&h->r);
 	iob_reset(&h->iob);
 	free(h->hdrbuf); h->hdrbuf=0;
 	if (h->keepalive) {
 	  io_dontwantwrite(i);
 	  io_wantread(i);
-	} else
+	} else {
+	  buffer_puts(buffer_1,"close ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putnlflush(buffer_1);
 	  io_close(i);
+	}
       }
     }
   }
