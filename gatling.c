@@ -3,7 +3,7 @@
 #define SUPPORT_CGI
 /* #define DEBUG to enable more verbose debug messages for tracking fd
  * leaks */
-// #define DEBUG
+#define DEBUG
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
@@ -2932,7 +2932,24 @@ pipeline:
 		byte_copy(c,alen-l,c+l);
 		array_truncate(&H->r,1,alen-l);
 		l=header_complete(H);
-		if (l) goto pipeline;
+		if (l) {
+		  if (H->t==HTTPREQUEST) {
+#ifdef DEBUG
+		    if (logging) {
+		      buffer_puts(buffer_1,"pipeline_filefd_close ");
+		      buffer_putulong(buffer_1,i);
+		      buffer_putspace(buffer_1);
+		      if (H->filefd==-1)
+			buffer_puts(buffer_1,"-1");
+		      else
+			buffer_putulong(buffer_1,H->filefd);
+		      buffer_putnlflush(buffer_1);
+		    }
+#endif
+		    if (H->filefd!=-1) io_close(H->filefd);
+		  }
+		  goto pipeline;
+		}
 	      } else
 		array_reset(&H->r);
 	    }

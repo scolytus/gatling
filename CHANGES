@@ -2,6 +2,7 @@
   CGI-through-proxy support (read README.proxy)
   SIGHUP will close server sockets but continue serving open requests
   add man page
+  fix HTTP pipelining fd leak
 
 0.4:
   add primitive FTP support (default: enabled; disable with -F!)
