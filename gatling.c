@@ -85,10 +85,10 @@ static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nCo
 
 void httperror(struct http_data* r,const char* title,const char* message) {
   char* c;
-  c=r->hdrbuf=(char*)malloc(strlen(message)+strlen(title)+250);
+  c=r->hdrbuf=(char*)malloc(strlen(message)+str_len(title)+250);
   if (!c) {
     r->hdrbuf=oom;
-    r->hlen=strlen(r->hdrbuf);
+    r->hlen=str_len(r->hdrbuf);
 
     buffer_putsflush(buffer_1,"error_oom\n");
 
@@ -98,7 +98,7 @@ void httperror(struct http_data* r,const char* title,const char* message) {
     c+=fmt_str(c,"\r\nContent-Type: text/html\r\nConnection: ");
     c+=fmt_str(c,r->keepalive?"keep-alive":"close");
     c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
-    c+=fmt_ulong(c,strlen(message)+strlen(title)+16-4);
+    c+=fmt_ulong(c,str_len(message)+str_len(title)+16-4);
     c+=fmt_str(c,"\r\n\r\n<title>");
     c+=fmt_str(c,title+4);
     c+=fmt_str(c,"</title>\n");
@@ -167,7 +167,7 @@ int header_diff(const char* s,const char* t) {
 char* http_header(struct http_data* r,char* h) {
   long i;
   long l=array_bytes(&r->r);
-  long sl=strlen(h);
+  long sl=str_len(h);
   char* c=array_start(&r->r);
   for (i=0; i+sl+2<l; ++i)
     if (c[i]=='\n' && case_equalb(c+i+1,sl,h) && c[i+sl+1]==':') {
@@ -192,13 +192,13 @@ int sort_size_a(de* x,de* y) { return x->ss.st_size-y->ss.st_size; }
 int sort_size_d(de* x,de* y) { return y->ss.st_size-x->ss.st_size; }
 
 void catencoded(array* a,char* s) {
-  unsigned int len=strlen(s);
+  unsigned int len=str_len(s);
   char* buf=alloca(fmt_urlencoded(0,s,len));
   array_catb(a,buf,fmt_urlencoded(buf,s,len));
 }
 
 void cathtml(array* a,char* s) {
-  unsigned int len=strlen(s);
+  unsigned int len=str_len(s);
   char* buf=alloca(fmt_html(0,s,len));
   array_catb(a,buf,fmt_html(buf,s,len));
 }
@@ -225,7 +225,7 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     x->name=o;
     if (lstat(d->d_name,&x->ss)==-1) { array_fail(&b); break; }
     array_cats0(&b,d->d_name);
-    o+=strlen(d->d_name)+1;
+    o+=str_len(d->d_name)+1;
     ++n;
   }
   closedir(D);
@@ -376,7 +376,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
 	if (virtual_hosts==1)
 	  return -1;
   }
-  if (filename[(i=strlen(filename))-1] == '/') {
+  if (filename[(i=str_len(filename))-1] == '/') {
     /* Damn.  Directory. */
     if (filename[1] && chdir(filename+1)==-1) return -1;
     h->mimetype="text/html";
@@ -437,7 +437,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
       return -1;
     if (doesgzip || doesbzip2) {
       int64 gfd;
-      char* tmpfilename=alloca(strlen(filename)+5);
+      char* tmpfilename=alloca(str_len(filename)+5);
       if (doesbzip2) {
 	i=fmt_str(tmpfilename,filename+1);
 	i+=fmt_str(tmpfilename+i,".bz2");
@@ -468,7 +468,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
 }
 
 int buffer_putlogstr(buffer* b,const char* s) {
-  unsigned long l=strlen(s);
+  unsigned long l=str_len(s);
   char* x;
   for (l=0; s[l] && s[l]!='\r' && s[l]!='\n'; ++l) ;
   if (!l) return 0;

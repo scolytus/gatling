@@ -8,10 +8,10 @@ CFLAGS=-pipe -Wall -O -g -I../libowfat/
 LDFLAGS=-g -L../libowfat/
 
 gatling: gatling.o
-	$(CC) -o $@ gatling.o -lowfat $(LDFLAGS)
+	$(CC) -o $@ gatling.o $(LDFLAGS) -lowfat
 
 httpbench: httpbench.o
-	$(CC) -o $@ httpbench.o -lowfat $(LDFLAGS)
+	$(CC) -o $@ httpbench.o $(LDFLAGS) -lowfat
 
 gatling.o: version.h
 
