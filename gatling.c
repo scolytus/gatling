@@ -977,7 +977,7 @@ e404:
 	struct http_data* x=io_getcookie(h->buddy);
 	if (x) {
 	  char *c=array_start(&h->r);
-	  c[strlen(c)]=' ';
+	  c[str_len(c)]=' ';
 	  array_catb(&x->r,array_start(&h->r),headerlen);
 	}
 	io_dontwantread(s);
@@ -2649,7 +2649,11 @@ pasverror:
 	int n;
 	while (1) {
 #ifdef __broken_itojun_v6__
-	  if (H->t==HTTPSERVER4 || H->t==FTPSERVER4 || H->t==SMBSERVER4) {
+	  if (H->t==HTTPSERVER4 || H->t==FTPSERVER4
+#ifdef SUPPORT_SMB
+	                                            || H->t==SMBSERVER4
+#endif
+	                                                               ) {
 	    byte_copy(ip,12,V4mappedprefix);
 	    scope_id=0;
 	    n=socket_accept4(i,ip+12,&port);
