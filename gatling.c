@@ -288,6 +288,8 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
     array_cats(&c,"\">");
     cathtml(&c,base+ab[i].name);
+    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/"); else
+    if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@");
     array_cats(&c,"</a><td>");
 
     j=fmt_2digits(buf,x->tm_mday);
