@@ -665,7 +665,7 @@ int main(int argc,char* argv[]) {
   char ip[16];
   uint16 port;
 
-  signal(EPIPE,SIG_IGN);
+  signal(SIGPIPE,SIG_IGN);
 
   byte_zero(ip,16);
   port=0; scope_id=0;
