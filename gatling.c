@@ -1215,20 +1215,25 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   } else {
     if (s[0]!='/') {	/* foo/$fnord */
       int z=str_rchr(s,'/');
-      pathprefix=alloca(z+2);
-      byte_copy(pathprefix,z,s);
-      pathprefix[z]='/';
-      pathprefix[z+1]=0;
-      match=0;
-      z=str_rchr(x,'/');
-      x[z]=0;
-      if (x[0]=='/' && x[1] && chdir(x+1)==-1) {
-notfound:
-	h->hdrbuf="450 no such file or directory.\r\n";
-	return -1;
+      if (s[z]!='/') {
+	pathprefix="";
+	match=s;
+      } else {
+	pathprefix=alloca(z+2);
+	byte_copy(pathprefix,z,s);
+	pathprefix[z]='/';
+	pathprefix[z+1]=0;
+	match=0;
+	z=str_rchr(x,'/');
+	x[z]=0;
+	if (x[0]=='/' && x[1] && chdir(x+1)==-1) {
+  notfound:
+	  h->hdrbuf="450 no such file or directory.\r\n";
+	  return -1;
+	}
+	x[z]='/';
+	match=x+z+1;
       }
-      x[z]='/';
-      match=x+z+1;
     } else {		/* /pub/$fnord */
       int z=str_rchr(x,'/');
       x[z]=0;
