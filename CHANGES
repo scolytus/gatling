@@ -4,6 +4,7 @@
   add man page
   fix HTTP pipelining fd leak
   add broken-symlink-redirect like fnord does (read README.redirect)
+  output size in log as 64-bit number
 
 0.4:
   add primitive FTP support (default: enabled; disable with -F!)

@@ -995,7 +995,7 @@ e404:
 	    buffer_puts(buffer_1," ");
 	    buffer_putlogstr(buffer_1,filename);
 	    buffer_puts(buffer_1," ");
-	    buffer_putulong(buffer_1,h->blen);
+	    buffer_putulonglong(buffer_1,h->blen);
 	    buffer_puts(buffer_1," ");
 	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	    buffer_puts(buffer_1," ");
@@ -1147,7 +1147,7 @@ rangeerror:
 	  case NORMAL: break;
 	  }
 	  buffer_puts(buffer_1," ");
-	  buffer_putulong(buffer_1,range_last-range_first);
+	  buffer_putulonglong(buffer_1,range_last-range_first);
 	  buffer_puts(buffer_1," ");
 	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	  buffer_puts(buffer_1," ");
