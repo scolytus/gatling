@@ -255,6 +255,7 @@ void httperror(struct http_data* r,const char* title,const char* message) {
 
 static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "html",	"text/html" },
+  { "txt",	"text/plain" },
   { "css",	"text/css" },
   { "dvi",	"application/x-dvi" },
   { "ps",	"application/postscript" },
