@@ -229,7 +229,7 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     de* x=array_allocate(&a,sizeof(de),n);
     if (!x) break;
     x->name=o;
-    if (lstat(d->d_name,&x->ss)==-1) { array_fail(&b); break; }
+    if (lstat(d->d_name,&x->ss)==-1) continue;
     array_cats0(&b,d->d_name);
     o+=str_len(d->d_name)+1;
     ++n;
