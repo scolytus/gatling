@@ -76,13 +76,9 @@ usage:
 	_exit(1);
       case 0: /* child */
 	{
-	  sigset_t ss;
-	  int sig;
-	  sigemptyset(&ss);
-	  sigaddset(&ss,SIGTERM);
 	  write(pfd[1],".",1);
 	  close(pfd[1]);
-	  sigwait(&ss,&sig);
+	  sleep(5*60);
 	  _exit(0);
 	}
       }

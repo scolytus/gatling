@@ -23,7 +23,7 @@ mmapbench: mmapbench.o
 	$(CC) -o $@ mmapbench.o $(LDFLAGS)
 
 forkbench: forkbench.o
-	$(CC) -o $@ forkbench.o $(LDFLAGS) -lpthread
+	$(CC) -o $@ forkbench.o $(LDFLAGS)
 
 gatling.o: version.h
 
