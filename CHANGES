@@ -1,0 +1,8 @@
+0.1:
+  directory listings
+  HEAD
+  if-modified-since
+  ranges (resume)
+
+0.0:
+  initial checkin, proof-of-concept taken from libowfat test/httpd.c

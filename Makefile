@@ -13,6 +13,11 @@ LDFLAGS=-s
 gatling: gatling.o
 	$(DIET) $(CC) $(LDFLAGS) -o $@ $^ -lowfat
 
+gatling.o: version.h
+
+version.h: CHANGES
+	(head -1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
+
 %.o: %.c
 	$(DIET) $(CC) -c $< -o $@ -I. $(CFLAGS)
 
@@ -24,4 +29,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling *.o
+	rm -f gatling *.o version.h

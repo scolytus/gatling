@@ -16,6 +16,10 @@
 #include <errno.h>
 #include <dirent.h>
 #include <time.h>
+#include <signal.h>
+#include "version.h"
+
+#define RELEASE "Gatling/" VERSION
 
 int virtual_hosts;
 int transproxy;
@@ -64,7 +68,7 @@ static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nCo
 void httperror(struct http_data* r,const char* title,const char* message) {
   int i;
   char* c;
-  c=r->hdrbuf=(char*)malloc(strlen(message)+strlen(title)+200);
+  c=r->hdrbuf=(char*)malloc(strlen(message)+strlen(title)+250);
   if (!c) {
     r->hdrbuf=oom;
     r->hlen=strlen(r->hdrbuf);
@@ -73,7 +77,7 @@ void httperror(struct http_data* r,const char* title,const char* message) {
     c+=fmt_str(c,title);
     c+=fmt_str(c,"\r\nContent-Type: text/html\r\nConnection: ");
     c+=fmt_str(c,r->keepalive?"keep-alive":"close");
-    c+=fmt_str(c,"\r\nContent-Length: ");
+    c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
     c+=fmt_ulong(c,strlen(message)+strlen(title)+16-4);
     c+=fmt_str(c,"\r\n\r\n<title>");
     c+=fmt_str(c,title+4);
@@ -343,18 +347,22 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
 }
 
 void httpresponse(struct http_data* h,int64 s) {
+  int head;
   char* c;
   const char* m;
+  time_t ims=0;
+  uint64 range_first,range_last;
   array_cat0(&h->r);
   c=array_start(&h->r);
-  if (byte_diff(c,4,"GET ")) {
+  if (byte_diff(c,4,"GET ") && byte_diff(c,5,"HEAD ")) {
 e400:
-    httperror(h,"400 Invalid Request","This server only understands GET.");
+    httperror(h,"400 Invalid Request","This server only understands GET and HEAD.");
   } else {
     char *d;
     int64 fd;
     struct stat s;
-    c+=4;
+    head=c[0]=='H';
+    c+=head?5:4;
     for (d=c; *d!=' '&&*d!='\t'&&*d!='\n'&&*d!='\r'; ++d) ;
     if (*d!=' ') goto e400;
     *d=0;
@@ -366,24 +374,26 @@ e404:
     } else {
       if (fd==-2) {
 	char* c;
-	c=h->hdrbuf=(char*)malloc(200);
+	c=h->hdrbuf=(char*)malloc(250);
 	if (!c)
 	  httperror(h,"500 Sorry","Out of Memory.");
 	else {
-	  c+=fmt_str(c,"HTTP/1.0 200 Here you go\r\nContent-Type: text/html\r\nConnection: ");
+	  c+=fmt_str(c,"HTTP/1.1 200 Here you go\r\nContent-Type: text/html\r\nConnection: ");
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
-	  c+=fmt_str(c,"\r\nContent-Length: ");
+	  c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
 	  c+=fmt_ulong(c,h->blen);
 	  c+=fmt_str(c,"\r\n\r\n");
 	  h->hlen=c-h->hdrbuf;
 	  iob_addbuf(&h->iob,h->hdrbuf,h->hlen);
-	  iob_addbuf(&h->iob,h->bodybuf,h->blen);
+	  if (!head)
+	    iob_addbuf(&h->iob,h->bodybuf,h->blen);
 	}
       } else {
 	if (fstat(fd,&s)==-1) {
 	  io_close(fd);
 	  goto e404;
 	}
+	range_first=0; range_last=s.st_size;
 	if ((m=http_header(h,"Connection"))) {
 	  if (!header_diff(m,"keep-alive"))
 	    h->keepalive=1;
@@ -396,21 +406,58 @@ e404:
 	    h->keepalive=1;
 	}
 	m=mimetype(c);
+	if ((c=http_header(h,"If-Modified-Since")))
+	  if ((unsigned char)(c[scan_httpdate(c,&ims)])>' ')
+	    ims=0;
+	if ((c=http_header(h,"Range"))) {
+	  if (byte_equal(c,6,"bytes=")) {
+	    int i;
+	    c+=6;
+	    if ((i=scan_ulonglong(c,&range_first))) {
+	      c+=i;
+	      if (*c=='-' && c[1]) {
+		++c;
+		if ((i=scan_ulonglong(c,&range_last))) {
+		  if (!i) goto rangeerror;
+		}
+	      }
+	    } else {
+rangeerror:
+	      httperror(h,"416 Bad Range","The requested range can not be satisfied.");
+	      goto fini;
+	    }
+	  }
+	}
 	c=h->hdrbuf=(char*)malloc(500);
-	c+=fmt_str(c,"HTTP/1.1 200 Coming Up\r\nContent-Type: ");
+	if (s.st_mtime<=ims) {
+	  c+=fmt_str(c,"HTTP/1.1 304 Not Changed");
+	  head=1;
+	} else
+	  c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
+	c+=fmt_str(c,"\r\nContent-Type: ");
 	c+=fmt_str(c,m);
-	c+=fmt_str(c,"\r\nContent-Length: ");
-	c+=fmt_ulonglong(c,s.st_size);
+	c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
+	c+=fmt_ulonglong(c,range_last-range_first);
 	c+=fmt_str(c,"\r\nLast-Modified: ");
 	c+=fmt_httpdate(c,s.st_mtime);
+	if (range_first || range_last!=s.st_size) {
+	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
+	  c+=fmt_ulonglong(c,range_first);
+	  c+=fmt_str(c,"-");
+	  c+=fmt_ulonglong(c,range_last);
+	  c+=fmt_str(c,"/");
+	  c+=fmt_ulonglong(c,s.st_size);
+	}
 	c+=fmt_str(c,"\r\nConnection: ");
 	c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	c+=fmt_str(c,"\r\n\r\n");
 	iob_addbuf(&h->iob,h->hdrbuf,c - h->hdrbuf);
-	iob_addfile(&h->iob,fd,0,s.st_size);
+	if (!head)
+	  iob_addfile(&h->iob,fd,range_first,range_last);
       }
     }
   }
+fini:
   io_dontwantread(s);
   io_wantwrite(s);
 }
@@ -420,6 +467,8 @@ int main(int argc,char* argv[]) {
   uint32 scope_id;
   char ip[16];
   uint16 port;
+
+  signal(EPIPE,SIG_IGN);
 
   byte_zero(ip,16);
   port=0; scope_id=0;
@@ -494,8 +543,16 @@ int main(int argc,char* argv[]) {
   if (!io_readfile(&origdir,".")) panic("open()");
   /* get fd for . so we can always fchdir back */
 
-  if (socket_bind6_reuse(s,V6any,8000,0)==-1)
-    panic("socket_bind6_reuse");
+  if (port==0) {
+    if (socket_bind6_reuse(s,ip,port=80,0)==-1)
+      if (socket_bind6_reuse(s,ip,port=8000,0)==-1)
+	panic("socket_bind6_reuse");
+    buffer_puts(buffer_2,"using port ");
+    buffer_putulong(buffer_2,port);
+    buffer_putnlflush(buffer_2);
+  } else
+    if (socket_bind6_reuse(s,ip,8000,0)==-1)
+      panic("socket_bind6_reuse");
   if (socket_listen(s,16)==-1)
     panic("socket_listen");
   io_nonblock(s);
@@ -583,8 +640,14 @@ emerge:
       struct http_data* h=io_getcookie(i);
       int64 r=iob_send(i,&h->iob);
 /*      printf("iob_send returned %lld\n",r); */
-      if (r==-1) io_eagain(i);
-      if (r<=0) {
+      if (r==-1)
+	io_eagain(i);
+      else if (r<=0) {
+	buffer_puts(buffer_2,"error on fd #");
+	buffer_putulong(buffer_2,i);
+	buffer_puts(buffer_2,": ");
+	buffer_puterror(buffer_2);
+	buffer_putsflush(buffer_2,", hanging up.\n");
 	array_trunc(&h->r);
 	iob_reset(&h->iob);
 	free(h->hdrbuf); h->hdrbuf=0;
