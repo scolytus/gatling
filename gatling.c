@@ -1889,6 +1889,7 @@ usage:
 #ifdef __broken_itojun_v6__
   if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
     if (byte_equal(ip,16,V6any)) {
+      f=socket_tcp6();
       if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
 	panic("socket_bind6_reuse for http");
       if (doftp>=0)
