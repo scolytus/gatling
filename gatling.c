@@ -775,8 +775,8 @@ int main(int argc,char* argv[]) {
 	  buffer_puts(buffer_1,"accept ");
 	  buffer_putulong(buffer_1,n);
 	  buffer_puts(buffer_1," ");
-	  buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
-	  buffer_puts(buffer_1,":");
+	  buffer_put(buffer_1,buf,byte_equal(ip,12,V4mappedprefix)?fmt_ip4(buf,ip+12):fmt_ip6(buf,ip));
+	  buffer_puts(buffer_1," ");
 	  buffer_putulong(buffer_1,port);
 	  buffer_putnlflush(buffer_1);
 
