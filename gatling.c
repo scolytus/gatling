@@ -1,5 +1,6 @@
 #undef SUPPORT_SMB
 #define SUPPORT_FTP
+#define SUPPORT_CGI
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
@@ -37,7 +38,13 @@
 #ifdef SUPPORT_SMB
 #include <iconv.h>
 #endif
+#ifdef SUPPORT_CGI
+#include <regex.h>
+#endif
 #include "havealloca.h"
+
+unsigned long timeout_secs=23;
+tai6464 next;
 
 #ifdef TIMEOUT_DEBUG
 void new_io_timeout(int64 d,tai6464 t) {
@@ -129,6 +136,10 @@ enum conntype {
   SMBSERVER4,	/* call socket_accept4() */
   SMBREQUEST,	/* read and handle SMB request */
 #endif
+
+#ifdef SUPPORT_CGI
+  PROXYSLAVE,	/* write request from buddy, relay response */
+#endif
 };
 
 #ifdef SUPPORT_FTP
@@ -168,6 +179,135 @@ struct http_data {
 #endif
   uint64 sent_until,prefetched_until;
 };
+
+#ifdef SUPPORT_CGI
+/* gatling implements CGI as a proxy.
+ * You configure a list of regular expressions, and if a request matches
+ * one of them, the request is forwarded to some other IP:port.  You can
+ * run another httpd there that can handle CGI, PHP, JSP and whatnot. */
+struct cgi_proxy {
+  regex_t r;
+  char ip[16];
+  uint16 port;
+  uint32 scope_id;
+  struct cgi_proxy* next;
+}* cgis;
+struct cgi_proxy* last;
+
+static int add_cgi(const char* c) {
+  struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
+  int i;
+  byte_zero(x,sizeof(struct cgi_proxy));
+  i=scan_ip6if(c,x->ip,&x->scope_id);
+  if (c[i]!='/') { nixgut: free(x); return -1; }
+  c+=i+1;
+  i=scan_ushort(c,&x->port);
+  if (c[i]!='/') goto nixgut;
+  c+=i+1;
+  if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) goto nixgut;
+  if (!last)
+    cgis=last=x;
+  else
+    last->next=x; last=x;
+  return 0;
+}
+
+static int proxy_connection(int sockfd,const char* c) {
+  struct cgi_proxy* x=cgis;
+  while (x) {
+    if (regexec(&x->r,c,0,0,0)==0) {
+      int s;
+      struct stat ss;
+      struct http_data* h;
+
+      if (stat(".cgi",&ss)==-1) continue;
+      if (!(h=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
+      s=socket_tcp6();
+      if (s==-1) return -1;
+      if (!io_fd(s)) {
+punt:
+	free(h);
+	io_close(s);
+	return -1;
+      }
+      io_eagain(s);
+      if (socket_connect6(s,x->ip,x->port,x->scope_id)==-1)
+	if (errno!=EINPROGRESS)
+	  goto punt;
+      byte_zero(h,sizeof(struct http_data));
+      h->t=PROXYSLAVE;
+      h->buddy=sockfd;
+      io_setcookie(s,h);
+      {
+	struct http_data* x=io_getcookie(sockfd);
+	if (x) {
+	  byte_copy(h->peerip,16,x->peerip);
+	}
+      }
+      if (timeout_secs)
+	io_timeout(s,next);
+      io_wantwrite(s);
+      return s;
+    }
+    x=x->next;
+  }
+  return -3;
+}
+
+int proxy_write_header(int sockfd,struct http_data* h) {
+  /* assume we can write the header in full. */
+  /* slight complication: we need to turn keep-alive off and we need to
+   * add a X-Forwarded-For header so the handling web server can write
+   * the real IP to the log file. */
+  struct http_data* H=io_getcookie(h->buddy);
+  int i,j;
+  long hlen=array_bytes(&h->r);
+  char* hdr=array_start(&h->r);
+  char* newheader=alloca(hlen+200);
+  for (i=j=0; i<hlen; ) {
+    int k=str_chr(hdr+i,'\n');
+    if (k==0) break;
+    if (case_starts(hdr+i,"Connection: ") || case_starts(hdr+i,"X-Forwarded-For: "))
+      i+=k+1;
+    else {
+      byte_copy(newheader+j,k+1,hdr+i);
+      i+=k+1;
+      j+=k+1;
+    }
+  }
+  if (j) j-=2;
+  H->keepalive=0;
+  j+=fmt_str(newheader+j,"Connection: close\r\nX-Forwarded-For: ");
+  j+=fmt_ip6c(newheader+j,H->peerip);
+  j+=fmt_str(newheader+j,"\r\n\r\n");
+  if (write(sockfd,newheader,j)!=j)
+    return -1;
+  return 0;
+}
+
+int proxy_is_readable(int sockfd,struct http_data* H) {
+  char buf[8192];
+  int i;
+  char* x;
+  int res=0;
+  struct http_data* peer=io_getcookie(H->buddy);
+  i=read(sockfd,buf,sizeof(buf));
+  if (i==-1) return -1;
+  if (i==0) {
+    if (peer) peer->buddy=-1;
+    H->buddy=-1;
+    res=-3;
+  } else {
+    x=malloc(i);
+    byte_copy(x,i,buf);
+    if (peer) iob_addbuf_free(&peer->iob,x,i);
+  }
+  io_dontwantread(sockfd);
+  io_wantwrite(H->buddy);
+  return res;
+}
+
+#endif
 
 
 static int open_for_reading(int64* fd,const char* name) {
@@ -536,7 +676,7 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
   return 1;
 }
 
-int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
+int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd) {
   char* s;
   char* args;
   unsigned long i;
@@ -603,6 +743,19 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
 	  return -1;
   }
   while (filename[1]=='/') ++filename;
+#ifdef SUPPORT_CGI
+  switch ((i=proxy_connection(sockfd,filename))) {
+  case -3: break;
+  case -1: return -1;
+  default:
+    if (i>=0) {
+      h->buddy=i;
+      return -3;
+    }
+  }
+#else
+  (void)sockfd;
+#endif
   if (filename[(i=str_len(filename))-1] == '/') {
     /* Damn.  Directory. */
     if (filename[1] && chdir(filename+1)==-1) return -1;
@@ -703,7 +856,7 @@ int buffer_putlogstr(buffer* b,const char* s) {
   return buffer_put(b,x,fmt_foldwhitespace(x,s,l));
 }
 
-void httpresponse(struct http_data* h,int64 s) {
+void httpresponse(struct http_data* h,int64 s,long headerlen) {
   int head;
   char* c;
   const char* m;
@@ -747,7 +900,7 @@ e400:
     }
 
     if (c[0]!='/') goto e404;
-    fd=http_openfile(h,c,&ss);
+    fd=http_openfile(h,c,&ss,s);
     if (fd==-1) {
 e404:
       httperror(h,"404 Not Found","No such file or directory.");
@@ -819,6 +972,17 @@ e404:
 	  else
 	    iob_addbuf_free(&h->iob,h->bodybuf,h->blen);
 	}
+#ifdef SUPPORT_CGI
+      } else if (fd==-3) {
+	struct http_data* x=io_getcookie(h->buddy);
+	if (x) {
+	  char *c=array_start(&h->r);
+	  c[strlen(c)]=' ';
+	  array_catb(&x->r,array_start(&h->r),headerlen);
+	}
+	io_dontwantread(s);
+	return;
+#endif
       } else {
 	if (fstat(fd,&ss)==-1) {
 	  io_close(fd);
@@ -1892,10 +2056,17 @@ static int switch_uid() {
 static void cleanup(int64 fd) {
   struct http_data* h=io_getcookie(fd);
   int buddyfd=-1;
+#if 0
+  if (logging) {
+    buffer_puts(buffer_1,"cleanup(");
+    buffer_putulonglong(buffer_1,fd);
+    buffer_putsflush(buffer_1,")\n");
+  }
+#endif
   if (h) {
     buddyfd=h->buddy;
-#ifdef SUPPORT_FTP
-    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE) {
+#if defined(SUPPORT_FTP) || defined(SUPPORT_CGI)
+    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE || h->t==PROXYSLAVE || h->t==HTTPREQUEST) {
       if (buddyfd!=-1) {
 	struct http_data* b=io_getcookie(buddyfd);
 	if (b)
@@ -1937,7 +2108,7 @@ void sighandler(int sig) {
 }
 
 int main(int argc,char* argv[]) {
-  int s=socket_tcp6();
+  int s;
   int f=-1;
 #ifdef SUPPORT_SMB
   int smbs=-1;
@@ -1952,22 +2123,27 @@ int main(int argc,char* argv[]) {
 #endif
 #ifdef __broken_itojun_v6__
 #warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
-  int s4=socket_tcp4();
+  int s4;
   enum conntype ct4=HTTPSERVER4;
 #ifdef SUPPORT_FTP
-  int f4=socket_tcp4();
+  int f4;
   enum conntype fct4=FTPSERVER4;
 #endif
 #endif
   uint32 scope_id;
   char ip[16];
   uint16 port,fport,sport;
-  tai6464 now,last,next,tick,nextftp;
-  unsigned long timeout_secs=23;
+  tai6464 now,last,tick,nextftp;
   unsigned long ftptimeout_secs=600;
   char* new_uid=0;
   char* chroot_to=0;
   uint64 prefetchquantum=0;
+
+  s=socket_tcp6();
+#ifdef __broken_itojun_v6__
+  f4=socket_tcp4();
+  s4=socket_tcp4();
+#endif
 
   signal(SIGPIPE,SIG_IGN);
 
@@ -1999,7 +2175,7 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sS");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSC:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -2073,6 +2249,15 @@ int main(int argc,char* argv[]) {
 	str_copy(workgroup,optarg);
       break;
 #endif
+#ifdef SUPPORT_CGI
+    case 'C':
+      if (add_cgi(optarg)) {
+	buffer_puts(buffer_2,"gatling: could not parse `");
+	buffer_puts(buffer_2,optarg);
+	buffer_putsflush(buffer_2,"´: expected something like `127.0.0.1/8001/cgi$´\n");
+      }
+      break;
+#endif
     case 'h':
 usage:
       buffer_putsflush(buffer_2,
@@ -2095,7 +2280,10 @@ usage:
 		  "\t-F\tdo not provide FTP\n"
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
-		  "\t-P n\tensable experimental prefetching code (may actually be slower)\n"
+		  "\t-P n\tenable experimental prefetching code (may actually be slower)\n"
+#ifdef SUPPORT_CGI
+		  "\t-C ip/port/regex\tCGI proxy\n"
+#endif
 #ifdef SUPPORT_SMB
 		  "\t-w name\tset SMB workgroup\n"
 #endif
@@ -2363,6 +2551,32 @@ usage:
 	return 111;
       }
       H->sent_until=H->prefetched_until=0;
+#ifdef SUPPORT_CGI
+      if (H->t==PROXYSLAVE) {
+	switch (proxy_is_readable(i,H)) {
+	case -1:
+	  {
+	    struct http_data* h=io_getcookie(H->buddy);
+	    if (logging) {
+	      buffer_puts(buffer_1,"proxy_read_error ");
+	      buffer_putulong(buffer_1,i);
+	      buffer_putspace(buffer_1);
+	      buffer_puterror(buffer_1);
+	      buffer_puts(buffer_1,"\nclose/acceptfail ");
+	      buffer_putulong(buffer_1,i);
+	      buffer_putnlflush(buffer_1);
+	    }
+	    H->buddy=-1;
+	    h->buddy=-1;
+	    cleanup(i);
+	  }
+	  break;
+	case -3:
+	  cleanup(i);
+	  break;
+	}
+      } else
+#endif
 #ifdef SUPPORT_FTP
       if (H->t==FTPPASSIVE) {
 	/* This is the server socket for a passive FTP data connections.
@@ -2616,7 +2830,7 @@ emerge:
 	      long alen;
 pipeline:
 	      if (H->t==HTTPREQUEST)
-		httpresponse(H,i);
+		httpresponse(H,i,l);
 #ifdef SUPPORT_SMB
 	      else if (H->t==SMBREQUEST)
 		smbresponse(H,i);
@@ -2647,17 +2861,41 @@ pipeline:
       if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
 	if (ftptimeout_secs)
 	  io_timeout(i,nextftp);
-      } else
-#endif
-      if (timeout_secs) {
+      } else if (timeout_secs) {
 	io_timeout(i,next);
-#ifndef SUPPORT_FTP
-      }
-#else
 	if (h->t==FTPSLAVE) {
 	  io_timeout(h->buddy,nextftp);
 	}
       }
+#else
+      if (timeout_secs)
+	io_timeout(i,next);
+#endif
+#ifdef SUPPORT_CGI
+      if (h->t==PROXYSLAVE) {
+	struct http_data* H;
+	H=io_getcookie(h->buddy);
+	if (proxy_write_header(i,h)==-1) {
+	  if (logging) {
+	    buffer_puts(buffer_1,"proxy_connect_error ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putspace(buffer_1);
+	    buffer_puterror(buffer_1);
+	    buffer_puts(buffer_1,"\nclose/connectfail ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
+	  H->buddy=-1;
+	  httperror(H,"502 Gateway Broken","Request relaying error.");
+	  h->buddy=-1;
+	  free(h);
+	  io_close(i);
+	}
+	io_dontwantwrite(i);
+	io_wantread(i);
+      }
+      else
+#endif
       if (h->t==FTPACTIVE) {
 	struct http_data* H;
 	H=io_getcookie(h->buddy);
@@ -2703,9 +2941,7 @@ pipeline:
 	      io_wantread(H->buddy);
 	  }
 	}
-      } else
-#endif
-      {
+      } else {
 	r=iob_send(i,&h->iob);
 	if (r==-1)
 	  io_eagain(i);
@@ -2734,6 +2970,13 @@ pipeline:
 #endif
 	    cleanup(i);
 	  } else {
+#ifdef SUPPORT_CGI
+	    if (h->t == HTTPREQUEST && h->buddy!=-1) {
+	      io_dontwantwrite(s);
+	      io_wantread(h->buddy);
+	      continue;
+	    }
+#endif
 	    if (logging && h->t == HTTPREQUEST) {
 	      buffer_puts(buffer_1,"request_done ");
 	      buffer_putulong(buffer_1,i);

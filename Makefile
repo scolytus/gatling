@@ -7,7 +7,7 @@ mktestdata manymapbench ioerr forksbench
 all: $(TARGET)
 
 CC=gcc
-CFLAGS=-pipe -Wall -Os -I../libowfat/
+CFLAGS=-pipe -Wall -O -I../libowfat/
 LDFLAGS=-s -L../libowfat/ -lowfat
 
 gatling: gatling.o libsocket libiconv
