@@ -1,5 +1,6 @@
 0.4:
-  add primitive ftp support (default: enabled; disable with -F!)
+  add primitive FTP support (default: enabled; disable with -F!)
+  add pipelining support (for both FTP and HTTP)
 
 0.3:
   add chroot+setuid support

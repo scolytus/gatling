@@ -1213,18 +1213,64 @@ nomem:
   return 0;
 }
 
+static int ftp_cwd(struct http_data* h,char* s) {
+  int l=h->ftppath?str_len(h->ftppath):0;
+  char* x=alloca(l+strlen(s)+5);
+  char* y;
+  /* first, append to path */
+  if (h->ftppath)
+    y=x+fmt_str(x,h->ftppath);
+  else
+    y=x;
+  y+=fmt_str(y,"/");
+  y+=fmt_str(y,s);
+  if (y[-1]=='\n') --y;
+  if (y[-1]=='\r') --y;
+  *y=0;
+
+  /* now reduce "//" and "/./" and "/[^/]+/../" to "/" */
+  l=canonpath(x);
+
+  if (ftp_vhost(h))
+    return -1;
+
+  if (x[1] && chdir(x+1)) {
+    h->hdrbuf="425 directory not found.\r\n";
+    return -1;
+  }
+  y=realloc(h->ftppath,l+1);
+  if (!y) {
+    h->hdrbuf="500 out of memory.\r\n";
+    return -1;
+  }
+  y[fmt_str(y,x)]=0;
+  h->ftppath=y;
+  h->hdrbuf="200 ok.\r\n";
+  return 0;
+}
+
 void ftpresponse(struct http_data* h,int64 s) {
   char* c;
   h->filefd=-1;
 
-  array_cat0(&h->r);
   c=array_start(&h->r);
-  if (case_starts(c,"QUIT\r\n")) {
+  {
+    char* d,* e=c+array_bytes(&h->r);
+    for (d=c; d<e; ++d) {
+      if (*d=='\n') {
+	if (d>c && d[-1]=='\r') --d;
+	*d=0;
+	break;
+      }
+      if (*d==0) *d='\n';
+    }
+  }
+  if (case_equals(c,"QUIT")) {
     h->hdrbuf="221 Goodbye.\r\n";
     h->keepalive=0;
   } else if (case_starts(c,"USER ")) {
     c+=5;
-    if (case_equals(c,"ftp\r\n") || case_equals(c,"anonymous\r\n"))
+    if (case_equals(c,"ftp") || case_equals(c,"anonymous"))
       h->hdrbuf="230 No need for passwords, you're logged in now.\r\n";
     else
       h->hdrbuf="230 I only serve anonymous users.  But I'll make an exception.\r\n";
@@ -1233,7 +1279,7 @@ void ftpresponse(struct http_data* h,int64 s) {
     h->hdrbuf="230 If you insist...\r\n";
   } else if (case_starts(c,"TYPE ")) {
     h->hdrbuf="200 yeah, whatever.\r\n";
-  } else if (case_starts(c,"PASV") || case_starts(c,"EPSV")) {
+  } else if (case_equals(c,"PASV") || case_equals(c,"EPSV")) {
     int epsv=(*c=='e' || *c=='E');
     char ip[16];
     uint16 port;
@@ -1374,7 +1420,7 @@ syntaxerror:
       buffer_putulong(buffer_1,port);
       buffer_putnlflush(buffer_1);
     }
-  } else if (case_starts(c,"PWD")) {
+  } else if (case_equals(c,"PWD")) {
     c=h->ftppath; if (!c) c="/";
     h->hdrbuf=malloc(50+str_len(c));
     if (h->hdrbuf) {
@@ -1385,37 +1431,9 @@ syntaxerror:
     } else
       h->hdrbuf="500 out of memory\r\n";
   } else if (case_starts(c,"CWD ")) {
-    int l=h->ftppath?str_len(h->ftppath):0;
-    char* x=alloca(l+strlen(c+=4)+5);
-    char* y;
-    /* first, append to path */
-    if (h->ftppath)
-      y=x+fmt_str(x,h->ftppath);
-    else
-      y=x;
-    y+=fmt_str(y,"/");
-    y+=fmt_str(y,c);
-    if (y[-1]=='\n') --y;
-    if (y[-1]=='\r') --y;
-    *y=0;
-
-    /* now reduce "//" and "/./" and "/[^/]+/../" to "/" */
-    l=canonpath(x);
-
-    if (ftp_vhost(h)) goto ABEND;
-
-    if (x[1] && chdir(x+1)) {
-      h->hdrbuf="425 directory not found.\r\n";
-      goto ABEND;
-    }
-    y=realloc(h->ftppath,l+1);
-    if (!y) {
-      h->hdrbuf="500 out of memory.\r\n";
-      goto ABEND;
-    }
-    y[fmt_str(y,x)]=0;
-    h->ftppath=y;
-    h->hdrbuf="200 ok.\r\n";
+    ftp_cwd(h,c+4);
+  } else if (case_equals(c,"CDUP") || case_equals(c,"XCUP")) {
+    ftp_cwd(h,"..");
   } else if (case_starts(c,"MDTM ")) {
     c+=5;
     if (ftp_mdtm(h,c)==0)
@@ -1424,9 +1442,9 @@ syntaxerror:
     c+=5;
     if (ftp_size(h,c)==0)
       c=h->hdrbuf;
-  } else if (case_starts(c,"FEAT")) {
+  } else if (case_equals(c,"FEAT")) {
     h->hdrbuf="211-Features:\r\n MDTM\r\n REST STREAM\r\n SIZE\r\n211 End\r\n";
-  } else if (case_starts(c,"SYST")) {
+  } else if (case_equals(c,"SYST")) {
     h->hdrbuf="215 UNIX Type: L8\r\n";
   } else if (case_starts(c,"REST ")) {
     uint64 x;
@@ -2083,10 +2101,20 @@ emerge:
 	    array_reset(&H->r);
 	    goto emerge;
 	  } else if ((l=header_complete(H))) {
+	    long alen;
+pipeline:
 	    if (H->t==HTTPREQUEST)
 	      httpresponse(H,i);
 	    else
 	      ftpresponse(H,i);
+	    if (l < (alen=array_bytes(&H->r))) {
+	      char* c=array_start(&H->r);
+	      byte_copy(c,alen-l,c+l);
+	      array_truncate(&H->r,1,alen-l);
+	      l=header_complete(H);
+	      if (l) goto pipeline;
+	    } else
+	      array_reset(&H->r);
 	  }
 	}
       }
@@ -2133,7 +2161,7 @@ emerge:
 	  iob_reset(&h->iob);
 	  h->hdrbuf=0;
 	  if (h->keepalive) {
-	    array_reset(&h->r);
+//	    array_reset(&h->r);
 	    iob_reset(&h->iob);
 	    if (h->filefd!=-1) { io_close(h->filefd); h->filefd=-1; }
 	    io_dontwantwrite(i);
