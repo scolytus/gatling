@@ -2,7 +2,7 @@ prefix=/usr/local
 BINDIR=${prefix}/bin
 
 TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
-mktestdata manymapbench
+mktestdata manymapbench ioerr
 
 all: $(TARGET)
 
@@ -36,6 +36,9 @@ mktestdata: mktestdata.o
 
 manymapbench: manymapbench.o
 	$(CC) -o $@ manymapbench.o $(LDFLAGS)
+
+ioerr: ioerr.o
+	$(CC) -o $@ ioerr.o $(LDFLAGS)
 
 gatling.o: version.h
 

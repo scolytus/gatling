@@ -373,7 +373,7 @@ usage:
 	buffer_putulong(buffer_1,x);
 	buffer_puts(buffer_1," ");
 	buffer_putulong(buffer_1,y/sample);
-	buffer_puts(buffer_1,"\n");
+	buffer_putnlflush(buffer_1);
       }
       ++j; if (j==interval) j=0;
 
@@ -386,7 +386,7 @@ usage:
       d=d+b.tv_usec-a.tv_usec;
       buffer_puts(buffer_1,"clat ");
       buffer_putulong(buffer_1,d);
-      buffer_puts(buffer_1,"\n");
+      buffer_putnlflush(buffer_1);
     }
   }
   buffer_flush(buffer_1);

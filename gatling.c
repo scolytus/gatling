@@ -111,7 +111,7 @@ void httperror(struct http_data* r,const char* title,const char* message) {
     c+=fmt_str(c,"\n");
     r->hlen=c - r->hdrbuf;
   }
-  iob_addbuf(&r->iob,r->hdrbuf,r->hlen);
+  iob_addbuf_free(&r->iob,r->hdrbuf,r->hlen);
 }
 
 static struct mimeentry { const char* name, *type; } mimetab[] = {
@@ -601,9 +601,9 @@ e404:
 	  }
 	  c+=fmt_str(c,"\r\n\r\n");
 	  h->hlen=c-h->hdrbuf;
-	  iob_addbuf(&h->iob,h->hdrbuf,h->hlen);
+	  iob_addbuf_free(&h->iob,h->hdrbuf,h->hlen);
 	  if (!head)
-	    iob_addbuf(&h->iob,h->bodybuf,h->blen);
+	    iob_addbuf_free(&h->iob,h->bodybuf,h->blen);
 	}
       } else {
 	if (fstat(fd,&ss)==-1) {
@@ -667,7 +667,7 @@ rangeerror:
 	  c+=fmt_str(c,"\r\nConnection: ");
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	  c+=fmt_str(c,"\r\n\r\n");
-	  iob_addbuf(&h->iob,h->hdrbuf,c - h->hdrbuf);
+	  iob_addbuf_free(&h->iob,h->hdrbuf,c - h->hdrbuf);
 	  if (!head) {
 	    iob_addfile(&h->iob,fd,range_first,range_last);
 	    h->filefd=fd;
@@ -745,6 +745,12 @@ static int switch_uid() {
   return 0;
 }
 
+static int fini;
+
+void sighandler(int sig) {
+  fini=1;
+}
+
 int main(int argc,char* argv[]) {
   int s=socket_tcp6();
 #ifdef __broken_itojun_v6__
@@ -760,6 +766,15 @@ int main(int argc,char* argv[]) {
   char* chroot_to=0;
 
   signal(SIGPIPE,SIG_IGN);
+
+  {
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_sigaction=0;
+    sa.sa_flags=SA_RESTART|SA_NOCLDSTOP;
+    sa.sa_handler=sighandler;
+    sigaction(SIGINT,&sa,0);
+  }
 
   if (!geteuid()) {
     struct rlimit rl;
@@ -882,7 +897,7 @@ usage:
       if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
 	panic("socket_bind6_reuse");
     } else {
-      close(s); s=-1;
+      io_close(s); s=-1;
     }
     if (socket_bind4_reuse(s4,ip+12,port)==-1)
       panic("socket_bind4_reuse");
@@ -954,6 +969,12 @@ usage:
 
   for (;;) {
     int64 i;
+
+    if (fini) {
+      buffer_putsflush(buffer_1,"stopping\n");
+      break;
+    }
+
     if (timeout_secs)
       io_waituntil(tick);
     else
@@ -981,11 +1002,11 @@ usage:
     }
 
     while ((i=io_canread())!=-1) {
+      if (i==s
 #ifdef __broken_itojun_v6__
-      if (i==s || i==s4) {
-#else
-      if (i==s) {
+               || i==s4
 #endif
+                       ) {
 	int n;
 #ifdef __broken_itojun_v6__
 	while (1) {
@@ -1053,8 +1074,7 @@ usage:
 	  if (h) {
 	    array_reset(&h->r);
 	    iob_reset(&h->iob);
-	    if (h->hdrbuf!=oom) free(h->hdrbuf); h->hdrbuf=0;
-	    free(h->bodybuf); h->bodybuf=0;
+	    free(h);
 	  }
 	  if (logging) {
 	    buffer_puts(buffer_1,"io_error ");
@@ -1070,7 +1090,7 @@ usage:
 	  if (h) {
 	    array_reset(&h->r);
 	    iob_reset(&h->iob);
-	    free(h->hdrbuf); h->hdrbuf=0;
+	    h->hdrbuf=0;
 	  }
 	  if (logging) {
 	    buffer_puts(buffer_1,"close ");
@@ -1089,6 +1109,7 @@ emerge:
 	    io_wantwrite(i);
 	  } else if (array_bytes(&h->r)>8192) {
 	    httperror(h,"500 request too long","You sent too much headers");
+	    array_reset(&h->r);
 	    goto emerge;
 	  } else if ((l=header_complete(h)))
 	    httpresponse(h,i);
@@ -1102,7 +1123,7 @@ emerge:
       if (r==-1)
 	io_eagain(i);
       else if (r<=0) {
-	if (h->filefd!=-1) close(h->filefd);
+	if (h->filefd!=-1) io_close(h->filefd);
 	if (r==-3) {
 	  if (logging) {
 	    buffer_puts(buffer_1,"socket_error ");
@@ -1120,7 +1141,7 @@ emerge:
 	}
 	array_trunc(&h->r);
 	iob_reset(&h->iob);
-	free(h->hdrbuf); h->hdrbuf=0;
+	h->hdrbuf=0;
 	if (h->keepalive) {
 	  io_dontwantwrite(i);
 	  io_wantread(i);
@@ -1131,10 +1152,14 @@ emerge:
 	    buffer_putnlflush(buffer_1);
 	  }
 	  io_close(i);
+	  array_reset(&h->r);
+	  free(h);
 	}
       } else
 	if (timeout_secs)
 	  io_timeout(i,next);
     }
   }
+  io_finishandshutdown();
+  return 0;
 }

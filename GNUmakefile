@@ -4,7 +4,7 @@ prefix=/opt/diet
 BINDIR=${prefix}/bin
 
 TARGETS=gatling httpbench bindbench mmapbench forkbench dl pthreadbench \
-mktestdata manymapbench
+mktestdata manymapbench ioerr
 
 all: $(TARGETS)
 
