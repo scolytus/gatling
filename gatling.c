@@ -799,10 +799,10 @@ int main(int argc,char* argv[]) {
       transproxy=1;
       break;
     case 'd':
-      directory_index=-1;
+      directory_index=1;
       break;
     case 'D':
-      directory_index=1;
+      directory_index=-1;
       break;
     case 'T':
       i=scan_ulong(optarg,&timeout_secs);
