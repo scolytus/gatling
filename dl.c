@@ -17,8 +17,6 @@
 #include <stdlib.h>
 #include <utime.h>
 #include <sys/uio.h>
-#include <sys/stat.h>
-#include "havealloca.h"
 
 static void carp(const char* routine) {
   buffer_puts(buffer_2,"dl: ");
