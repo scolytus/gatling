@@ -4,3 +4,6 @@ version.h
 dl
 ioerr
 mktestdata
+libiconv
+libsocket
+dummy.c
