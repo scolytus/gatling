@@ -14,6 +14,11 @@
 #include <sys/resource.h>
 #include <stdlib.h>
 
+#ifdef __i386__
+#define rdtscl(low) \
+     __asm__ __volatile__ ("rdtsc" : "=A" (low))
+#endif
+
 int main(int argc,char* argv[]) {
   unsigned long count=1000;
   int v6;
@@ -43,7 +48,7 @@ int main(int argc,char* argv[]) {
     case '6':
       v6=1;
       break;
-    case '?':
+    case 'h':
       buffer_putsflush(buffer_2,
 		  "usage: bindbench [-h] [-6] [-c count]\n"
 		  "\n"
@@ -57,28 +62,49 @@ int main(int argc,char* argv[]) {
 
   {
     int i;
-    unsigned long d;
     char ip[16];
     int port;
+#ifdef __i386__
+    unsigned long long a,b,c;
+#else
     struct timeval a,b,c;
+    unsigned long d;
+#endif
     int *socks=alloca(count*sizeof(int));
     port=0; byte_zero(ip,16);
     for (i=0; i<count; ++i) {
+#ifdef __i386__
+      rdtscl(a);
+#else
       gettimeofday(&a,0);
+#endif
       socks[i]=v6?socket_tcp6():socket_tcp4();
+#ifdef __i386__
+      rdtscl(b);
+#else
       gettimeofday(&b,0);
+#endif
       if (v6)
 	socket_bind6(socks[i],ip,port,0);
       else
 	socket_bind4(socks[i],ip,port);
+#ifdef __i386__
+      rdtscl(c);
+      buffer_putulong(buffer_1,b-a);
+#else
       gettimeofday(&c,0);
       d=(b.tv_sec-a.tv_sec)*10000000;
       d=d+b.tv_usec-a.tv_usec;
       buffer_putulong(buffer_1,d);
+#endif
       buffer_putspace(buffer_1);
+#ifdef __i386__
+      buffer_putulong(buffer_1,c-b);
+#else
       d=(c.tv_sec-b.tv_sec)*10000000;
       d=d+c.tv_usec-b.tv_usec;
       buffer_putulong(buffer_1,d);
+#endif
       buffer_puts(buffer_1,"\n");
     }
   }
