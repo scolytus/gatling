@@ -1,10 +1,10 @@
 // #define SUPPORT_SMB
-#define SUPPORT_FTP
-#define SUPPORT_PROXY
+/* #define SUPPORT_FTP */
+/* #define SUPPORT_PROXY */
 /* #define DEBUG to enable more verbose debug messages for tracking fd
  * leaks */
 /* #define DEBUG */
-#define SUPPORT_CGI
+/* #define SUPPORT_CGI */
 /* #define SUPPORT_HTACCESS */
 
 /* http header size limit: */
@@ -125,12 +125,6 @@ extern int init_clientside_tls(SSL** ssl,int sock);
 
 static void carp(const char* routine) {
   buffer_putmflush(buffer_2,routine,": ",strerror(errno),"\n");
-#if 0
-  buffer_puts(buffer_2,routine);
-  buffer_puts(buffer_2,": ");
-  buffer_puterror(buffer_2);
-  buffer_putnlflush(buffer_2);
-#endif
 }
 
 static void panic(const char* routine) {
@@ -371,17 +365,6 @@ punt:
 	  tmp[fmt_ip6ifc(tmp,x->ip,x->scope_id)]=0;
 
 	  buffer_putm(buffer_1,"proxy_connect ",bufsockfd," ",bufs," ",tmp," ",bufport," ");
-#if 0
-	  buffer_puts(buffer_1,"proxy_connect ");
-	  buffer_putulong(buffer_1,sockfd);
-	  buffer_putspace(buffer_1);
-	  buffer_putulong(buffer_1,s);
-	  buffer_putspace(buffer_1);
-	  buffer_put(buffer_1,tmp,fmt_ip6ifc(tmp,x->ip,x->scope_id));
-	  buffer_putspace(buffer_1);
-	  buffer_put(buffer_1,tmp,fmt_ulong(tmp,x->port));
-	  buffer_putspace(buffer_1);
-#endif
 	  buffer_putlogstr(buffer_1,c);
 	  buffer_putnlflush(buffer_1);
 	}
@@ -439,15 +422,6 @@ punt:
 	  bufpid[fmt_ulong(bufpid,pid)]=0;
 
 	  buffer_putmflush(buffer_1,"cgi_fork ",bufsfd," ",bufs," ",bufpid,"\n");
-#if 0
-	  buffer_puts(buffer_1,"cgi_fork ");
-	  buffer_putulong(buffer_1,sockfd);
-	  buffer_putspace(buffer_1);
-	  buffer_putulong(buffer_1,s);
-	  buffer_putspace(buffer_1);
-	  buffer_putulong(buffer_1,pid);
-	  buffer_putnlflush(buffer_1);
-#endif
 	}
 #endif
       }
@@ -554,11 +528,6 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
       char numbuf[FMT_ULONG];
       numbuf[fmt_ulong(numbuf,sockfd)]=0;
       buffer_putmflush(buffer_1,"cgiproxy_read0 ",numbuf,"\n");
-#if 0
-      buffer_puts(buffer_1,"cgiproxy_read0 ");
-      buffer_putulong(buffer_1,sockfd);
-      buffer_putnlflush(buffer_1);
-#endif
     }
     if (peer) {
       peer->buddy=-1;
@@ -804,6 +773,7 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "gif",	"image/gif" },
   { "png",	"image/png" },
   { "jpeg",	"image/jpeg" },
+  { "bild",	"image/jpeg" },
   { "jpg",	"image/jpeg" },
   { "mpeg",	"video/mpeg" },
   { "mpg",	"video/mpeg" },
@@ -1344,11 +1314,6 @@ e400:
       char numbuf[FMT_ULONG];
       numbuf[fmt_ulong(numbuf,s)]=0;
       buffer_putmflush(buffer_1,"error_400 ",numbuf,"\n");
-#if 0
-      buffer_puts(buffer_1,"error_400 ");
-      buffer_putulong(buffer_1,s);
-      buffer_putsflush(buffer_1,"\n");
-#endif
     }
 
   } else {
@@ -2860,16 +2825,6 @@ void forkslave(int fd,buffer* in) {
 	path[dirlen]=0;
 	remoteaddr[ralen]=0;
 
-#if 0
-	buffer_puts(buffer_2,"httpreq: ");
-	buffer_put(buffer_2,httpreq,reqlen);
-	buffer_puts(buffer_2,"\n\npath: ");
-	buffer_put(buffer_2,path,dirlen);
-	buffer_puts(buffer_2,"\nremoteip: ");
-	buffer_put(buffer_2,remoteaddr,ralen);
-	buffer_putnlflush(buffer_2);
-#endif
-
 	if (dirlen==0 || chdir(path)==0) {
 	  /* now find cgi */
 	  char* cginame;
@@ -3142,23 +3097,11 @@ static void handle_read_proxypost(int64 i,struct http_data* H) {
 	numbuf[fmt_ulong(numbuf,i)]=0;
 
 	buffer_putmflush(buffer_1,"proxy_read_error ",numbuf," ",strerror(errno),"\nclose/acceptfail ",numbuf,"\n");
-#if 0
-	buffer_puts(buffer_1,"proxy_read_error ");
-	buffer_putulong(buffer_1,i);
-	buffer_putspace(buffer_1);
-	buffer_puterror(buffer_1);
-	buffer_puts(buffer_1,"\nclose/acceptfail ");
-	buffer_putulong(buffer_1,i);
-	buffer_putnlflush(buffer_1);
-#endif
       }
       H->buddy=-1;
       h->buddy=-1;
       cleanup(i);
     }
-    break;
-  case -3:
-    cleanup(i);
     break;
   }
 }
@@ -3176,15 +3119,6 @@ static void handle_read_httppost(int64 i,struct http_data* H) {
 	char a[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
 	buffer_putmflush(buffer_1,"http_postdata_read_error ",a," ",strerror(errno),"\nclose/acceptfail ",a,"\n");
-#if 0
-	buffer_puts(buffer_1,"http_postdata_read_error ");
-	buffer_putulong(buffer_1,i);
-	buffer_putspace(buffer_1);
-	buffer_puterror(buffer_1);
-	buffer_puts(buffer_1,"\nclose/acceptfail ");
-	buffer_putulong(buffer_1,i);
-	buffer_putnlflush(buffer_1);
-#endif
       }
       cleanup(i);
     } else {
@@ -3701,15 +3635,6 @@ ioerror:
       char a[FMT_ULONG];
       a[fmt_ulong(a,i)]=0;
       buffer_putmflush(buffer_1,"io_error ",a," ",strerror(errno),"\nclose/readerr ",a,"\n");
-#if 0
-      buffer_puts(buffer_1,"io_error ");
-      buffer_putulong(buffer_1,i);
-      buffer_puts(buffer_1," ");
-      buffer_puterror(buffer_1);
-      buffer_puts(buffer_1,"\nclose/readerr ");
-      buffer_putulong(buffer_1,i);
-      buffer_putnlflush(buffer_1);
-#endif
     }
     cleanup(i);
   } else if (l==0) {
@@ -3738,13 +3663,6 @@ ioerror:
 	  a[fmt_ulong(a,i)]=0;
 	  b[fmt_ulong(b,ss.st_size)]=0;
 	  buffer_putmflush(buffer_1,"received ",a," ",b,"\n");
-#if 0
-	  buffer_puts(buffer_1,"received ");
-	  buffer_putulong(buffer_1,i);
-	  buffer_putspace(buffer_1);
-	  buffer_putulonglong(buffer_1,ss.st_size);
-	  buffer_putnlflush(buffer_1);
-#endif
 	}
       }
     }
@@ -3864,15 +3782,6 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 	char a[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
 	buffer_putmflush(buffer_1,"socket_error ",a," ",strerror(errno),"\nclose/writefail ",a,"\n");
-#if 0
-	buffer_puts(buffer_1,"socket_error ");
-	buffer_putulong(buffer_1,i);
-	buffer_puts(buffer_1," ");
-	buffer_puterror(buffer_1);
-	buffer_puts(buffer_1,"\nclose/writefail ");
-	buffer_putulong(buffer_1,i);
-	buffer_putnlflush(buffer_1);
-#endif
       }
 #ifdef SUPPORT_FTP
       if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
@@ -4523,13 +4432,6 @@ usage:
 	    char numbuf[FMT_ULONG];
 	    numbuf[fmt_ulong(numbuf,i)]=0;
 	    buffer_putmflush(buffer_1,"timeout ",numbuf,"\nclose/timeout ",numbuf,"\n");
-#if 0
-	    buffer_puts(buffer_1,"timeout ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_puts(buffer_1,"\nclose/timeout ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
-#endif
 	  }
 	  cleanup(i);
 	}
