@@ -3821,7 +3821,7 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 	buffer_putulong(buffer_1,i);
 	buffer_putnlflush(buffer_1);
       }
-      array_trunc(&h->r);
+      if (array_bytes(&h->r)>0) --h->r.initialized;
       iob_reset(&h->iob);
       h->hdrbuf=0;
       if (h->keepalive) {

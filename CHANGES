@@ -1,4 +1,5 @@
 0.8:
+  fix pipelining bug
 
 0.7:
   use the new scan_urlencoded2 (libowfat cvs); properly serve
