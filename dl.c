@@ -184,6 +184,28 @@ static int scan_int2digit(const char* s, int* i) {
   return 2;
 }
 
+static inline int issafe(unsigned char c) {
+  return (c!='"' && c>=' ' && c!='+');
+}
+
+unsigned long fmt_urlencoded(char* dest,const char* src,unsigned long len) {
+  register const unsigned char* s=(const unsigned char*) src;
+  unsigned long written=0,i;
+  for (i=0; i<len; ++i) {
+    if (!issafe(s[i])) {
+      if (dest) {
+	dest[written]='%';
+	dest[written+1]=fmt_tohex(s[i]>>4);
+	dest[written+2]=fmt_tohex(s[i]&15);
+      }
+      written+=3;
+    } else {
+      if (dest) dest[written]=s[i]; ++written;
+    }
+  }
+  return written;
+}
+
 int main(int argc,char* argv[]) {
   time_t ims=0;
   int useport=0;
