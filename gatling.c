@@ -928,9 +928,15 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
   if (ftp_vhost(h)) return -1;
 
   errno=0; fd=-1;
-  h->hdrbuf=forreading?"550 File not found.\r\n":"550 You can't upload here!\r\n";
+  h->hdrbuf=forreading?"550 No such file or directory.\r\n":"550 You can't upload here!\r\n";
   if (x[1]) {
-    if (forreading) open_for_reading(&fd,x+1); else open_for_writing(&fd,x+1);
+    switch (forreading) {
+    case 1: open_for_reading(&fd,x+1); break;
+    case 0: open_for_writing(&fd,x+1); break;
+    case 2: fd=mkdir(x+1,0777);
+	    if (!fd) chmod(x+1,0777);
+	    break;
+    }
   }
 
   if (logging && what) {
@@ -1368,6 +1374,12 @@ static int ftp_cwd(struct http_data* h,char* s) {
   return 0;
 }
 
+static int ftp_mkdir(struct http_data* h,const char* s) {
+  if (ftp_open(h,s,2,0,"mkdir")==-1) return -1;
+  h->hdrbuf="257 directory created.\r\n";
+  return 0;
+}
+
 void ftpresponse(struct http_data* h,int64 s) {
   char* c;
   h->filefd=-1;
@@ -1564,6 +1576,9 @@ syntaxerror:
     c+=5;
     if (ftp_size(h,c)==0)
       c=h->hdrbuf;
+  } else if (case_starts(c,"MKD ")) {
+    c+=4;
+    ftp_mkdir(h,c);
   } else if (case_equals(c,"FEAT")) {
     h->hdrbuf="211-Features:\r\n MDTM\r\n REST STREAM\r\n SIZE\r\n211 End\r\n";
   } else if (case_equals(c,"SYST")) {
