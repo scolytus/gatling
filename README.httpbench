@@ -2,7 +2,7 @@ httpbench is a latency measurement tool.
 
 Call it like this:
 
-  ./httpbench -k -c 500 -i 10 -s 5 http://127.0.0.1:8000/
+  ./httpbench -k -c 1000 -i 10 -s 5 http://127.0.0.1:8000/README.httpbench
 
 This means that httpbench should open 500 HTTP connections to
 127.0.0.1:8000, and every 10 connections it should 5 times request "/"
