@@ -27,6 +27,9 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include "version.h"
+#include <assert.h>
+
+static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 
 #ifdef USE_ZLIB
 #include <zlib.h>
@@ -61,30 +64,94 @@ enum encoding {
   BZIP2,
 };
 
+enum conntype {
+  HTTPSERVER6,	/* call socket_accept6() */
+  HTTPSERVER4,	/* call socket_accept4() */
+  HTTPREQUEST,	/* read and handle http request */
+  FTPSERVER6,	/* call socket_accept6() */
+  FTPSERVER4,	/* call socket_accept4() */
+  FTPCONTROL6,	/* read and handle ftp commands */
+  FTPCONTROL4,	/* read and handle ftp commands */
+  FTPPASSIVE,	/* accept a slave connection */
+  FTPACTIVE,	/* still need to connect slave connection */
+  FTPSLAVE,	/* send/receive files */
+};
+
+enum ftpstate {
+  GREETING,
+  WAITINGFORUSER,
+  LOGGEDIN,
+  WAITCONNECT,
+};
+
 struct http_data {
+  enum conntype t;
+  enum ftpstate f;
   array r;
   io_batch iob;
-  char myip[16];
+  unsigned char myip[16];	/* this is needed for virtual hosting */
+  uint32 myscope_id;		/* in the absence of a Host header */
   uint16 myport;
+  uint16 destport;	/* port on remote system, used for active FTP */
   char* hdrbuf,* bodybuf;
   const char *mimetype;
-  int hlen,blen;
-  int keepalive;
-  int filefd;
+  int hlen,blen;	/* hlen == length of hdrbuf, blen == length of bodybuf */
+  int keepalive;	/* 1 if we want the TCP connection to stay connected */
+			/* this is always 1 for FTP except after the client said QUIT */
+  int filefd;	/* -1 or the descriptor of the file we are sending out */
+  int buddy;	/* descriptor for the other connection, only used for FTP */
+  unsigned char peerip[16];	/* needed for active FTP */
   enum encoding encoding;
+  char* ftppath;
+  uint64 ftp_rest;	/* offset to start transfer at */
 };
+
+/* "/foo" -> "/foo"
+ * "/foo/./" -> "/foo"
+ * "/foo/.." -> "/" */
+static int canonpath(char* s) {
+  int i,j;
+  char c;
+  for (i=j=0; (c=s[i]); ++i) {
+    if (c=='/') {
+      while (s[i+1]=='/') ++i;			/* "//" */
+    } else if (c=='.' && j && s[j-1]=='/') {
+      if (s[i+1]=='.' && (s[i+2]=='/' || s[i+2]==0)) {		/* /../ */
+	if (j>1)
+	  for (j-=2; s[j]!='/' && j>0; --j);	/* remove previous dir */
+	i+=2;
+      } else if (s[i+1]=='/' || s[i+1]==0) {
+	++i;
+	continue;
+      } else
+	c=':';
+    }
+    if (!(s[j]=s[i])) break; ++j;
+  }
+  if (j && s[j-1]=='/') --j;
+  if (!j) { s[0]='/'; j=1; }
+  s[j]=0;
+  return j;
+}
 
 int header_complete(struct http_data* r) {
   long i;
   long l=array_bytes(&r->r);
   const char* c=array_start(&r->r);
-  for (i=0; i+1<l; ++i) {
-    if (c[i]=='\n' && c[i+1]=='\n')
-      return i+2;
-    if (i+3<l &&
-	c[i]=='\r' && c[i+1]=='\n' &&
-	c[i+2]=='\r' && c[i+3]=='\n')
-      return i+4;
+  if (r->t==HTTPREQUEST) {
+    for (i=0; i+1<l; ++i) {
+      if (c[i]=='\n' && c[i+1]=='\n')
+	return i+2;
+      if (i+3<l &&
+	  c[i]=='\r' && c[i+1]=='\n' &&
+	  c[i+2]=='\r' && c[i+3]=='\n')
+	return i+4;
+    }
+  } else {
+    /* FTP */
+    for (i=0; i<l; ++i)
+      if (c[i]=='\n')
+	return i+1;
   }
   return 0;
 }
@@ -93,28 +160,36 @@ static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nCo
 
 void httperror(struct http_data* r,const char* title,const char* message) {
   char* c;
-  c=r->hdrbuf=(char*)malloc(str_len(message)+str_len(title)+250);
-  if (!c) {
-    r->hdrbuf=oom;
-    r->hlen=str_len(r->hdrbuf);
-
-    buffer_putsflush(buffer_1,"error_oom\n");
-
+  if (r->t==HTTPSERVER4 || r->t==HTTPSERVER6) {
+    c=r->hdrbuf=(char*)malloc(str_len(message)+str_len(title)+250);
+    if (!c) {
+      r->hdrbuf=oom;
+      r->hlen=str_len(r->hdrbuf);
+      buffer_putsflush(buffer_1,"error_oom\n");
+      iob_addbuf(&r->iob,r->hdrbuf,r->hlen);
+    } else {
+      c+=fmt_str(c,"HTTP/1.0 ");
+      c+=fmt_str(c,title);
+      c+=fmt_str(c,"\r\nContent-Type: text/html\r\nConnection: ");
+      c+=fmt_str(c,r->keepalive?"keep-alive":"close");
+      c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
+      c+=fmt_ulong(c,str_len(message)+str_len(title)+16-4);
+      c+=fmt_str(c,"\r\n\r\n<title>");
+      c+=fmt_str(c,title+4);
+      c+=fmt_str(c,"</title>\n");
+      c+=fmt_str(c,message);
+      c+=fmt_str(c,"\n");
+      r->hlen=c - r->hdrbuf;
+      iob_addbuf_free(&r->iob,r->hdrbuf,r->hlen);
+    }
   } else {
-    c+=fmt_str(c,"HTTP/1.0 ");
+    /* FTP */
+    c=r->hdrbuf=(char*)malloc(str_len(title)+3);
     c+=fmt_str(c,title);
-    c+=fmt_str(c,"\r\nContent-Type: text/html\r\nConnection: ");
-    c+=fmt_str(c,r->keepalive?"keep-alive":"close");
-    c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
-    c+=fmt_ulong(c,str_len(message)+str_len(title)+16-4);
-    c+=fmt_str(c,"\r\n\r\n<title>");
-    c+=fmt_str(c,title+4);
-    c+=fmt_str(c,"</title>\n");
-    c+=fmt_str(c,message);
-    c+=fmt_str(c,"\n");
-    r->hlen=c - r->hdrbuf;
+    c+=fmt_str(c,"\r\n");
+    r->hlen=c-r->hdrbuf;
+    iob_addbuf_free(&r->iob,r->hdrbuf,r->hlen);
   }
-  iob_addbuf_free(&r->iob,r->hdrbuf,r->hlen);
 }
 
 static struct mimeentry { const char* name, *type; } mimetab[] = {
@@ -301,7 +376,6 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     char buf[31];
     int j;
     struct tm* x=localtime(&ab[i].ss.st_mtime);
-    static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
     if (name[0]=='.') {
       if (name[1]==0) continue; /* skip "." */
       if (name[1]!='.' || name[2]!=0)	/* skip dot-files */
@@ -384,7 +458,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
       i=fmt_ip4(s,h->myip+12);
     else
       i=fmt_ip6(s,h->myip);
-    i+=fmt_str(s+i," ");
+    i+=fmt_str(s+i,":");
     i+=fmt_ulong(s+i,h->myport);
     s[i]=0;
   } else {
@@ -721,6 +795,609 @@ fini:
   io_wantwrite(s);
 }
 
+
+
+
+/* FTP */
+
+static int ftp_vhost(struct http_data* h) {
+  char* y;
+  int i;
+
+  /* construct artificial Host header from IP */
+  y=alloca(IP6_FMT+7);
+  if (byte_equal(h->myip,12,V4mappedprefix))
+    i=fmt_ip4(y,h->myip+12);
+  else
+    i=fmt_ip6(y,h->myip);
+  i+=fmt_str(y+i,":");
+  i+=fmt_ulong(y+i,h->myport);
+  y[i]=0;
+
+  fchdir(origdir);
+  if (virtual_hosts>=0) {
+    if (chdir(y)==-1)
+      if (chdir("default")==-1)
+	if (virtual_hosts==1) {
+	  h->hdrbuf="425 no such virtual host.\r\n";
+	  return -1;
+	}
+  }
+  return 0;
+}
+
+static int ftp_open(struct http_data* h,const char* s,int forreading) {
+  int l=h->ftppath?str_len(h->ftppath):0;
+  char* x=alloca(l+strlen(s)+5);
+  char* y;
+  int64 fd;
+
+  /* first, append to path */
+  if (h->ftppath)
+    y=x+fmt_str(x,h->ftppath);
+  else
+    y=x;
+  y+=fmt_str(y,"/");
+  y+=fmt_str(y,s);
+  if (y[-1]=='\n') --y;
+  if (y[-1]=='\r') --y;
+  *y=0;
+
+  /* now reduce "//" and "/./" and "/[^/]+/../" to "/" */
+  l=canonpath(x);
+
+  if (ftp_vhost(h)) return -1;
+
+  if (!(forreading?io_readfile(&fd,x+1):io_createfile(&fd,x+1))) {
+    h->hdrbuf="425 file not found.\r\n";
+    return -1;
+  }
+  return fd;
+}
+
+static int ftp_retr(struct http_data* h,const char* s) {
+  uint64 range_first,range_last;
+  struct stat ss;
+  struct http_data* b;
+  if (h->buddy==-1 || !(b=io_getcookie(h->buddy))) {
+    h->hdrbuf="425 Need data connection!?\r\n";
+    return -1;
+  }
+  if (b->filefd!=-1) { io_close(b->filefd); b->filefd=-1; }
+  if ((b->filefd=ftp_open(h,s,1))==-1) return -1;
+  if (fstat(b->filefd,&ss)==-1)
+    range_last=0;
+  else
+    range_last=ss.st_size;
+  range_first=h->ftp_rest; h->ftp_rest=0;
+  if (range_first>range_last) range_first=range_last;
+  iob_addfile(&b->iob,b->filefd,range_first,range_last);
+
+  h->f=WAITCONNECT;
+  h->hdrbuf=malloc(100);
+  if (!h->hdrbuf) {
+    h->hdrbuf=(b->t==FTPSLAVE)?"125 go on\r\n":"150 go on\r\n";
+    return -1;
+  } else {
+    int i;
+    if (b->t==FTPSLAVE) {
+      i=fmt_str(h->hdrbuf,"125 go on (");
+      io_wantwrite(h->buddy);
+      h->f=LOGGEDIN;
+    } else if (b->t==FTPACTIVE)
+      i=fmt_str(h->hdrbuf,"150 connecting (");
+    else
+      i=fmt_str(h->hdrbuf,"150 listening (");
+    i+=fmt_ulonglong(h->hdrbuf+i,ss.st_size);
+    i+=fmt_str(h->hdrbuf+i," bytes)\r\n");
+  }
+
+  return 0;
+}
+
+static int ftp_mdtm(struct http_data* h,const char* s) {
+  struct stat ss;
+  int fd;
+  int i;
+  struct tm* t;
+  if ((fd=ftp_open(h,s,1))==-1) return -1;
+  i=fstat(fd,&ss);
+  io_close(fd);
+  if (i==-1) {
+    h->hdrbuf="500 file gone?!\r\n";
+    return -1;
+  }
+  t=gmtime(&ss.st_mtime);
+  h->hdrbuf=malloc(100);
+  if (!h->hdrbuf) {
+    h->hdrbuf="500 out of memory\r\n";
+    return -1;
+  }
+  i=fmt_str(h->hdrbuf,"213 ");
+  i+=fmt_2digits(h->hdrbuf+i,(t->tm_year+1900)/100);
+  i+=fmt_2digits(h->hdrbuf+i,(t->tm_year+1900)%100);
+  i+=fmt_2digits(h->hdrbuf+i,t->tm_mon+1);
+  i+=fmt_2digits(h->hdrbuf+i,t->tm_mday);
+  i+=fmt_2digits(h->hdrbuf+i,t->tm_hour);
+  i+=fmt_2digits(h->hdrbuf+i,t->tm_min);
+  i+=fmt_2digits(h->hdrbuf+i,t->tm_sec);
+  i+=fmt_str(h->hdrbuf+i,"\r\n");
+  h->hdrbuf[i]=0;
+  return 0;
+}
+
+static int ftp_size(struct http_data* h,const char* s) {
+  struct stat ss;
+  int fd;
+  int i;
+  if ((fd=ftp_open(h,s,1))==-1) return -1;
+  i=fstat(fd,&ss);
+  io_close(fd);
+  if (i==-1) {
+    h->hdrbuf="500 file gone?!\r\n";
+    return -1;
+  }
+  h->hdrbuf=malloc(100);
+  if (!h->hdrbuf) {
+    h->hdrbuf="500 out of memory\r\n";
+    return -1;
+  }
+  i=fmt_str(h->hdrbuf,"213 ");
+  i+=fmt_ulonglong(h->hdrbuf+i,ss.st_size);
+  i+=fmt_str(h->hdrbuf+i,"\r\n");
+  h->hdrbuf[i]=0;
+  return 0;
+}
+
+
+static void ftp_ls(array* x,const char* s,const struct stat* const ss) {
+  char buf[PATH_MAX];
+  int i,j;
+  struct tm* t;
+  {
+    int i,m=ss->st_mode;
+    for (i=0; i<10; ++i) buf[i]='-';
+    if (S_ISDIR(m)) buf[0]='d'; else
+    if (S_ISLNK(m)) buf[0]='l';	/* other specials not supported */
+    if (m&S_IRUSR) buf[1]='r';
+    if (m&S_IWUSR) buf[2]='w';
+    if (m&S_IXUSR) buf[3]='x';
+    if (m&S_IRGRP) buf[4]='r';
+    if (m&S_IWGRP) buf[5]='w';
+    if (m&S_IXGRP) buf[6]='x';
+    if (m&S_IROTH) buf[7]='r';
+    if (m&S_IWOTH) buf[8]='w';
+    if (m&S_IXOTH) buf[9]='x';
+    buf[10]=' ';
+  }
+  array_catb(x,buf,11);
+
+  i=j=fmt_ulong(buf,ss->st_nlink);
+  if (i<3) j=3;
+  array_catb(x,buf+100,fmt_pad(buf+100,buf,i,j,j));
+  array_cats(x," root     root     ");
+
+  buf[i=fmt_ulonglong(buf,ss->st_size)]=' ';
+  j=++i; if (i<8) j=8;
+  array_catb(x,buf+100,fmt_pad(buf+100,buf,i,j,j));
+
+  {
+    time_t now=time(0);
+    t=localtime(&ss->st_mtime);
+    array_catb(x,months+3*t->tm_mon,3);
+    array_cats(x," ");
+    array_catb(x,buf,fmt_2digits(buf,t->tm_mday));
+    array_cats(x," ");
+    if (ss->st_mtime<=now && ss->st_mtime>=now-60*60*12*356) {
+      array_catb(x,buf,fmt_2digits(buf,t->tm_hour));
+      array_cats(x,":");
+      array_catb(x,buf,fmt_2digits(buf,t->tm_min));
+    } else {
+      array_cats(x," ");
+      array_catb(x,buf,fmt_ulong0(buf,t->tm_year+1900,4));
+    }
+  }
+  array_cats(x," ");
+  array_cats(x,s);
+  if (S_ISLNK(ss->st_mode)) {
+    array_cats(x," -> ");
+    array_cats(x,readlink(s,buf,sizeof(buf))?"[error]":buf);
+  }
+  array_cats(x,"\r\n");
+}
+
+static int ftp_list(struct http_data* h,char* s,int _long) {
+  int i,l=h->ftppath?str_len(h->ftppath):0;
+  char* x=alloca(l+strlen(s)+5);
+  char* y;
+  DIR* D;
+  struct dirent* d;
+  int rev=0;
+  int what=0;
+
+  unsigned long o,n;
+  int (*sortfun)(de*,de*);
+  array a,b,c;
+  de* ab;
+
+  i=str_len(s);
+  if (i>1) {
+    if (s[i-1]=='\n') --i;
+    if (s[i-1]=='\r') --i;
+    s[i]=0;
+  }
+
+  byte_zero(&a,sizeof(a));
+  byte_zero(&b,sizeof(b));
+  byte_zero(&c,sizeof(c));
+  o=n=0;
+
+  sortfun=sort_name_a;
+
+  if (s[0]=='-') {
+    for (++s; *s && *s!=' '; ++s) {
+      switch (*s) {
+      case 'l': _long=1; break;
+      case 'r': rev=1; break;
+      case 'S': what=1; break;
+      case 't': what=2; break;
+      }
+    }
+    while (*s==' ') ++s;
+  }
+  {
+    switch (what) {
+    case 0: sortfun=rev?sort_name_a:sort_name_d; break;
+    case 1: sortfun=rev?sort_size_a:sort_size_d; break;
+    case 2: sortfun=rev?sort_mtime_a:sort_mtime_d; break;
+    }
+  }
+
+  /* first, append to path */
+  if (h->ftppath)
+    y=x+fmt_str(x,h->ftppath);
+  else
+    y=x;
+  y+=fmt_str(y,"/");
+  y+=fmt_str(y,s);
+  if (y[-1]=='\n') --y;
+  if (y[-1]=='\r') --y;
+  *y=0;
+
+  /* now reduce "//" and "/./" and "/[^/]+/../" to "/" */
+  l=canonpath(x);
+
+  if (ftp_vhost(h)) return 0;
+
+  D=opendir(x[1]?x+1:".");
+  if (!D) {
+    de* X=array_allocate(&a,sizeof(de),n);
+    X->name=o;
+    if (lstat(x+1,&X->ss)==-1) {
+      h->hdrbuf="450 no such file or directory\r\n";
+      return -1;
+    }
+    array_cats0(&b,s);
+    o+=str_len(s)+1;
+    ++n;
+  } else {
+    chdir(x+1);
+    while ((d=readdir(D))) {
+      de* X=array_allocate(&a,sizeof(de),n);
+      if (!X) break;
+      X->name=o;
+      if (lstat(d->d_name,&X->ss)==-1) continue;
+      array_cats0(&b,d->d_name);
+      o+=str_len(d->d_name)+1;
+      ++n;
+    }
+    closedir(D);
+  }
+  if (array_failed(&a) || array_failed(&b)) {
+    array_reset(&a);
+    array_reset(&b);
+nomem:
+    h->hdrbuf="500 out of memory\r\n";
+    return -1;
+  }
+  base=array_start(&b);
+  qsort(array_start(&a),n,sizeof(de),(int(*)(const void*,const void*))sortfun);
+
+  ab=array_start(&a);
+  for (i=0; i<n; ++i) {
+    char* name=base+ab[i].name;
+
+    if (name[0]=='.') {
+      if (name[1]==0) continue; /* skip "." */
+      if (name[1]!='.' || name[2]!=0)	/* skip dot-files */
+	continue;
+    }
+    if (_long)
+      ftp_ls(&c,name,&ab[i].ss);
+    else {
+      array_cats(&c,name);
+      array_cats(&c,"\r\n");
+    }
+  }
+  array_reset(&a);
+  array_reset(&b);
+  if (array_failed(&c)) goto nomem;
+  {
+    struct http_data* b=io_getcookie(h->buddy);
+    if (b) {
+      iob_addbuf_free(&b->iob,array_start(&c),array_bytes(&c));
+      h->f=WAITCONNECT;
+      if (b->t==FTPSLAVE) {
+	h->hdrbuf="125 go on\r\n";
+	io_wantwrite(h->buddy);
+	h->f=LOGGEDIN;
+      } else if (b->t==FTPACTIVE)
+	h->hdrbuf="150 connecting\r\n";
+      else
+	h->hdrbuf="150 I'm listening\r\n";
+    }
+  }
+  return 0;
+}
+
+void ftpresponse(struct http_data* h,int64 s) {
+  char* c;
+  h->filefd=-1;
+
+  array_cat0(&h->r);
+  c=array_start(&h->r);
+  if (case_starts(c,"QUIT\r\n")) {
+    h->hdrbuf="221 Goodbye.\r\n";
+    h->keepalive=0;
+  } else if (case_starts(c,"USER ")) {
+    c+=5;
+    if (case_equals(c,"ftp\r\n") || case_equals(c,"anonymous\r\n"))
+      h->hdrbuf="230 No need for passwords, you're logged in now.\r\n";
+    else
+      h->hdrbuf="230 I only serve anonymous users.  But I'll make an exception.\r\n";
+    h->f=LOGGEDIN;
+  } else if (case_starts(c,"PASS ")) {
+    h->hdrbuf="230 If you insist...\r\n";
+  } else if (case_starts(c,"TYPE ")) {
+    h->hdrbuf="200 yeah, whatever.\r\n";
+  } else if (case_starts(c,"PASV") || case_starts(c,"EPSV")) {
+    int epsv=(*c=='e' || *c=='E');
+    char ip[16];
+    uint16 port;
+#ifdef __broken_itojun_v6__
+#warning fixme
+#endif
+    h->buddy=socket_tcp6();
+    if (h->buddy==-1) {
+      h->hdrbuf="425 socket() failed.\r\n";
+      goto ABEND;
+    }
+    io_nonblock(h->buddy);
+    if (socket_bind6_reuse(h->buddy,h->myip,0,h->myscope_id)==-1) {
+closeandgo:
+      io_close(h->buddy);
+      h->hdrbuf="425 socket error.\r\n";
+      goto ABEND;
+    }
+    if (socket_local6(h->buddy,ip,&port,0)==-1) goto closeandgo;
+    if (!(h->hdrbuf=malloc(100))) goto closeandgo;
+    if (epsv==0) {
+      c=h->hdrbuf+fmt_str(h->hdrbuf,"227 Passive Mode OK (");
+      {
+	int i;
+	for (i=0; i<4; ++i) {
+	  c+=fmt_ulong(c,h->myip[12+i]);
+	  c+=fmt_str(c,",");
+	}
+      }
+      c+=fmt_ulong(c,(port>>8)&0xff);
+      c+=fmt_str(c,",");
+      c+=fmt_ulong(c,port&0xff);
+      c+=fmt_str(c,")\r\n");
+    } else {
+      c=h->hdrbuf+fmt_str(h->hdrbuf,"229 Passive Mode OK (|||");
+      c+=fmt_ulong(c,port);
+      c+=fmt_str(c,"|)\r\n");
+    }
+    *c=0;
+    if (io_fd(h->buddy)) {
+      struct http_data* x=malloc(sizeof(struct http_data));
+      if (!x) {
+freecloseabort:
+	free(h->hdrbuf);
+	c=0;
+	goto closeandgo;
+      }
+      byte_zero(x,sizeof(struct http_data));
+      x->buddy=s; x->filefd=-1;
+      x->t=FTPPASSIVE;
+      io_setcookie(h->buddy,x);
+      socket_listen(h->buddy,1);
+      io_wantread(h->buddy);
+      if (logging) {
+	buffer_puts(buffer_1,epsv?"epsv_listen ":"pasv_listen ");
+	buffer_putulong(buffer_1,s);
+	buffer_putspace(buffer_1);
+	buffer_putulong(buffer_1,h->buddy);
+	buffer_putspace(buffer_1);
+	buffer_putulong(buffer_1,port);
+	buffer_putnlflush(buffer_1);
+      }
+    } else
+      goto freecloseabort;
+  } else if (case_starts(c,"PORT ") || case_starts(c,"EPRT ")) {
+    int eprt=(*c=='e' || *c=='E');
+    char ip[16];
+    uint16 port;
+#ifdef __broken_itojun_v6__
+#warning fixme
+#endif
+    c+=5;
+    if (eprt) {
+      /* |1|10.0.0.4|1025| or @2@::1@1026@ */
+      char sep;
+      int i;
+      if (!(sep=*c)) goto syntaxerror;
+      if (c[2]!=sep) goto syntaxerror;
+      if (c[1]=='1') {
+	byte_copy(ip,12,V4mappedprefix);
+	if (c[3+(i=scan_ip4(c+3,ip+12))]!=sep || !i) goto syntaxerror;
+      } else if (c[1]=='2') {
+	if (c[3+(i=scan_ip6(c+3,ip))]!=sep || !i) goto syntaxerror;
+      } else goto syntaxerror;
+      c+=i+3;
+      if (c[i=scan_ushort(c,&port)]!=sep || !i) goto syntaxerror;
+    } else {
+      /* 10,0,0,1,4,1 -> 10.0.0.1:1025 */
+      unsigned long l;
+      int r,i;
+      for (i=0; i<4; ++i) {
+	if (c[r=scan_ulong(c,&l)]!=',' || l>255) {
+syntaxerror:
+	  h->hdrbuf="501 Huh?  What?!  Where am I?\r\n";
+	  goto ABEND;
+	}
+	c+=r+1;
+	ip[12+i]=l;
+	byte_copy(ip,12,V4mappedprefix);
+      }
+      if (c[r=scan_ulong(c,&l)]!=',' || l>255) goto syntaxerror;
+      c+=r+1;
+      port=l<<8;
+      if (c[r=scan_ulong(c,&l)]!='\r' || l>255) goto syntaxerror;
+      port+=l;
+    }
+    h->buddy=socket_tcp6();
+    if (h->buddy==-1) {
+      h->hdrbuf="425 socket() failed.\r\n";
+      goto ABEND;
+    }
+    io_nonblock(h->buddy);
+    if (byte_diff(h->peerip,16,ip)) {
+      h->hdrbuf="425 Sorry, but I will only connect back to your own IP.\r\n";
+      io_close(h->buddy);
+      goto ABEND;
+    }
+    h->hdrbuf="200 Okay, go ahead.\r\n";
+    if (io_fd(h->buddy)) {
+      struct http_data* x=malloc(sizeof(struct http_data));
+      if (!x) goto closeandgo;
+      byte_zero(x,sizeof(struct http_data));
+      x->buddy=s; x->filefd=-1;
+      x->t=FTPSLAVE;
+      x->destport=port;
+      io_setcookie(h->buddy,x);
+    } else
+      goto closeandgo;
+
+    socket_connect6(h->buddy,ip,port,h->myscope_id);
+
+    if (logging) {
+      buffer_puts(buffer_1,eprt?"eprt ":"port ");
+      buffer_putulong(buffer_1,s);
+      buffer_putspace(buffer_1);
+      buffer_putulong(buffer_1,h->buddy);
+      buffer_putspace(buffer_1);
+      buffer_putulong(buffer_1,port);
+      buffer_putnlflush(buffer_1);
+    }
+  } else if (case_starts(c,"PWD")) {
+    c=h->ftppath; if (!c) c="/";
+    h->hdrbuf=malloc(50+str_len(c));
+    if (h->hdrbuf) {
+      c=h->hdrbuf;
+      c+=fmt_str(c,"257 \"");
+      c+=fmt_str(c,h->ftppath?h->ftppath:"/");
+      c+=fmt_str(c,"\" \r\n");
+    } else
+      h->hdrbuf="500 out of memory\r\n";
+  } else if (case_starts(c,"CWD ")) {
+    int l=h->ftppath?str_len(h->ftppath):0;
+    char* x=alloca(l+strlen(c+=4)+5);
+    char* y;
+    /* first, append to path */
+    if (h->ftppath)
+      y=x+fmt_str(x,h->ftppath);
+    else
+      y=x;
+    y+=fmt_str(y,"/");
+    y+=fmt_str(y,c);
+    if (y[-1]=='\n') --y;
+    if (y[-1]=='\r') --y;
+    *y=0;
+
+    /* now reduce "//" and "/./" and "/[^/]+/../" to "/" */
+    l=canonpath(x);
+
+    if (ftp_vhost(h)) goto ABEND;
+
+    if (x[1] && chdir(x+1)) {
+      h->hdrbuf="425 directory not found.\r\n";
+      goto ABEND;
+    }
+    y=realloc(h->ftppath,l+1);
+    if (!y) {
+      h->hdrbuf="500 out of memory.\r\n";
+      goto ABEND;
+    }
+    y[fmt_str(y,x)]=0;
+    h->ftppath=y;
+    h->hdrbuf="200 ok.\r\n";
+  } else if (case_starts(c,"MDTM ")) {
+    c+=5;
+    if (ftp_mdtm(h,c)==0)
+      c=h->hdrbuf;
+  } else if (case_starts(c,"SIZE ")) {
+    c+=5;
+    if (ftp_size(h,c)==0)
+      c=h->hdrbuf;
+  } else if (case_starts(c,"FEAT")) {
+    h->hdrbuf="211-Features:\r\n MDTM\r\n REST STREAM\r\n SIZE\r\n211 End\r\n";
+  } else if (case_starts(c,"SYST")) {
+    h->hdrbuf="215 UNIX Type: L8\r\n";
+  } else if (case_starts(c,"REST ")) {
+    uint64 x;
+    int i;
+    c+=5;
+    if (c[i=scan_ulonglong(c,&x)]=='\r' || c[i]=='\n') {
+      h->hdrbuf="350 ok.\r\n";
+      h->ftp_rest=x;
+    } else
+      h->hdrbuf="501 invalid number\r\n";
+  } else if (case_starts(c,"RETR ")) {
+    c+=5;
+    if (ftp_retr(h,c)==0)
+      c=h->hdrbuf;
+  } else if (case_starts(c,"LIST")) {
+    c+=4;
+    if (*c==' ') ++c;
+    ftp_list(h,c,1);
+  } else if (case_starts(c,"NLST")) {
+    c+=4;
+    if (*c==' ') ++c;
+    ftp_list(h,c,0);
+  } else {
+    static int funny;
+    switch (++funny) {
+    case 1: h->hdrbuf="550 The heck you say.\r\n"; break;
+    case 2: h->hdrbuf="550 No, really?\r\n"; break;
+    case 3: h->hdrbuf="550 Yeah, whatever...\r\n"; break;
+    case 4: h->hdrbuf="550 How intriguing!\r\n"; break;
+    default: h->hdrbuf="550 I'm just a simple FTP server, you know?\r\n"; funny=0; break;
+    }
+  }
+ABEND:
+  {
+    char* d=array_start(&h->r);
+    if (c>=d && c<=d+array_bytes(&h->r))
+      iob_addbuf(&h->iob,h->hdrbuf,str_len(h->hdrbuf));
+    else
+      iob_addbuf_free(&h->iob,h->hdrbuf,str_len(h->hdrbuf));
+  }
+  io_dontwantread(s);
+  io_wantwrite(s);
+}
+
 static uid_t __uid;
 static gid_t __gid;
 
@@ -760,13 +1437,28 @@ static int switch_uid() {
 
 static void cleanup(int64 fd) {
   struct http_data* h=io_getcookie(fd);
+  int buddyfd=-1;
   if (h) {
+    buddyfd=h->buddy;
+    if (h->t==FTPSLAVE) buddyfd=-1;
     array_reset(&h->r);
     iob_reset(&h->iob);
     if (h->filefd!=-1) io_close(h->filefd);
+    free(h->ftppath);
     free(h);
   }
+  buffer_puts(buffer_2,"cleaning up fd #");
+  buffer_putulong(buffer_2,fd);
+  buffer_putnlflush(buffer_2);
   io_close(fd);
+  if (buddyfd>=0) {
+    buffer_puts(buffer_2,"cleaning up buddy fd #");
+    buffer_putulong(buffer_2,buddyfd);
+    buffer_putnlflush(buffer_2);
+    h=io_getcookie(buddyfd);
+    if (h) h->buddy=-1;
+    cleanup(buddyfd);
+  }
 }
 
 static int fini;
@@ -777,13 +1469,20 @@ void sighandler(int sig) {
 
 int main(int argc,char* argv[]) {
   int s=socket_tcp6();
+  int f=-1;
+  int doftp=0;
+  enum conntype ct=HTTPSERVER6;
+  enum conntype fct=FTPSERVER6;
 #ifdef __broken_itojun_v6__
 #warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
   int s4=socket_tcp4();
+  int f4=socket_tcp4();
+  enum conntype ct4=HTTPSERVER4;
+  enum conntype fct4=FTPSERVER4;
 #endif
   uint32 scope_id;
   char ip[16];
-  uint16 port;
+  uint16 port,fport;
   tai6464 now,last,next,tick;
   unsigned long timeout_secs=23;
   char* new_uid=0;
@@ -813,13 +1512,13 @@ int main(int argc,char* argv[]) {
   }
 
   byte_zero(ip,16);
-  port=0; scope_id=0;
+  port=0; fport=0; scope_id=0;
 
   logging=1;
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"hni:p:vVdDtT:c:u:");
+    int c=getopt(argc,argv,"hnfFi:p:vVdDtT:c:u:");
     if (c==-1) break;
     switch (c) {
     case 'n':
@@ -848,7 +1547,10 @@ int main(int argc,char* argv[]) {
       }
       break;
     case 'p':
-      i=scan_ushort(optarg,&port);
+      if (doftp==1)
+	i=scan_ushort(optarg,&fport);
+      else
+	i=scan_ushort(optarg,&port);
       if (i==0) {
 	buffer_puts(buffer_2,"gatling: warning: could not parse port ");
 	buffer_puts(buffer_2,optarg+i+1);
@@ -869,6 +1571,12 @@ int main(int argc,char* argv[]) {
       break;
     case 'D':
       directory_index=-1;
+      break;
+    case 'f':
+      doftp=1;
+      break;
+    case 'F':
+      doftp=-1;
       break;
     case 'T':
       i=scan_ulong(optarg,&timeout_secs);
@@ -896,6 +1604,8 @@ usage:
 		  "\t-c dir\tchroot to dir after binding\n"
 		  "\t\t(default is -d unless in virtual hosting mode)\n"
 		  "\t-n\tdo not produce logging output\n"
+		  "\t-f\tprovide FTP; next -p is meant for the FTP port (default: 21)\n"
+		  "\t-F\tdo not provide FTP\n"
 		  );
       return 0;
     case '?':
@@ -917,31 +1627,59 @@ usage:
 
   if (port==0)
     port=geteuid()?8000:80;
+  if (fport==0)
+    fport=geteuid()?2121:21;
 #ifdef __broken_itojun_v6__
   if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
     if (byte_equal(ip,16,V6any)) {
       if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
-	panic("socket_bind6_reuse");
+	panic("socket_bind6_reuse for http");
+      if (doftp>=0)
+	if (socket_bind6_reuse(f,ip,fport,scope_id)==-1) {
+	  if (doftp==1)
+	    panic("socket_bind6_reuse for ftp");
+	  buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
+	  io_close(f); f=-1;
+	}
     } else {
       io_close(s); s=-1;
     }
     if (socket_bind4_reuse(s4,ip+12,port)==-1)
       panic("socket_bind4_reuse");
+    if (doftp>=0)
+      if (socket_bind4_reuse(f4,ip+12,port)==-1) {
+	if (doftp==1)
+	  panic("socket_bind4_reuse");
+	buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
+	io_close(f4); f4=-1;
+      }
   } else {
     if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
       panic("socket_bind6_reuse");
     s4=-1;
+    if (doftp>=0)
+      if (socket_bind6_reuse(f,ip,port,scope_id)==-1) {
+	if (doftp==1)
+	  panic("socket_bind6_reuse");
+	buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
+	io_close(f); f=-1;
+      }
+    f4=-1;
   }
   buffer_putsflush(buffer_2,"WARNING: We are taking heavy losses working around itojun KAME madness here.\n"
 		            "         Please consider using an operating system with real IPv6 support instead!\n");
 #else
-  if (port==0) {
-    if (socket_bind6_reuse(s,ip,port=80,0)==-1)
-      if (socket_bind6_reuse(s,ip,port=8000,0)==-1)
+  if (socket_bind6_reuse(s,ip,port,0)==-1)
+    panic("socket_bind6_reuse");
+  if (doftp>=0) {
+    f=socket_tcp6();
+    if (socket_bind6_reuse(f,ip,fport,scope_id)==-1) {
+      if (doftp==1)
 	panic("socket_bind6_reuse");
-  } else
-    if (socket_bind6_reuse(s,ip,port,0)==-1)
-      panic("socket_bind6_reuse");
+      buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
+      io_close(f); f=-1;
+    }
+  }
 #endif
 
   if (prepare_switch_uid(new_uid)==-1)
@@ -965,6 +1703,13 @@ usage:
     buffer_puts(buffer_1," ");
     buffer_putulong(buffer_1,port);
     buffer_putnlflush(buffer_1);
+    if (f!=-1) {
+      buffer_puts(buffer_1,"start_ftp 0 ");
+      buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
+      buffer_puts(buffer_1," ");
+      buffer_putulong(buffer_1,fport);
+      buffer_putnlflush(buffer_1);
+    }
   }
 
 #ifdef __broken_itojun_v6__
@@ -974,6 +1719,7 @@ usage:
     io_nonblock(s);
     if (!io_fd(s))
       panic("io_fd");
+    io_setcookie(s,&ct);
     io_wantread(s);
   }
   if (s4!=-1) {
@@ -982,7 +1728,26 @@ usage:
     io_nonblock(s4);
     if (!io_fd(s4))
       panic("io_fd");
+    io_setcookie(s4,&ct4);
     io_wantread(s4);
+  }
+  if (f!=-1) {
+    if (socket_listen(f,16)==-1)
+      panic("socket_listen");
+    io_nonblock(f);
+    if (!io_fd(f))
+      panic("io_fd");
+    io_setcookie(f,&fct);
+    io_wantread(f);
+  }
+  if (f4!=-1) {
+    if (socket_listen(f4,16)==-1)
+      panic("socket_listen");
+    io_nonblock(f4);
+    if (!io_fd(f4))
+      panic("io_fd");
+    io_setcookie(f4,&fct4);
+    io_wantread(f4);
   }
 #else
   if (socket_listen(s,16)==-1)
@@ -990,7 +1755,17 @@ usage:
   io_nonblock(s);
   if (!io_fd(s))
     panic("io_fd");
+  io_setcookie(s,&ct);
   io_wantread(s);
+  if (f!=-1) {
+    if (socket_listen(f,16)==-1)
+      panic("socket_listen");
+    io_nonblock(f);
+    if (!io_fd(f))
+      panic("io_fd");
+    io_setcookie(f,&fct);
+    io_wantread(f);
+  }
 #endif
 
   for (;;) {
@@ -1028,24 +1803,107 @@ usage:
     }
 
     while ((i=io_canread())!=-1) {
-      if (i==s
-#ifdef __broken_itojun_v6__
-               || i==s4
-#endif
-                       ) {
+      struct http_data* H=io_getcookie(i);
+      if (!H) {
+	buffer_putsflush(buffer_1,"no_cookie\n");
+	return 111;
+      }
+      if (H->t==FTPPASSIVE) {
+	struct http_data* h;
 	int n;
-#ifdef __broken_itojun_v6__
+	h=io_getcookie(H->buddy);
+	assert(h);
+	n=socket_accept6(i,H->myip,&H->myport,&H->myscope_id);
+	if (n==-1) {
+	  if (logging) {
+	    buffer_puts(buffer_1,"pasv_accept_error ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putspace(buffer_1);
+	    buffer_puterror(buffer_1);
+	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
+	  h->buddy=-1;
+	  free(H);
+	  io_close(i);
+	} else {
+	  if (logging) {
+	    buffer_puts(buffer_1,"pasv_accept ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putspace(buffer_1);
+	    buffer_putulong(buffer_1,n);
+	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
+	  h->buddy=n;
+	  io_setcookie(n,H);
+	  io_close(i);
+	  H->t=FTPSLAVE;
+#ifdef TCP_NODELAY
+	  {
+	    int x=1;
+	    setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
+	  }
+#endif
+	  if (h->f==WAITCONNECT) {
+	    h->f=LOGGEDIN;
+	    io_wantwrite(h->buddy);
+	  }
+	}
+      } else if (H->t==FTPACTIVE) {
+	struct http_data* h;
+	h=io_getcookie(H->buddy);
+	assert(h);
+	if (socket_connect6(i,H->peerip,H->destport,H->myscope_id)==-1) {
+	  if (logging) {
+	    buffer_puts(buffer_1,"port_connect_error ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putspace(buffer_1);
+	    buffer_puterror(buffer_1);
+	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putnlflush(buffer_1);
+	  }
+	  h->buddy=-1;
+	  free(H);
+	  io_close(i);
+	} else {
+	  if (logging) {
+	    char buf[IP6_FMT];
+	    buffer_puts(buffer_1,"port_connect ");
+	    buffer_putulong(buffer_1,i);
+	    buffer_putspace(buffer_1);
+	    buffer_put(buffer_1,buf,fmt_ip6(buf,H->peerip));
+	    buffer_puts(buffer_1,":");
+	    buffer_put(buffer_1,buf,fmt_ulong(buf,H->destport));
+	    buffer_putnlflush(buffer_1);
+	  }
+	  H->t=FTPSLAVE;
+#ifdef TCP_NODELAY
+	  {
+	    int x=1;
+	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
+	  }
+#endif
+	  if (h->f==WAITCONNECT) {
+	    h->f=LOGGEDIN;
+	    io_wantwrite(h->buddy);
+	  }
+	}
+      } else if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4 || H->t==FTPSERVER6 || H->t==FTPSERVER4) {
+	int n;
 	while (1) {
-	  if (i==s4) {
+#ifdef __broken_itojun_v6__
+	  if (H->t==HTTPSERVER4 || H->t==FTPSERVER4) {
 	    byte_copy(ip,12,V4mappedprefix);
 	    scope_id=0;
 	    n=socket_accept4(i,ip+12,&port);
 	  } else
+#endif
 	    n=socket_accept6(i,ip,&port,&scope_id);
 	  if (n==-1) break;
-#else
-	while ((n=socket_accept6(s,ip,&port,&scope_id))!=-1) {
-#endif
 	  {
 	    char buf[IP6_FMT];
 
@@ -1063,18 +1921,35 @@ usage:
 	  io_nonblock(n);
 	  if (io_fd(n)) {
 	    struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
-	    io_wantread(n);
+	    if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6)
+	      io_wantread(n);
+	    else
+	      io_wantwrite(n);
 	    if (h) {
 	      byte_zero(h,sizeof(struct http_data));
 #ifdef __broken_itojun_v6__
 	      if (i==s4) {
 		byte_copy(h->myip,12,V4mappedprefix);
-		socket_local4(i,h->myip+12,&h->myport);
+		socket_local4(n,h->myip+12,&h->myport);
 	      } else
-		socket_local6(s,h->myip,&h->myport,0);
+		socket_local6(n,h->myip,&h->myport,0);
 #else
-	      socket_local6(s,h->myip,&h->myport,0);
+	      socket_local6(n,h->myip,&h->myport,0);
 #endif
+	      byte_copy(h->peerip,16,ip);
+	      h->myscope_id=scope_id;
+	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6)
+		h->t=HTTPREQUEST;
+	      else {
+		if (H->t==FTPSERVER6)
+		  h->t=FTPCONTROL6;
+		else
+		  h->t=FTPCONTROL4;
+		iob_addbuf(&h->iob,"220 Hi there!\r\n",15);
+		h->keepalive=1;
+	      }
+	      h->buddy=-1;
+	      h->filefd=-1;
 	      io_setcookie(n,h);
 	      if (timeout_secs)
 		io_timeout(n,next);
@@ -1083,24 +1958,24 @@ usage:
 		int i=1;
 		setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&i,sizeof(i));
 	      }
+#else
+#warning TCP_NODELAY not defined
 #endif
 	    } else
 	      io_close(n);
-	  } else {
+	  } else
 	    io_close(n);
-	  }
 	}
 	if (errno==EAGAIN)
 	  io_eagain(i);
 	else
 #ifdef __broken_itojun_v6__
-	  carp(i==s4?"socket_accept4":"socket_accept6");
+	  carp(H->t==HTTPSERVER4||H->t==FTPSERVER4?"socket_accept4":"socket_accept6");
 #else
 	  carp("socket_accept6");
 #endif
       } else {
 	char buf[8192];
-	struct http_data* h=io_getcookie(i);
 	int l=io_tryread(i,buf,sizeof buf);
 	if (l==-3) {
 	  if (logging) {
@@ -1123,25 +1998,28 @@ usage:
 	} else if (l>0) {
 	  if (timeout_secs)
 	    io_timeout(i,next);
-	  array_catb(&h->r,buf,l);
-	  if (array_failed(&h->r)) {
-	    httperror(h,"500 Server Error","request too long.");
+	  array_catb(&H->r,buf,l);
+	  if (array_failed(&H->r)) {
+	    httperror(H,"500 Server Error","request too long.");
 emerge:
 	    io_dontwantread(i);
 	    io_wantwrite(i);
-	  } else if (array_bytes(&h->r)>8192) {
-	    httperror(h,"500 request too long","You sent too much headers");
-	    array_reset(&h->r);
+	  } else if (array_bytes(&H->r)>8192) {
+	    httperror(H,"500 request too long","You sent too much headers");
+	    array_reset(&H->r);
 	    goto emerge;
-	  } else if ((l=header_complete(h)))
-	    httpresponse(h,i);
+	  } else if ((l=header_complete(H))) {
+	    if (H->t==HTTPREQUEST)
+	      httpresponse(H,i);
+	    else
+	      ftpresponse(H,i);
+	  }
 	}
       }
     }
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
       int64 r=iob_send(i,&h->iob);
-/*      printf("iob_send returned %lld\n",r); */
       if (r==-1)
 	io_eagain(i);
       else if (r<=0) {
@@ -1155,9 +2033,18 @@ emerge:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
+	  if (h->t==FTPSLAVE) {
+	    struct http_data* b=io_getcookie(h->buddy);
+	    if (b) {
+	      b->buddy=-1;
+	      iob_reset(&b->iob);
+	      iob_adds(&b->iob,"554 socket error.\r\n");
+	      io_wantwrite(h->buddy);
+	    }
+	  }
 	  cleanup(i);
 	} else {
-	  if (logging) {
+	  if (logging && h->t == HTTPREQUEST) {
 	    buffer_puts(buffer_1,"request_done ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
@@ -1177,12 +2064,26 @@ emerge:
 	      buffer_putulong(buffer_1,i);
 	      buffer_putnlflush(buffer_1);
 	    }
+	    if (h->t==FTPSLAVE) {
+	      struct http_data* b=io_getcookie(h->buddy);
+	      if (b) {
+		b->buddy=-1;
+		iob_reset(&b->iob);
+		iob_adds(&b->iob,"226 Done.\r\n");
+		io_dontwantread(h->buddy);
+		io_wantwrite(h->buddy);
+	      } else
+		buffer_putsflush(buffer_2,"ARGH: no cookie or no buddy for FTP slave!\n");
+	    }
 	    cleanup(i);
 	  }
 	}
       } else
-	if (timeout_secs)
+	if (timeout_secs) {
 	  io_timeout(i,next);
+	  if (h->t==FTPSLAVE)
+	    io_timeout(h->buddy,next);
+	}
     }
   }
   io_finishandshutdown();
