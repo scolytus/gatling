@@ -1,3 +1,5 @@
 
 FreeBSD: accf_http(9)
 
+make sure HEAD through proxy works or is rejected.
+

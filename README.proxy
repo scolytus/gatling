@@ -11,7 +11,7 @@ combine the best of all worlds.
 
 For testing, run gatling like this:
 
-  ./gatling -C 127.0.0.1/8023/cgi$
+  ./gatling -p 127.0.0.1/8023/cgi$
 
 And then run fnord in the same directory like this:
 
@@ -26,9 +26,9 @@ My current idea is that fnord would run an external program (think:
 perl) that would get peer IP address and HTTP request on stdin and write
 a priority on stdout.
 
-You can have more than one -C statement.  The first matching will always
+You can have more than one -p statement.  The first matching will always
 be used.  So you can have one backend for .jsp and a different one for
 .cgi.
 
-This CGI proxy mode will only be used if the file ".cgi" exists in the
+This CGI proxy mode will only be used if the file ".proxy" exists in the
 root of the virtual server.

@@ -6,6 +6,7 @@
   add broken-symlink-redirect like fnord does (read README.redirect)
   output size in log as 64-bit number
   add resume support to dl
+  support POST for CGI proxy
 
 0.4:
   add primitive FTP support (default: enabled; disable with -F!)
