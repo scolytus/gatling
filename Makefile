@@ -10,17 +10,17 @@ CC=gcc
 CFLAGS=-pipe -Wall -O -g -I../libowfat/
 LDFLAGS=-g -L../libowfat/ -lowfat
 
-gatling: gatling.o
-	$(CC) -o $@ gatling.o $(LDFLAGS)
+gatling: gatling.o libsocket
+	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket`
 
-httpbench: httpbench.o
-	$(CC) -o $@ httpbench.o $(LDFLAGS)
+httpbench: httpbench.o libsocket
+	$(CC) -o $@ httpbench.o $(LDFLAGS) `cat libsocket`
 
-dl: dl.o
-	$(CC) -o $@ dl.o $(LDFLAGS)
+dl: dl.o libsocket
+	$(CC) -o $@ dl.o $(LDFLAGS) `cat libsocket`
 
-bindbench: bindbench.o
-	$(CC) -o $@ bindbench.o $(LDFLAGS)
+bindbench: bindbench.o libsocket
+	$(CC) -o $@ bindbench.o $(LDFLAGS) `cat libsocket`
 
 mmapbench: mmapbench.o
 	$(CC) -o $@ mmapbench.o $(LDFLAGS)
@@ -37,8 +37,8 @@ mktestdata: mktestdata.o
 manymapbench: manymapbench.o
 	$(CC) -o $@ manymapbench.o $(LDFLAGS)
 
-ioerr: ioerr.o
-	$(CC) -o $@ ioerr.o $(LDFLAGS)
+ioerr: ioerr.o libsocket
+	$(CC) -o $@ ioerr.o $(LDFLAGS) `cat libsocket`
 
 gatling.o: version.h
 
@@ -48,6 +48,12 @@ version.h: CHANGES
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
 
+libsocket:
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
+	fi; fi; fi > libsocket
+
 install: gatling
 	install -D $(BINDIR)
 	install $@ $(BINDIR)
@@ -56,4 +62,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f $(TARGET) *.o version.h core *.core
+	rm -f $(TARGET) *.o version.h core *.core libsocket

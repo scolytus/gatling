@@ -29,7 +29,7 @@ static void panic(const char* routine) {
 }
 
 int main(int argc,char* argv[]) {
-  unsigned long count=25000;
+  unsigned long count=10000;
 
   for (;;) {
     int i;
@@ -44,12 +44,12 @@ int main(int argc,char* argv[]) {
 	buffer_putsflush(buffer_2,"\n");
       }
       break;
-    case '?':
+    case 'h':
       buffer_putsflush(buffer_2,
-		  "usage: mktestdata [-h] [-c count] filename\n"
+		  "usage: mktestdata [-h] [-c count]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
-		  "\t-c n\tmmap n 4k pages (default: 25000)\n");
+		  "\t-c n\tcreate n small files (default: 10000)\n");
       return 0;
     }
   }

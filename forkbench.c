@@ -44,11 +44,13 @@ int main(int argc,char* argv[]) {
     }
   }
 
+#ifdef RLIMIT_NPROC
   {
     struct rlimit rl;
     rl.rlim_cur=count+2; rl.rlim_max=count+2;
     setrlimit(RLIMIT_NPROC,&rl);
   }
+#endif
 
 
   {

@@ -18,7 +18,7 @@
 #include <utime.h>
 
 static void carp(const char* routine) {
-  buffer_puts(buffer_2,"httpbench: ");
+  buffer_puts(buffer_2,"dl: ");
   buffer_puts(buffer_2,routine);
   buffer_puts(buffer_2,": ");
   buffer_puterror(buffer_2);
@@ -131,13 +131,6 @@ int main(int argc,char* argv[]) {
 
   signal(SIGPIPE,SIG_IGN);
 
-  {
-    struct rlimit rl;
-    rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
-    setrlimit(RLIMIT_NOFILE,&rl);
-    setrlimit(RLIMIT_NPROC,&rl);
-  }
-
   for (;;) {
     int i;
     int c=getopt(argc,argv,"c:i:s:k");
@@ -149,7 +142,7 @@ int main(int argc,char* argv[]) {
     case 'i':
       i=scan_ulong(optarg,&interval);
       if (i==0 || optarg[i]) {
-	buffer_puts(buffer_2,"httpbench: warning: could not parse interval: ");
+	buffer_puts(buffer_2,"dl: warning: could not parse interval: ");
 	buffer_puts(buffer_2,optarg+i+1);
 	buffer_putsflush(buffer_2,"\n");
       }
@@ -157,7 +150,7 @@ int main(int argc,char* argv[]) {
     case 'c':
       i=scan_ulong(optarg,&count);
       if (i==0 || optarg[i]) {
-	buffer_puts(buffer_2,"httpbench: warning: could not parse count: ");
+	buffer_puts(buffer_2,"dl: warning: could not parse count: ");
 	buffer_puts(buffer_2,optarg+i+1);
 	buffer_putsflush(buffer_2,"\n");
       }
@@ -165,7 +158,7 @@ int main(int argc,char* argv[]) {
     case 's':
       i=scan_ulong(optarg,&sample);
       if (i==0 || optarg[i]) {
-	buffer_puts(buffer_2,"httpbench: warning: could not parse sample size: ");
+	buffer_puts(buffer_2,"dl: warning: could not parse sample size: ");
 	buffer_puts(buffer_2,optarg+i+1);
 	buffer_putsflush(buffer_2,"\n");
       }
@@ -214,7 +207,7 @@ usage:
 	host[tmp]=0;
 	scope_id=socket_getifidx(host+tmp+1);
 	if (scope_id==0) {
-	  buffer_puts(buffer_2,"httpbench: warning: network interface ");
+	  buffer_puts(buffer_2,"dl: warning: network interface ");
 	  buffer_puts(buffer_2,host+tmp+1);
 	  buffer_putsflush(buffer_2," not found.\n");
 	}
@@ -225,7 +218,7 @@ usage:
       stralloc a={0};
       stralloc_copys(&a,host);
       if (dns_ip6(&ips,&a)==-1) {
-	buffer_puts(buffer_2,"httpbench: could not resolve IP: ");
+	buffer_puts(buffer_2,"dl: could not resolve IP: ");
 	buffer_puts(buffer_2,host);
 	buffer_putnlflush(buffer_2);
 	return 1;
@@ -242,7 +235,7 @@ usage:
       i+=fmt_str(request+i,host);
       i+=fmt_str(request+i,":");
       i+=fmt_ulong(request+i,port);
-      i+=fmt_str(request+i,"\r\nUser-Agent: httpbench/1.0\r\nConnection: ");
+      i+=fmt_str(request+i,"\r\nUser-Agent: dl/1.0\r\nConnection: ");
       i+=fmt_str(request+i,keepalive?"keep-alive":"close");
       i+=fmt_str(request+i,"\r\n\r\n");
       rlen=i; request[rlen]=0;

@@ -1,6 +1,7 @@
 case `uname -s` in
   Linux)
     sysctl -w kernel.threads-max=6000
+    sysctl -w net.ipv4.ip_local_port_range="1024 61000"
     ;;
   FreeBSD)
     sysctl -w kern.maxfiles=11000
@@ -15,6 +16,10 @@ case `uname -s` in
   NetBSD)
     sysctl -w kern.maxfiles=11000
     sysctl -w kern.maxproc=6000
+    ;;
+  AIX)
+    chdev -L sys0 -a maxuproc=11000
+    no -o tcp_ephemeral_low=1024
     ;;
 esac
 

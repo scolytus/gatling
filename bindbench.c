@@ -29,7 +29,9 @@ int main(int argc,char* argv[]) {
     struct rlimit rl;
     rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
     setrlimit(RLIMIT_NOFILE,&rl);
+#ifdef RLIMIT_NPROC
     setrlimit(RLIMIT_NPROC,&rl);
+#endif
   }
 
   for (;;) {
@@ -61,7 +63,7 @@ int main(int argc,char* argv[]) {
 
 
   {
-    int i;
+    int i,r;
     char ip[16];
     int port;
 #ifdef __i386__
@@ -84,10 +86,22 @@ int main(int argc,char* argv[]) {
 #else
       gettimeofday(&b,0);
 #endif
+      if (socks[i]==-1) {
+	buffer_puts(buffer_2,"socket() failed: ");
+	buffer_puterror(buffer_2);
+	buffer_putnlflush(buffer_2);
+	exit(1);
+      }
       if (v6)
-	socket_bind6(socks[i],ip,port,0);
+	r=socket_bind6(socks[i],ip,port,0);
       else
-	socket_bind4(socks[i],ip,port);
+	r=socket_bind4(socks[i],ip,port);
+      if (r==-1) {
+	buffer_puts(buffer_2,"bind() failed: ");
+	buffer_puterror(buffer_2);
+	buffer_putnlflush(buffer_2);
+	exit(1);
+      }
 #ifdef __i386__
       rdtscl(c);
       buffer_putulong(buffer_1,b-a);

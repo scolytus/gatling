@@ -64,6 +64,20 @@ version.h: CHANGES
 %.o: %.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS)
 
+libsocket:
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
+	fi; fi; fi > libsocket
+
+libsocketkludge.a: libsocket
+	ar q $@
+	-ranlib $@
+
+LDLIBS+=`cat libsocket`
+
+$(TARGETS): libsocketkludge.a
+
 install: gatling
 	install -D $(BINDIR)
 	install $@ $(BINDIR)
@@ -72,4 +86,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f $(TARGETS) *.o version.h core *.core
+	rm -f $(TARGETS) *.o version.h core *.core libsocket

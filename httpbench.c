@@ -170,8 +170,10 @@ int main(int argc,char* argv[]) {
   if (!geteuid()) {
     struct rlimit rl;
     long l;
+#ifdef RLIMIT_NPROC
     rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
     setrlimit(RLIMIT_NPROC,&rl);
+#endif
     for (l=0; l<20000; l+=500) {
       rl.rlim_cur=l; rl.rlim_max=l;
       if (setrlimit(RLIMIT_NOFILE,&rl)==-1) break;
