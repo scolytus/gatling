@@ -175,6 +175,14 @@ usage:
     int colon=str_chr(host,':');
     int slash=str_chr(host,'/');
     char* c;
+    if (host[0]=='[') {	/* ipv6 IP notation */
+      int tmp;
+      ++host;
+      tmp=str_chr(host,']');
+      if (host[tmp]==']') host[tmp]=0;
+      if (host[tmp+1]==':') colon=tmp+1;
+      if (colon<tmp+1) colon=slash;
+    }
     if (colon<slash) {
       host[colon]=0;
       c=host+colon+1;
@@ -190,12 +198,6 @@ usage:
       host=tmp;
     }
     *c='/';
-    if (host[0]=='[') {	/* ipv6 IP notation */
-      int tmp;
-      ++host;
-      tmp=str_chr(host,']');
-      if (host[tmp]==']') host[tmp]=0;
-    }
     {
       int tmp=str_chr(host,'%');
       if (host[tmp]) {
