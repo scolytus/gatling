@@ -1580,6 +1580,7 @@ syntaxerror:
       x->buddy=s; x->filefd=-1;
       x->t=FTPACTIVE;
       x->destport=port;
+      byte_copy(x->peerip,16,ip);
       io_setcookie(h->buddy,x);
     } else
       goto closeandgo;
