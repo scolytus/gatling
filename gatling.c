@@ -771,7 +771,6 @@ int main(int argc,char* argv[]) {
     struct sigaction sa;
     byte_zero(&sa,sizeof(sa));
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags=SA_RESTART|SA_NOCLDSTOP;
     sa.sa_handler=sighandler;
     sigaction(SIGINT,&sa,0);
   }
