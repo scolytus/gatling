@@ -8,7 +8,7 @@ CFLAGS=-pipe -Wall -O -g -I../libowfat/
 LDFLAGS=-g -L../libowfat/
 
 gatling: gatling.o
-	$(CC) -o $@ $< -lowfat $(LDFLAGS)
+	$(CC) -o $@ gatling.o -lowfat $(LDFLAGS)
 
 gatling.o: version.h
 
@@ -16,7 +16,7 @@ version.h: CHANGES
 	(head -1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
 
 %.o: %.c
-	$(CC) -c $< -o $@ -I. $(CFLAGS)
+	$(CC) -c $< -I. $(CFLAGS)
 
 install: gatling
 	install -D $(BINDIR)
