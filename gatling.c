@@ -637,7 +637,10 @@ e404:
       if (logging) {
 	char buf[IP6_FMT+10];
 	int x;
-	x=fmt_ip6(buf,h->myip);
+	if (byte_equal(h->myip,12,V4mappedprefix))
+	  x=fmt_ip4(buf,h->myip+12);
+	else
+	  x=fmt_ip6(buf,h->myip);
 	x+=fmt_str(buf+x,"/");
 	x+=fmt_ulong(buf+x,h->myport);
 	buf[x]=0;
@@ -666,7 +669,10 @@ e404:
 	  if (logging) {
 	    char buf[IP6_FMT+10];
 	    int x;
-	    x=fmt_ip6(buf,h->myip);
+	    if (byte_equal(h->myip,12,V4mappedprefix))
+	      x=fmt_ip4(buf,h->myip+12);
+	    else
+	      x=fmt_ip6(buf,h->myip);
 	    x+=fmt_str(buf+x,"/");
 	    x+=fmt_ulong(buf+x,h->myport);
 	    buf[x]=0;
@@ -789,7 +795,10 @@ rangeerror:
 	if (logging) {
 	  char buf[IP6_FMT+10];
 	  int x;
-	  x=fmt_ip6(buf,h->myip);
+	  if (byte_equal(h->myip,12,V4mappedprefix))
+	    x=fmt_ip4(buf,h->myip+12);
+	  else
+	    x=fmt_ip6(buf,h->myip);
 	  x+=fmt_str(buf+x,"/");
 	  x+=fmt_ulong(buf+x,h->myport);
 	  buf[x]=0;
@@ -850,7 +859,7 @@ static int ftp_vhost(struct http_data* h) {
   return 0;
 }
 
-static int ftp_open(struct http_data* h,const char* s,int forreading) {
+static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,const char* what) {
   int l=h->ftppath?str_len(h->ftppath):0;
   char* x=alloca(l+strlen(s)+5);
   char* y;
@@ -874,21 +883,54 @@ static int ftp_open(struct http_data* h,const char* s,int forreading) {
 
   if (!(forreading?io_readfile(&fd,x+1):io_createfile(&fd,x+1))) {
     h->hdrbuf="425 file not found.\r\n";
-    return -1;
+    fd=-1;
   }
+
+  if (logging && what) {
+    buffer_puts(buffer_1,what);
+    if (fd==-1) buffer_puts(buffer_1,"/404");
+    buffer_putspace(buffer_1);
+    buffer_putulong(buffer_1,sock);
+    buffer_putspace(buffer_1);
+    buffer_putlogstr(buffer_1,x+1);
+    buffer_putspace(buffer_1);
+  }
+
   return fd;
 }
 
-static int ftp_retr(struct http_data* h,const char* s) {
+static int ftp_retr(struct http_data* h,const char* s,int64 sock) {
   uint64 range_first,range_last;
   struct stat ss;
   struct http_data* b;
+
+  char buf[IP6_FMT+10];
+  int x;
+  if (byte_equal(h->myip,12,V4mappedprefix))
+    x=fmt_ip4(buf,h->myip+12);
+  else
+    x=fmt_ip6(buf,h->myip);
+  x+=fmt_str(buf+x,"/");
+  x+=fmt_ulong(buf+x,h->myport);
+  buf[x]=0;
+
   if (h->buddy==-1 || !(b=io_getcookie(h->buddy))) {
     h->hdrbuf="425 Need data connection!?\r\n";
     return -1;
   }
   if (b->filefd!=-1) { io_close(b->filefd); b->filefd=-1; }
-  if ((b->filefd=ftp_open(h,s,1))==-1) return -1;
+  b->filefd=ftp_open(h,s,1,sock,"RETR");
+  if (b->filefd==-1) {
+
+    if (logging) {
+      buffer_putulonglong(buffer_1,0);
+      buffer_putspace(buffer_1);
+      buffer_putlogstr(buffer_1,buf);
+      buffer_putnlflush(buffer_1);
+    }
+
+    return -1;
+  }
   if (fstat(b->filefd,&ss)==-1)
     range_last=0;
   else
@@ -896,6 +938,13 @@ static int ftp_retr(struct http_data* h,const char* s) {
   range_first=h->ftp_rest; h->ftp_rest=0;
   if (range_first>range_last) range_first=range_last;
   iob_addfile(&b->iob,b->filefd,range_first,range_last);
+
+  if (logging) {
+    buffer_putulonglong(buffer_1,range_last-range_first);
+    buffer_putspace(buffer_1);
+    buffer_putlogstr(buffer_1,buf);
+    buffer_putnlflush(buffer_1);
+  }
 
   h->f=WAITCONNECT;
   h->hdrbuf=malloc(100);
@@ -924,7 +973,7 @@ static int ftp_mdtm(struct http_data* h,const char* s) {
   int fd;
   int i;
   struct tm* t;
-  if ((fd=ftp_open(h,s,1))==-1) return -1;
+  if ((fd=ftp_open(h,s,1,0,0))==-1) return -1;
   i=fstat(fd,&ss);
   io_close(fd);
   if (i==-1) {
@@ -954,7 +1003,7 @@ static int ftp_size(struct http_data* h,const char* s) {
   struct stat ss;
   int fd;
   int i;
-  if ((fd=ftp_open(h,s,1))==-1) return -1;
+  if ((fd=ftp_open(h,s,1,0,0))==-1) return -1;
   i=fstat(fd,&ss);
   io_close(fd);
   if (i==-1) {
@@ -1390,7 +1439,7 @@ syntaxerror:
       h->hdrbuf="501 invalid number\r\n";
   } else if (case_starts(c,"RETR ")) {
     c+=5;
-    if (ftp_retr(h,c)==0)
+    if (ftp_retr(h,c,s)==0)
       c=h->hdrbuf;
   } else if (case_starts(c,"LIST")) {
     c+=4;
