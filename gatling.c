@@ -539,7 +539,7 @@ e404:
 	buffer_puts(buffer_1," 0 ");
 	buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	buffer_puts(buffer_1," ");
-	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
 	buffer_putsflush(buffer_1,"\n");
       }
 
@@ -562,7 +562,7 @@ e404:
 	    buffer_puts(buffer_1," ");
 	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	    buffer_puts(buffer_1," ");
-	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
 	    buffer_putsflush(buffer_1,"\n");
 	  }
 
@@ -669,7 +669,7 @@ rangeerror:
 	  buffer_puts(buffer_1," ");
 	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	  buffer_puts(buffer_1," ");
-	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referrer"))?tmp:"[no_referrer]");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
 	  buffer_putsflush(buffer_1,"\n");
 	}
       }
