@@ -67,7 +67,6 @@ int header_complete(struct http_data* r) {
 static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nout of memory\n";
 
 void httperror(struct http_data* r,const char* title,const char* message) {
-  int i;
   char* c;
   c=r->hdrbuf=(char*)malloc(strlen(message)+strlen(title)+250);
   if (!c) {
@@ -77,7 +76,7 @@ void httperror(struct http_data* r,const char* title,const char* message) {
     buffer_putsflush(buffer_1,"error_oom\n");
 
   } else {
-    i=fmt_str(c,"HTTP/1.0 ");
+    c+=fmt_str(c,"HTTP/1.0 ");
     c+=fmt_str(c,title);
     c+=fmt_str(c,"\r\nContent-Type: text/html\r\nConnection: ");
     c+=fmt_str(c,r->keepalive?"keep-alive":"close");
