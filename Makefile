@@ -18,7 +18,7 @@ else
 DIET=
 endif
 else
-DIET:=$(diet_path)
+DIET:=$(strip $(diet_path))
 endif
 
 # to build without diet libc support, use $ make DIET=
@@ -40,7 +40,14 @@ CFLAGS+=-DUSE_ZLIB
 LDFLAGS+=-lz
 endif
 
+libowfat_path = $(strip $(foreach dir,../libowfat*,$(wildcard $(dir)/textcode.h)))
+ifneq ($(libowfat_path),)
+CFLAGS+=$(foreach fnord,$(libowfat_path),-I$(dir $(fnord)))
+LDFLAGS+=$(foreach fnord,$(libowfat_path),-L$(dir $(fnord)))
+endif
+
 gatling: gatling.o
+	echo $(libowfat_path)
 	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
 
 gatling.o: version.h
