@@ -635,6 +635,12 @@ e404:
       httperror(h,"404 Not Found","No such file or directory.");
 
       if (logging) {
+	char buf[IP6_FMT+10];
+	int x;
+	x=fmt_ip6(buf,h->myip);
+	x+=fmt_str(buf+x,"/");
+	x+=fmt_ulong(buf+x,h->myport);
+	buf[x]=0;
 	buffer_puts(buffer_1,head?"HEAD/404 ":"GET/404 ");
 	buffer_putulong(buffer_1,s);
 	buffer_puts(buffer_1," ");
@@ -643,6 +649,8 @@ e404:
 	buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	buffer_puts(buffer_1," ");
 	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
 	buffer_putsflush(buffer_1,"\n");
       }
 
@@ -656,6 +664,12 @@ e404:
 	else {
 
 	  if (logging) {
+	    char buf[IP6_FMT+10];
+	    int x;
+	    x=fmt_ip6(buf,h->myip);
+	    x+=fmt_str(buf+x,"/");
+	    x+=fmt_ulong(buf+x,h->myport);
+	    buf[x]=0;
 	    buffer_puts(buffer_1,head?"HEAD ":"GET ");
 	    buffer_putulong(buffer_1,s);
 	    buffer_puts(buffer_1," ");
@@ -666,6 +680,8 @@ e404:
 	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	    buffer_puts(buffer_1," ");
 	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
 	    buffer_putsflush(buffer_1,"\n");
 	  }
 
@@ -771,6 +787,12 @@ rangeerror:
 	}
 
 	if (logging) {
+	  char buf[IP6_FMT+10];
+	  int x;
+	  x=fmt_ip6(buf,h->myip);
+	  x+=fmt_str(buf+x,"/");
+	  x+=fmt_ulong(buf+x,h->myport);
+	  buf[x]=0;
 	  buffer_putulong(buffer_1,s);
 	  buffer_puts(buffer_1," ");
 	  buffer_putlogstr(buffer_1,filename);
@@ -785,6 +807,8 @@ rangeerror:
 	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
 	  buffer_puts(buffer_1," ");
 	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
 	  buffer_putsflush(buffer_1,"\n");
 	}
       }
