@@ -1509,7 +1509,7 @@ syntaxerror:
       buffer_putulong(buffer_1,port);
       buffer_putnlflush(buffer_1);
     }
-  } else if (case_equals(c,"PWD")) {
+  } else if (case_equals(c,"PWD") || case_equals(c,"XPWD") /* fsck windoze */) {
     c=h->ftppath; if (!c) c="/";
     h->hdrbuf=malloc(50+str_len(c));
     if (h->hdrbuf) {
