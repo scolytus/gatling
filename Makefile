@@ -1,7 +1,7 @@
 prefix=/usr/local
 BINDIR=${prefix}/bin
 
-all: gatling httpbench dl bindbench mmapbench
+all: gatling httpbench dl bindbench mmapbench forkbench
 
 CC=gcc
 CFLAGS=-pipe -Wall -O -g -I../libowfat/ -lowfat
@@ -22,6 +22,9 @@ bindbench: bindbench.o
 mmapbench: mmapbench.o
 	$(CC) -o $@ dl.o $(LDFLAGS)
 
+forkbench: forkbench.o
+	$(CC) -o $@ forkbench.o $(LDFLAGS)
+
 gatling.o: version.h
 
 version.h: CHANGES
@@ -38,4 +41,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling httpbench mmapbench bindbench dl *.o version.h
+	rm -f gatling httpbench mmapbench bindbench forkbench dl *.o version.h

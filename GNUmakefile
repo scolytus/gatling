@@ -3,7 +3,9 @@ ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin
 
-all: gatling httpbench dl bindbench mmapbench
+TARGETS=gatling httpbench bindbench mmapbench forkbench dl
+
+all: $(TARGETS)
 
 CC=gcc
 CFLAGS=-pipe -Wall
@@ -35,9 +37,11 @@ DIET+=-Os
 endif
 endif
 
+LDLIBS=-lowfat
+
 ifeq ($(ZLIB),1)
 CFLAGS+=-DUSE_ZLIB
-LDFLAGS+=-lz
+LDLIBS+=-lz
 endif
 
 libowfat_path = $(strip $(foreach dir,../libowfat*,$(wildcard $(dir)/textcode.h)))
@@ -46,20 +50,7 @@ CFLAGS+=$(foreach fnord,$(libowfat_path),-I$(dir $(fnord)))
 LDFLAGS+=$(foreach fnord,$(libowfat_path),-L$(dir $(fnord)))
 endif
 
-gatling: gatling.o
-	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
-
-httpbench: httpbench.o
-	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
-
-dl: dl.o
-	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
-
-bindbench: bindbench.o
-	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
-
-mmapbench: mmapbench.o
-	$(DIET) $(CC) -o $@ $^ -lowfat $(LDFLAGS)
+CC:=$(DIET) $(CC)
 
 gatling.o: version.h
 
@@ -77,4 +68,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling httpbench bindbench mmapbench dl *.o version.h
+	rm -f gatling httpbench bindbench mmapbench forkbench dl *.o version.h
