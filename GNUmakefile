@@ -64,7 +64,7 @@ forksbench: forkbench.o
 gatling.o: version.h
 
 tlsgatling: gatling.c ssl.o
-	-$(CC) -o $@ $^ -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+	-$(CC) -o $@ $^ $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
