@@ -506,24 +506,37 @@ usage:
 	dataconn=srv;
       }
     }
-    if (verbose) {
-      buffer_puts(buffer_1,"RETR ");
-      buffer_puts(buffer_1,filename);
-      buffer_putsflush(buffer_1,"... ");
+    if (!filename[0]) {
+      if (verbose) {
+	buffer_puts(buffer_1,"CWD ");
+	buffer_puts(buffer_1,pathname);
+	buffer_putsflush(buffer_1,"... ");
+      }
+      if ((ftpcmd2(s,&ftpbuf,"CWD ",pathname)/100)!=2) panic("CWD failed\n");
+      if (verbose) buffer_putsflush(buffer_2,"\nNLST\n");
+      if (ftpcmd(s,&ftpbuf,"NLST\r\n")!=150) panic("No 150 response to NLST\n");
+    } else {
+      if (verbose) {
+	buffer_puts(buffer_1,"RETR ");
+	buffer_puts(buffer_1,filename);
+	buffer_putsflush(buffer_1,"... ");
+      }
+      if (ftpcmd2(s,&ftpbuf,"RETR ",pathname)!=150) panic("No 150 response to RETR\n");
+      if (verbose) buffer_putsflush(buffer_1,"ok.  Downloading...\n");
     }
-    if (ftpcmd2(s,&ftpbuf,"RETR ",pathname));
-    if (verbose) buffer_putsflush(buffer_1,"ok.  Downloading...\n");
     {
       char buf[8192];
       int l;
       int64 d;
-      if (io_createfile(&d,filename)==0)
-	panic("creat");
+      if (filename[0]) {
+	if (io_createfile(&d,filename)==0)
+	  panic("creat");
+      } else d=1;
       while ((l=read(dataconn,buf,sizeof buf))>0) {
 	if (write(d,buf,l) != l) panic("short write");
       }
       if (l==-1) panic("read");
-      close(d);
+      if (d!=1) close(d);
     }
     close(dataconn);
     if (verbose) buffer_putsflush(buffer_1,"Download finished... Waiting for server to acknowledge... ");
@@ -534,7 +547,7 @@ skipdownload:
   } else
     panic("invalid mode\n");
   close(s);
-  if (u.actime) {
+  if (filename[0] && u.actime) {
     u.modtime=u.actime;
     if (utime(filename,&u)==-1) panic("utime");
   }
