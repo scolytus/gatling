@@ -14,6 +14,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <stdlib.h>
+#include <errno.h>
 
 static void carp(const char* routine) {
   buffer_puts(buffer_2,"httpbench: ");
@@ -28,11 +29,20 @@ static void panic(const char* routine) {
   exit(111);
 }
 
+uint16 bindport=0;
+
 static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   int v6=byte_diff(ip,12,V4mappedprefix);
   int s;
   if (v6) {
     s=socket_tcp6();
+    if (bindport) {
+      while (socket_bind6_reuse(s,V6any,bindport,0)==-1) {
+	if (errno!=EADDRINUSE)
+	  panic("socket_bind6");
+	if (++bindport<1024) bindport=1024;
+      }
+    }
     if (socket_connect6(s,ip,port,scope_id)==-1) {
       carp("socket_connect6");
       close(s);
@@ -40,6 +50,13 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
     }
   } else {
     s=socket_tcp4();
+    if (bindport) {
+      while (socket_bind6_reuse(s,V6any,bindport,0)==-1) {
+	if (errno!=EADDRINUSE)
+	  panic("socket_bind6");
+	if (++bindport<1024) bindport=1024;
+      }
+    }
     if (socket_connect4(s,ip+12,port)==-1) {
       carp("socket_connect4");
       close(s);
@@ -151,7 +168,7 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"c:i:s:k");
+    int c=getopt(argc,argv,"c:i:s:kb");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -181,16 +198,20 @@ int main(int argc,char* argv[]) {
 	buffer_putsflush(buffer_2,"\n");
       }
       break;
+    case 'b':
+      bindport=10000;
+      break;
     case '?':
 usage:
       buffer_putsflush(buffer_2,
-		  "usage: httpbench [-h] [-c count] [-i interval] [-s sample] url\n"
+		  "usage: httpbench [-hb] [-c count] [-i interval] [-s sample] url\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-c n\topen n connections total (default: 1000)\n"
 		  "\t-i n\tevery n connections, measure the latency (default: 10)\n"
 		  "\t-s n\tlatency == average of time to fetch an URL n times (default: 5)\n"
 		  "\t-k\tenable HTTP keep-alive\n"
+		  "\t-b\tbind the sockets ourselves, so the OS doesn't choose the ports\n"
 		  "Setting the number of connections to 1 measures the throughput\n"
 		  "instead of the latency (give URL to a large file).\n");
       return 0;
