@@ -1,4 +1,5 @@
 0.6:
+  implement ABOR (ncftp was confused after aborting a connection)
 
 0.5:
   CGI-through-proxy support (read README.proxy)

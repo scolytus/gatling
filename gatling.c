@@ -1923,6 +1923,9 @@ void ftpresponse(struct http_data* h,int64 s) {
   c=array_start(&h->r);
   {
     char* d,* e=c+array_bytes(&h->r);
+
+    write(1,c,e-c);
+
     for (d=c; d<e; ++d) {
       if (*d=='\n') {
 	if (d>c && d[-1]=='\r') --d;
@@ -1935,6 +1938,18 @@ void ftpresponse(struct http_data* h,int64 s) {
   if (case_equals(c,"QUIT")) {
     h->hdrbuf="221 Goodbye.\r\n";
     h->keepalive=0;
+  } else if (case_equals(c,"ABOR") ||
+	     case_equals(c,"\xff\xf4\xff\xf2""ABOR") ||
+	     case_equals(c,"\xff\xf4\xff""ABOR")) {
+    /* for some reason, on Linux 2.6 the trailing \xf2 sometimes does
+     * not arrive although it is visible in the tcpdump */
+    if (h->buddy==-1)
+      h->hdrbuf="226 Ok.\r\n";
+    else {
+      io_close(h->buddy);
+      h->buddy=-1;
+      h->hdrbuf="426 Ok.\r\n226 Connection closed.\r\n";
+    }
   } else if (case_starts(c,"USER ")) {
     c+=5;
     if (case_equals(c,"ftp") || case_equals(c,"anonymous")) {
