@@ -178,10 +178,11 @@ usage:
     if (host[0]=='[') {	/* ipv6 IP notation */
       int tmp;
       ++host;
+      --colon; --slash;
       tmp=str_chr(host,']');
       if (host[tmp]==']') host[tmp]=0;
       if (host[tmp+1]==':') colon=tmp+1;
-      if (colon<tmp+1) colon=slash;
+      if (colon<tmp+1) colon=tmp+1+str_len(host+tmp+1);
     }
     if (colon<slash) {
       host[colon]=0;
