@@ -32,4 +32,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling *.o version.h
+	rm -f gatling httpbench dl *.o version.h
