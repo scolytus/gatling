@@ -60,13 +60,14 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
 }
 
 struct utimbuf u;
+unsigned long long resumeofs;
 
 static int readanswer(int s,const char* filename) {
   char buf[8192];
   int i,j,body=-1,r;
-  unsigned long long rest;
   int64 d;
   unsigned long httpcode;
+  unsigned long long rest;
   i=0; d=-1; httpcode=0;
   while ((r=read(s,buf+i,sizeof(buf)-i)) > 0) {
     i+=r;
@@ -75,7 +76,8 @@ static int readanswer(int s,const char* filename) {
 	unsigned long code;
 	body=j+4;
 	if (scan_ulong(buf+9,&code)) httpcode=code;
-	if (code==200 && io_createfile(&d,filename)==0)
+	if ((resumeofs && code==206 && io_appendfile(&d,filename)==0) ||
+	    (!resumeofs && code==200 && io_createfile(&d,filename)==0))
 	  panic("creat");
 	if (r-j-4)
 	  if (write(d,buf+body,r-j-4)!=r-j-4) panic("write");
@@ -90,7 +92,7 @@ static int readanswer(int s,const char* filename) {
       break;
     }
   }
-  if (httpcode!=200) return 0;
+  if (httpcode!= (resumeofs?206:200)) return 0;
   if (r==-1) return -1;
   rest=-1;
   for (j=0; j<r; j+=str_chr(buf+j,'\n')) {
@@ -188,6 +190,7 @@ int main(int argc,char* argv[]) {
   int usev4=0;
   int verbose=0;
   int newer=0;
+  int resume=0;
   int keepalive=0;
   char ip[16];
   uint16 port=80;
@@ -205,7 +208,7 @@ int main(int argc,char* argv[]) {
   signal(SIGPIPE,SIG_IGN);
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nv");
+    int c=getopt(argc,argv,"i:ko4nvr");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -221,6 +224,9 @@ int main(int argc,char* argv[]) {
 	  ims=ss.st_mtime;
       }
       break;
+    case 'r':
+      resume=1;
+      break;
     case 'o':
       useport=1;
       break;
@@ -235,6 +241,7 @@ usage:
       buffer_putsflush(buffer_2,"usage: dl [-i file] [-no4v] url\n"
 		       "	-i fn	only fetch file if it is newer than fn\n"
 		       "	-n	only fetch file if it is newer than local copy\n"
+		       "	-r	resume\n"
 		       "	-4	use PORT and PASV instead of EPRT and EPSV\n"
 		       "	-o	use PORT and EPRT instead of EPRT and EPSV\n"
 		       "	-v	be verbose\n");
@@ -306,12 +313,22 @@ usage:
     }
 
     filename=c+str_rchr(c,'/')+1;
-    if (newer) {
+    if (resume || newer) {
       struct stat ss;
       if (stat(filename,&ss)==0) {
-	if (verbose) buffer_putsflush(buffer_1,"Found old file as If-Modified-Since reference.\n");
-	ims=ss.st_mtime;
-      }
+	if (resume) {
+	  resumeofs=ss.st_size;
+	  if (verbose) {
+	    buffer_puts(buffer_1,"Resuming from ");
+	    buffer_putulonglong(buffer_1,resumeofs);
+	    buffer_putsflush(buffer_1,"...\n");
+	  }
+	} else if (newer) {
+	  if (verbose) buffer_putsflush(buffer_1,"Found old file as If-Modified-Since reference.\n");
+	  ims=ss.st_mtime;
+	}
+      } else
+	resume=0;
     }
 
     if (mode==HTTP) {
@@ -328,6 +345,11 @@ usage:
 	if (ims) {
 	  i+=fmt_str(request+i,"\r\nIf-Modified-Since: ");
 	  i+=fmt_httpdate(request+i,ims);
+	}
+	if (resumeofs) {
+	  i+=fmt_str(request+i,"\r\nRange: bytes=");
+	  i+=fmt_ulonglong(request+i,resumeofs);
+	  i+=fmt_str(request+i,"-");
 	}
 	i+=fmt_str(request+i,"\r\nUser-Agent: dl/1.0\r\nConnection: ");
 	i+=fmt_str(request+i,keepalive?"keep-alive":"close");
@@ -418,6 +440,23 @@ usage:
 	if (verbose) buffer_putsflush(buffer_1,"invalid response format.\n");
     } else
       if (verbose) buffer_putsflush(buffer_1,"failed.\n");
+
+    if (resume) {
+      char* buf=alloca(strlen(filename)+10);
+      int i;
+      i=fmt_str(buf,"REST ");
+      i+=fmt_ulonglong(buf+i,resumeofs);
+      i+=fmt_str(buf+i,"\r\n");
+      buf[i]=0; ++i;
+      if (verbose) {
+	buffer_put(buffer_1,buf,i-3);
+	buffer_putsflush(buffer_1,"... ");
+      }
+      if (ftpcmd(s,&ftpbuf,buf)!=350) {
+	buffer_putsflush(buffer_1,verbose?"FAILED!\n":"Resume failed!\n");
+	exit(1);
+      }
+    }
 
     if (useport) {
       uint16 port;
@@ -516,14 +555,15 @@ usage:
       }
       if ((ftpcmd2(s,&ftpbuf,"CWD ",pathname)/100)!=2) panic("CWD failed\n");
       if (verbose) buffer_putsflush(buffer_2,"\nNLST\n");
-      if (ftpcmd(s,&ftpbuf,"NLST\r\n")!=150) panic("No 150 response to NLST\n");
+      if (((i=ftpcmd(s,&ftpbuf,"NLST\r\n"))!=150) && i!=125) panic("No 125/150 response to NLST\n");
     } else {
+      int i;
       if (verbose) {
 	buffer_puts(buffer_1,"RETR ");
 	buffer_puts(buffer_1,filename);
 	buffer_putsflush(buffer_1,"... ");
       }
-      if (ftpcmd2(s,&ftpbuf,"RETR ",pathname)!=150) panic("No 150 response to RETR\n");
+      if (((i=ftpcmd2(s,&ftpbuf,"RETR ",pathname))!=150) && i!=125) panic("No 125/150 response to RETR\n");
       if (verbose) buffer_putsflush(buffer_1,"ok.  Downloading...\n");
     }
     {
@@ -531,7 +571,7 @@ usage:
       int l;
       int64 d;
       if (filename[0]) {
-	if (io_createfile(&d,filename)==0)
+	if ((resume?io_appendfile(&d,filename):io_createfile(&d,filename))==0)
 	  panic("creat");
       } else d=1;
       while ((l=read(dataconn,buf,sizeof buf))>0) {
