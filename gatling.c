@@ -3089,7 +3089,7 @@ void forkslave(int fd,buffer* in) {
     }
   }
 error:
-  write(fd,&code,4);
+  if (write(fd,&code,4)!=4) exit(0);
   code=strlen(msg);
   write(fd,&code,4);
   {
