@@ -818,8 +818,38 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     }
   } else {
     h->mimetype=mimetype(filename);
-    if (!open_for_reading(&fd,filename+1,ss))
+    if (!open_for_reading(&fd,filename+1,ss)) {
+      if (errno==ENOENT) {
+	char buf[2048];
+	int i;
+	if ((i=readlink(filename+1,buf,sizeof(buf)))!=-1) {
+	  buf[i]=0;
+	  if (strstr(buf,"://")) {
+	    h->bodybuf=malloc(strlen(buf)+300);
+	    h->hdrbuf=malloc(strlen(buf)+300);
+	    if (h->bodybuf && h->hdrbuf) {
+	      int i;
+	      i=fmt_str(h->bodybuf,"Look <a href=\"");
+	      i+=fmt_str(h->bodybuf+i,buf);
+	      i+=fmt_str(h->bodybuf+i,"\">here</a>!\n");
+	      h->blen=i;
+
+	      i=fmt_str(h->hdrbuf,"HTTP/1.0 301 Go Away\r\nConnection: ");
+	      i+=fmt_str(h->hdrbuf+i,h->keepalive?"keep-alive":"close");
+	      i+=fmt_str(h->hdrbuf+i,"\r\nServer: " RELEASE "\r\nContent-Length: ");
+	      i+=fmt_ulong(h->hdrbuf+i,h->blen);
+	      i+=fmt_str(h->hdrbuf+i,"\r\nLocation: ");
+	      i+=fmt_str(h->hdrbuf+i,buf);
+	      i+=fmt_str(h->hdrbuf+i,"\r\n\r\n");
+	      h->hlen=i;
+	      return -4;
+	    }
+	    free(h->bodybuf); free(h->hdrbuf);
+	  }
+	}
+      }
       return -1;
+    }
 #ifdef DEBUG
     if (logging) {
       buffer_puts(buffer_1,"open_file ");
@@ -943,7 +973,10 @@ e404:
 
     } else {
       char* filename=c;
-      if (fd==-2) {
+      if (fd==-4) {	/* redirect */
+	iob_addbuf_free(&h->iob,h->hdrbuf,h->hlen);
+	iob_addbuf_free(&h->iob,h->bodybuf,h->blen);
+      } else if (fd==-2) {
 	char* c;
 	c=h->hdrbuf=(char*)malloc(250);
 	if (!c)
