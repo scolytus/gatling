@@ -880,7 +880,7 @@ int main(int argc,char* argv[]) {
     case 'h':
 usage:
       buffer_putsflush(buffer_2,
-		  "usage: gatling [-hvVtdD] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
+		  "usage: gatling [-hnvVtdD] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
 		  "               [-u uid] [-c dir]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
@@ -894,6 +894,7 @@ usage:
 		  "\t-u uid\tswitch to this UID after binding\n"
 		  "\t-c dir\tchroot to dir after binding\n"
 		  "\t\t(default is -d unless in virtual hosting mode)\n"
+		  "\t-n\tdo not produce logging output\n"
 		  );
       return 0;
     case '?':

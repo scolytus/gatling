@@ -72,6 +72,7 @@ libsocket:
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
 	fi; fi; fi > libsocket
+	rm -f trysocket
 
 libsocketkludge.a: libsocket
 	ar q $@
@@ -89,4 +90,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f $(TARGETS) *.o version.h core *.core libsocket
+	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a
