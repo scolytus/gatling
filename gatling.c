@@ -988,7 +988,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
       range_last=ss.st_size;
     range_first=h->ftp_rest; h->ftp_rest=0;
     if (range_first>range_last) range_first=range_last;
-    iob_addfile(&b->iob,b->filefd,range_first,range_last);
+    iob_addfile(&b->iob,b->filefd,range_first,range_last-range_first);
     if (logging) {
       buffer_putulonglong(buffer_1,range_last-range_first);
       buffer_putspace(buffer_1);
