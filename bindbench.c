@@ -120,6 +120,10 @@ int main(int argc,char* argv[]) {
       buffer_putulong(buffer_1,d);
 #endif
       buffer_puts(buffer_1,"\n");
+      if (i>50) {
+	close(socks[10]);
+	socks[10]=v6?socket_tcp6():socket_tcp4();
+      }
     }
   }
 
