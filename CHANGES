@@ -2,6 +2,7 @@
   add chroot+setuid support
   compiler warnings removed (Julien Touche)
   also take time for reaping in forkbench (Niels Provos)
+  fix memory and fd leaks (with Thomas Walpuski)
 
 0.2:
   zlib support (directory listings only)

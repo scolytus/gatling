@@ -668,10 +668,9 @@ rangeerror:
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	  c+=fmt_str(c,"\r\n\r\n");
 	  iob_addbuf_free(&h->iob,h->hdrbuf,c - h->hdrbuf);
-	  if (!head) {
-	    iob_addfile(&h->iob,fd,range_first,range_last);
-	    h->filefd=fd;
-	  }
+	  if (!head)
+	    iob_addfile(&h->iob,fd,range_first,range_last-range_first);
+	  h->filefd=fd;
 	  if (logging) {
 	    if (h->hdrbuf[9]=='3') {
 	      buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
