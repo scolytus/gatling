@@ -62,7 +62,7 @@ forksbench: forkbench.o
 gatling.o: version.h
 
 version.h: CHANGES
-	(head -1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
+	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
 
 %.o: %.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS)

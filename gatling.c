@@ -1,4 +1,5 @@
 #undef SUPPORT_SMB
+#define SUPPORT_FTP
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
@@ -113,6 +114,7 @@ enum conntype {
   HTTPSERVER4,	/* call socket_accept4() */
   HTTPREQUEST,	/* read and handle http request */
 
+#ifdef SUPPORT_FTP
   FTPSERVER6,	/* call socket_accept6() */
   FTPSERVER4,	/* call socket_accept4() */
   FTPCONTROL6,	/* read and handle ftp commands */
@@ -120,12 +122,16 @@ enum conntype {
   FTPPASSIVE,	/* accept a slave connection */
   FTPACTIVE,	/* still need to connect slave connection */
   FTPSLAVE,	/* send/receive files */
+#endif
 
+#ifdef SUPPORT_SMB
   SMBSERVER6,	/* call socket_accept6() */
   SMBSERVER4,	/* call socket_accept4() */
   SMBREQUEST,	/* read and handle SMB request */
+#endif
 };
 
+#ifdef SUPPORT_FTP
 enum ftpstate {
   GREETING,
   WAITINGFORUSER,
@@ -134,10 +140,13 @@ enum ftpstate {
   DOWNLOADING,
   UPLOADING,
 };
+#endif
 
 struct http_data {
   enum conntype t;
+#ifdef SUPPORT_FTP
   enum ftpstate f;
+#endif
   array r;
   io_batch iob;
   unsigned char myip[16];	/* this is needed for virtual hosting */
@@ -153,8 +162,10 @@ struct http_data {
   int buddy;	/* descriptor for the other connection, only used for FTP */
   unsigned char peerip[16];	/* needed for active FTP */
   enum encoding encoding;
+#ifdef SUPPORT_FTP
   char* ftppath;
   uint64 ftp_rest;	/* offset to start transfer at */
+#endif
   uint64 sent_until,prefetched_until;
 };
 
@@ -173,6 +184,7 @@ static int open_for_reading(int64* fd,const char* name) {
   return 0;
 }
 
+#ifdef SUPPORT_FTP
 static int open_for_writing(int64* fd,const char* name) {
   /* only allow creating files in world writable directories */
   const char* c;
@@ -215,6 +227,7 @@ static int canonpath(char* s) {
   s[j]=0;
   return j;
 }
+#endif
 
 int header_complete(struct http_data* r) {
   long i;
@@ -229,6 +242,7 @@ int header_complete(struct http_data* r) {
 	  c[i+2]=='\r' && c[i+3]=='\n')
 	return i+4;
     }
+#ifdef SUPPORT_SMB
   } else if (r->t==SMBREQUEST) {
     /* SMB */
     /* first four bytes are the NetBIOS session;
@@ -238,6 +252,7 @@ int header_complete(struct http_data* r) {
     if (c[0]!=0) return 1;
     len=uint32_read_big(c) & 0x00ffffff;
     if (l==len+4) return len+4;
+#endif
   } else {
     /* FTP */
     for (i=0; i<l; ++i)
@@ -331,6 +346,9 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "xbm",	"image/x-xbitmap" },
   { "xpm",	"image/x-xpixmap" },
   { "xwd",	"image/x-xwindowdump" },
+  { "text",	"text/plain" },
+  { "txt",	"text/plain" },
+  { "m3u",	"audio/x-mpegurl" },
   { 0 } };
 
 const char* mimetype(const char* filename) {
@@ -920,7 +938,7 @@ fini:
 }
 
 
-
+#ifdef SUPPORT_FTP
 /*
   __ _
  / _| |_ _ __
@@ -1699,6 +1717,7 @@ ABEND:
   io_wantwrite(s);
 }
 
+#endif /* SUPPORT_FTP */
 
 
 #ifdef SUPPORT_SMB
@@ -1875,6 +1894,7 @@ static void cleanup(int64 fd) {
   int buddyfd=-1;
   if (h) {
     buddyfd=h->buddy;
+#ifdef SUPPORT_FTP
     if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE) {
       if (buddyfd!=-1) {
 	struct http_data* b=io_getcookie(buddyfd);
@@ -1883,10 +1903,13 @@ static void cleanup(int64 fd) {
       }
       buddyfd=-1;
     }
+#endif
     array_reset(&h->r);
     iob_reset(&h->iob);
     if (h->filefd!=-1) io_close(h->filefd);
+#ifdef SUPPORT_FTP
     free(h->ftppath);
+#endif
     free(h);
   }
 #if 0
@@ -1924,13 +1947,17 @@ int main(int argc,char* argv[]) {
   int dosmb=0;
   enum { HTTP, FTP, SMB } lastopt=HTTP;
   enum conntype ct=HTTPSERVER6;
+#ifdef SUPPORT_FTP
   enum conntype fct=FTPSERVER6;
+#endif
 #ifdef __broken_itojun_v6__
 #warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
   int s4=socket_tcp4();
   enum conntype ct4=HTTPSERVER4;
+#ifdef SUPPORT_FTP
   int f4=socket_tcp4();
   enum conntype fct4=FTPSERVER4;
+#endif
 #endif
   uint32 scope_id;
   char ip[16];
@@ -2268,6 +2295,7 @@ usage:
     panic("io_fd");
   io_setcookie(s,&ct);
   io_wantread(s);
+#ifdef SUPPORT_FTP
   if (f!=-1) {
     if (socket_listen(f,16)==-1)
       panic("socket_listen");
@@ -2277,6 +2305,7 @@ usage:
     io_setcookie(f,&fct);
     io_wantread(f);
   }
+#endif
 #ifdef SUPPORT_SMB
   if (smbs!=-1) {
     if (socket_listen(smbs,16)==-1)
@@ -2334,6 +2363,7 @@ usage:
 	return 111;
       }
       H->sent_until=H->prefetched_until=0;
+#ifdef SUPPORT_FTP
       if (H->t==FTPPASSIVE) {
 	/* This is the server socket for a passive FTP data connections.
 	 * A read event means the peer established a TCP connection.
@@ -2387,9 +2417,16 @@ pasverror:
 	      io_wantread(h->buddy);
 	  }
 	}
-      } else if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4 ||
-		 H->t==FTPSERVER6 || H->t==FTPSERVER4 ||
-		 H->t==SMBSERVER6 || H->t==SMBSERVER4) {
+      } else
+#endif
+      if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
+#ifdef SUPPORT_FTP
+	|| H->t==FTPSERVER6 || H->t==FTPSERVER4
+#endif
+#ifdef SUPPORT_SMB
+	|| H->t==SMBSERVER6 || H->t==SMBSERVER4
+#endif
+	  ) {
 	/* This is an FTP or HTTP or SMB server connection.
 	 * This read event means that someone connected to us.
 	 * accept() the connection, establish connection type from
@@ -2424,7 +2461,11 @@ pasverror:
 	  if (io_fd(n)) {
 	    struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
 	    if (h) {
-	      if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4 || H->t==SMBSERVER6 || H->t==SMBSERVER4)
+	      if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
+#ifdef SUPPORT_SMB
+		|| H->t==SMBSERVER6 || H->t==SMBSERVER4
+#endif
+		)
 		io_wantread(n);
 	      else
 		io_wantwrite(n);
@@ -2450,6 +2491,7 @@ pasverror:
 		if (timeout_secs)
 		  io_timeout(n,next);
 #endif
+#ifdef SUPPORT_FTP
 	      } else {
 		if (H->t==FTPSERVER6)
 		  h->t=FTPCONTROL6;
@@ -2459,6 +2501,7 @@ pasverror:
 		h->keepalive=1;
 		if (ftptimeout_secs)
 		  io_timeout(n,nextftp);
+#endif
 	      }
 	      h->buddy=-1;
 	      h->filefd=-1;
@@ -2493,7 +2536,9 @@ pasverror:
 	char buf[8192];
 	int l=io_tryread(i,buf,sizeof buf);
 	if (l==-3) {
+#ifdef SUPPORT_FTP
 ioerror:
+#endif
 	  if (logging) {
 	    buffer_puts(buffer_1,"io_error ");
 	    buffer_putulong(buffer_1,i);
@@ -2510,6 +2555,7 @@ ioerror:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
+#ifdef SUPPORT_FTP
 	  if (H->t==FTPSLAVE) {
 	    /* This is an FTP upload, it just finished. */
 	    struct http_data* b=io_getcookie(H->buddy);
@@ -2532,9 +2578,11 @@ ioerror:
 	      }
 	    }
 	  }
+#endif
 	  cleanup(i);
 	} else if (l>0) {
 	  /* successfully read some data (l bytes) */
+#ifdef SUPPORT_FTP
 	  if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
 	    if (ftptimeout_secs)
 	      io_timeout(i,nextftp);
@@ -2550,7 +2598,9 @@ ioerror:
 	      io_timeout(H->buddy,nextftp);
 	    if ((r=write(H->filefd,buf,l))!=l)
 	      goto ioerror;
-	  } else {
+	  } else
+#endif
+	  {
 	    /* received a request */
 	    array_catb(&H->r,buf,l);
 	    if (array_failed(&H->r)) {
@@ -2571,8 +2621,10 @@ pipeline:
 	      else if (H->t==SMBREQUEST)
 		smbresponse(H,i);
 #endif
+#ifdef SUPPORT_FTP
 	      else
 		ftpresponse(H,i);
+#endif
 	      if (l < (alen=array_bytes(&H->r))) {
 		char* c=array_start(&H->r);
 		byte_copy(c,alen-l,c+l);
@@ -2591,11 +2643,17 @@ pipeline:
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
       int64 r;
+#ifdef SUPPORT_FTP
       if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
 	if (ftptimeout_secs)
 	  io_timeout(i,nextftp);
-      } else if (timeout_secs) {
+      } else
+#endif
+      if (timeout_secs) {
 	io_timeout(i,next);
+#ifndef SUPPORT_FTP
+      }
+#else
 	if (h->t==FTPSLAVE) {
 	  io_timeout(h->buddy,nextftp);
 	}
@@ -2645,7 +2703,9 @@ pipeline:
 	      io_wantread(H->buddy);
 	  }
 	}
-      } else {
+      } else
+#endif
+      {
 	r=iob_send(i,&h->iob);
 	if (r==-1)
 	  io_eagain(i);
@@ -2660,6 +2720,7 @@ pipeline:
 	      buffer_putulong(buffer_1,i);
 	      buffer_putnlflush(buffer_1);
 	    }
+#ifdef SUPPORT_FTP
 	    if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
 	      struct http_data* b=io_getcookie(h->buddy);
 	      assert(b);
@@ -2670,6 +2731,7 @@ pipeline:
 		io_wantwrite(h->buddy);
 	      }
 	    }
+#endif
 	    cleanup(i);
 	  } else {
 	    if (logging && h->t == HTTPREQUEST) {
@@ -2691,6 +2753,7 @@ pipeline:
 		buffer_putulong(buffer_1,i);
 		buffer_putnlflush(buffer_1);
 	      }
+#ifdef SUPPORT_FTP
 	      if (h->t==FTPSLAVE) {
 		struct http_data* b=io_getcookie(h->buddy);
 		if (b) {
@@ -2702,6 +2765,7 @@ pipeline:
 		} else
 		  buffer_putsflush(buffer_2,"ARGH: no cookie or no buddy for FTP slave!\n");
 	      }
+#endif
 	      cleanup(i);
 	    }
 	  }
