@@ -548,7 +548,7 @@ int sort_size_a(de* x,de* y) { return x->ss.st_size-y->ss.st_size; }
 int sort_size_d(de* x,de* y) { return y->ss.st_size-x->ss.st_size; }
 
 static inline int issafe(unsigned char c) {
-  return (c!='"' && c!='%' && c>=' ');
+  return (c!='"' && c!='%' && c>=' ' && c!='+');
 }
 
 unsigned long fmt_urlencoded(char* dest,const char* src,unsigned long len) {
