@@ -106,3 +106,14 @@ uninstall:
 
 clean:
 	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv
+
+VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
+CURNAME=$(notdir $(shell pwd))
+
+rename:
+	if test $(CURNAME) != $(VERSION); then cd .. && mv $(CURNAME) $(VERSION); fi
+
+tar: clean rename
+	rm -f dep libdep
+	cd ..; tar cvvf $(VERSION).tar.bz2 --use=bzip2 --exclude CVS $(VERSION)
+
