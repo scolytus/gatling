@@ -17,3 +17,8 @@ gettimeofday and give the results in CPU cycles, not usec.  You can
 divide the numbers by the CPU frequency to get comparable numbers.  As
 there is no portable way to get the CPU frequency, mmapbench does not
 even pretend to do this.
+
+NOTE: if you get a bus error, you gave too small a file as argument.
+The default settings from run-bench assume a file (or block device!) at
+least 160 MB.  So the easiest way is to just point mmapbench to your
+root partition, or use dd to create a large new file.
