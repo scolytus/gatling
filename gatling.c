@@ -280,7 +280,7 @@ punt:
 	    char c;
 	    if ((c=cl[scan_ulonglong(cl,&h->still_to_copy)])!='\r' && c!='\n') h->still_to_copy=0;
 	  }
-	  x->still_to_copy=0; h->still_to_copy;
+	  x->still_to_copy=0;
 //	  printf("still_to_copy init: %p %llu <-> %p %llu\n",x,x->still_to_copy,h,h->still_to_copy);
 	  byte_copy(h->peerip,16,x->peerip);
 	}
@@ -1179,6 +1179,8 @@ rangeerror:
 	  iob_addbuf_free(&h->iob,h->hdrbuf,c - h->hdrbuf);
 	  if (!head)
 	    iob_addfile_close(&h->iob,fd,range_first,range_last-range_first);
+	  else
+	    if (fd!=-1) io_close(fd);
 	  if (logging) {
 	    if (h->hdrbuf[9]=='3') {
 	      buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
