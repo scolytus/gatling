@@ -1,7 +1,9 @@
 #undef SUPPORT_SMB
 #define SUPPORT_FTP
 #define SUPPORT_CGI
-#define DEBUG
+/* #define DEBUG to enable more verbose debug messages for tracking fd
+ * leaks */
+// #define DEBUG
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
@@ -1195,6 +1197,18 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
 	    break;
     }
   }
+#ifdef DEBUG
+  if (forreading<2)
+    if (logging) {
+      buffer_puts(buffer_1,"ftp_open_file ");
+      buffer_putulong(buffer_1,sock);
+      buffer_putspace(buffer_1);
+      buffer_putulong(buffer_1,fd);
+      buffer_putspace(buffer_1);
+      buffer_puts(buffer_1,x+1);
+      buffer_putnlflush(buffer_1);
+    }
+#endif
 
   if (logging && what) {
     buffer_puts(buffer_1,what);
@@ -3025,7 +3039,10 @@ pipeline:
 		buffer_puts(buffer_1,"keepalive_cleanup_filefd_close ");
 		buffer_putulong(buffer_1,i);
 		buffer_putspace(buffer_1);
-		buffer_putulong(buffer_1,h->filefd);
+		if (h->filefd==-1)
+		  buffer_puts(buffer_1,"-1");
+		else
+		  buffer_putulong(buffer_1,h->filefd);
 		buffer_putnlflush(buffer_1);
 	      }
 #endif
