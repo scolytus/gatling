@@ -264,7 +264,7 @@ usage:
 		       "	-i fn	only fetch file if it is newer than fn\n"
 		       "	-n	only fetch file if it is newer than local copy\n"
 		       "	-r	resume\n"
-		       "	-4	use PORT and PASV instead of EPRT and EPSV\n"
+		       "	-4	use PORT and PASV instead of EPRT and EPSV, only connect using IPv4\n"
 		       "	-o	use PORT and EPRT instead of PASV and EPSV\n"
 		       "	-v	be verbose\n");
       return 0;
@@ -386,6 +386,7 @@ usage:
     int i;
     s=-1;
     for (i=0; i+16<=ips.len; i+=16) {
+      if (usev4 && !ip6_isv4mapped(ips.s+i)) continue;
       if (verbose) {
 	char buf[IP6_FMT];
 	buffer_puts(buffer_1,"connecting to ");
