@@ -3736,7 +3736,17 @@ pipeline:
 	  byte_copy(c,alen-l,c+l);
 	  array_truncate(&H->r,1,alen-l);
 	  l=header_complete(H);
-	  if (l) goto pipeline;
+
+#if 0
+	  write(1,"\n\n",2);
+	  write(1,array_start(&H->r),array_bytes(&H->r));
+	  write(1,"\n\n",2);
+#endif
+
+	  if (l) {
+	    if (H->r.initialized) --H->r.initialized;
+	    goto pipeline;
+	  }
 	} else
 	  array_reset(&H->r);
       }
