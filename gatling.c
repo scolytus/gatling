@@ -575,11 +575,13 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
     if (needheader) {
       int j;
       x=malloc(i+100);
+      if (!x) goto nomem;
       j=fmt_str(x,"HTTP/1.0 200 Here you go\r\nServer: " RELEASE "\r\n");
       byte_copy(x+j,i,buf);
       i+=j;
     } else {
       x=malloc(i);
+      if (!x) goto nomem;
       byte_copy(x,i,buf);
     }
     if (peer) iob_addbuf_free(&peer->iob,x,i);
@@ -587,6 +589,14 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
   io_dontwantread(sockfd);
   io_wantwrite(H->buddy);
   return res;
+nomem:
+  if (logging) {
+    char numbuf[FMT_ULONG];
+    numbuf[fmt_ulong(numbuf,sockfd)]=0;
+    buffer_putmflush(buffer_1,"outofmemory ",numbuf,"\n");
+  }
+  cleanup(sockfd);
+  return -1;
 }
 
 int read_http_post(int sockfd,struct http_data* H) {
@@ -1181,6 +1191,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       if (doesgzip) {
 	uLongf destlen=h->blen+30+h->blen/1000;
 	char *compressed=malloc(destlen+15);
+	if (!compressed) return -2;
 	if (compress2(compressed+8,&destlen,h->bodybuf,h->blen,3)==Z_OK && destlen<h->blen) {
 	  /* I am absolutely _not_ sure why this works, but we
 	   * apparently have to ignore the first two and the last four
