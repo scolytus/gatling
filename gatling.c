@@ -1652,8 +1652,9 @@ int main(int argc,char* argv[]) {
   uint32 scope_id;
   char ip[16];
   uint16 port,fport;
-  tai6464 now,last,next,tick;
+  tai6464 now,last,next,tick,nextftp;
   unsigned long timeout_secs=23;
+  unsigned long ftptimeout_secs=600;
   char* new_uid=0;
   char* chroot_to=0;
 
@@ -1754,7 +1755,7 @@ int main(int argc,char* argv[]) {
       doftp=-1;
       break;
     case 'T':
-      i=scan_ulong(optarg,&timeout_secs);
+      i=scan_ulong(optarg,doftp?&ftptimeout_secs:&timeout_secs);
       if (i==0) {
 	buffer_puts(buffer_2,"gatling: warning: could not parse timeout in seconds ");
 	buffer_puts(buffer_2,optarg+i+1);
@@ -1799,6 +1800,8 @@ usage:
     taia_now(&last);
     byte_copy(&next,sizeof(next),&last);
     next.sec.x += timeout_secs;
+    byte_copy(&nextftp,sizeof(next),&last);
+    nextftp.sec.x += ftptimeout_secs;
     byte_copy(&tick,sizeof(next),&last);
     ++tick.sec.x;
   }
@@ -2125,6 +2128,8 @@ usage:
 	      h->myscope_id=scope_id;
 	      if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6)
 		h->t=HTTPREQUEST;
+		if (timeout_secs)
+		  io_timeout(n,next);
 	      else {
 		if (H->t==FTPSERVER6)
 		  h->t=FTPCONTROL6;
@@ -2132,12 +2137,12 @@ usage:
 		  h->t=FTPCONTROL4;
 		iob_addbuf(&h->iob,"220 Hi there!\r\n",15);
 		h->keepalive=1;
+		if (ftptimeout_secs)
+		  io_timeout(n,nextftp);
 	      }
 	      h->buddy=-1;
 	      h->filefd=-1;
 	      io_setcookie(n,h);
-	      if (timeout_secs)
-		io_timeout(n,next);
 #ifdef TCP_NODELAY
 	      {
 		int i=1;
@@ -2203,12 +2208,18 @@ ioerror:
 	  }
 	  cleanup(i);
 	} else if (l>0) {
-	  if (timeout_secs)
-	    io_timeout(i,next);
+	  if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
+	    if (ftptimeout_secs)
+	      io_timeout(i,nextftp);
+	  } else
+	    if (timeout_secs)
+	      io_timeout(i,next);
 
 	  if (H->t==FTPSLAVE) {
 	    /* receive an upload */
 	    int r;
+	    if (ftptimeout_secs)
+	      io_timeout(H->buddy,nextftp);
 	    if ((r=write(H->filefd,buf,l))!=l)
 	      goto ioerror;
 	  } else {
@@ -2248,7 +2259,7 @@ pipeline:
       if (timeout_secs) {
 	io_timeout(i,next);
 	if (h->t==FTPSLAVE)
-	  io_timeout(h->buddy,next);
+	  io_timeout(h->buddy,nextftp);
       }
       r=iob_send(i,&h->iob);
       if (r==-1)
