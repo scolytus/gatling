@@ -17,6 +17,7 @@
 #include <errno.h>
 
 static void carp(const char* routine) {
+  buffer_flush(buffer_1);
   buffer_puts(buffer_2,"httpbench: ");
   buffer_puts(buffer_2,routine);
   buffer_puts(buffer_2,": ");

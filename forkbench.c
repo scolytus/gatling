@@ -74,6 +74,7 @@ int main(int argc,char* argv[]) {
       gettimeofday(&a,0);
       switch (x[i].p=fork()) {
       case -1:
+	buffer_flush(buffer_1);
 	buffer_puts(buffer_2,"fork failed: ");
 	buffer_puterror(buffer_2);
 	buffer_putnlflush(buffer_2);
@@ -88,6 +89,7 @@ int main(int argc,char* argv[]) {
 	}
       }
       if (read(pfd[0],buf,1)!=1) {
+	buffer_flush(buffer_1);
 	buffer_putsflush(buffer_2,"child did not write into pipe?!\n");
 	for (j=0; j<i; ++j) kill(x[j].p,SIGTERM);
 	_exit(1);
