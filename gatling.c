@@ -2332,6 +2332,7 @@ usage:
 	    buffer_putnlflush(buffer_1);
 	  }
 	  h->buddy=n;
+	  io_fd(n);
 	  io_setcookie(n,H);
 	  io_nonblock(n);
 	  io_close(i);
@@ -2594,6 +2595,7 @@ pipeline:
 	    setsockopt(i,IPPROTO_TCP,TCP_NODELAY,&x,sizeof(x));
 	  }
 #endif
+	  io_fd(i);
 	  io_dontwantwrite(i);
 	  if (H->f==WAITCONNECT) {
 	    H->f=LOGGEDIN;
