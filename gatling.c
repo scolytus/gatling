@@ -258,6 +258,7 @@ static int add_proxy(const char* c) {
 static char* http_header(struct http_data* r,char* h);
 int buffer_putlogstr(buffer* b,const char* s);
 void httperror(struct http_data* r,const char* title,const char* message);
+static int header_complete(struct http_data* r);
 
 static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d) {
   struct cgi_proxy* x=cgis;
@@ -397,10 +398,29 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	    io_dontwantwrite(sockfd);
 	  } else {
 	    /* there is still data to copy */
+
+#if 0
+	    char* data=array_start(&d->r);
+	    long i,j,found;
+	    j=array_bytes(&d->r);
+	    found=-1;
+	    for (i=0; i<j; ++i)
+	      if (byte_equal(data+i,4,"\r\n\r\n")) {
+		found=i+4; break;
+	      }
+	    assert(found!=-1);	/* we shouldn't be here if the header was not complete */
+	    if (found!=-1) {
+	    }
+#endif
+	    /* TODO: check whether we already have data to read */
+
 	    io_wantread(sockfd);
 	    io_dontwantwrite(sockfd);
 	    io_wantread(s);
-	    io_dontwantwrite(s);
+	    if (header_complete(d) < array_bytes(&d->r))	/* FIXME */
+	      io_wantwrite(s);
+	    else
+	      io_dontwantwrite(s);
 	  }
 	}
       }
@@ -576,7 +596,7 @@ static int canonpath(char* s) {
 }
 #endif
 
-int header_complete(struct http_data* r) {
+static int header_complete(struct http_data* r) {
   long i;
   long l=array_bytes(&r->r);
   const char* c=array_start(&r->r);
@@ -3689,9 +3709,11 @@ pipeline:
 	    char* c=array_start(&H->r);
 	    long alen=array_bytes(&H->r);
 	    long l;
-	    if (alen>H->still_to_copy) alen=H->still_to_copy;
+//	    printf("%ld bytes still in H->r (%ld in h->r), still to copy: %lld (%lld in h)\n",alen,(long)array_bytes(&h->r),H->still_to_copy,h->still_to_copy);
+	    if (alen>h->still_to_copy) alen=h->still_to_copy;
 	    if (alen==0) goto nothingmoretocopy;
 	    l=write(i,c,alen);
+//	    printf("wrote %ld bytes (wanted to write %ld; had %lld still to copy)\n",l,alen,H->still_to_copy);
 	    if (l<1) {
 	      /* ARGH!  Proxy crashed! *groan* */
 	      if (logging) {
