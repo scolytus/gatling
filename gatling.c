@@ -1091,6 +1091,7 @@ usage:
 	    array_reset(&h->r);
 	    iob_reset(&h->iob);
 	    h->hdrbuf=0;
+	    free(h);
 	  }
 	  if (logging) {
 	    buffer_puts(buffer_1,"close ");
