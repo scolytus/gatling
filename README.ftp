@@ -36,3 +36,23 @@ Please note:
   c) Like for HTTP, gatling will do virtual hosting, i.e. if the client
      connected to IP 10.1.1.23 on port 21, gatling will look for the
      exported data in the directory "10.1.1.23:21".
+
+  d) gatling will not let users download files that are not world
+     readable, even if the permissions would normally allow the gatling
+     process to read the files.  This is to prevent accidental
+     publication of sensitive files.
+
+  e) gatling accepts uploads per anonymous FTP, but only to directories
+     that are world writable.  Since there normally are no world
+     writable directories, this should not pose much of a threat to
+     anyone.  Please note that the files are created with mode 600,
+     which means gatling will not let others download uploaded files, so
+     it cannot be exploited as warez dump.
+
+     You can disable uploads altogether with -U, or you can allow
+     anonymous downloaders to download just uploaded files with -a.
+
+  f) gatling's directory listings will always claim files are owned by
+     root.  The local accounts on FTP sites are ignored by software and
+     not normally useful to outsiders anyway, but revealing them may
+     expose more of your organisation to FTP users than you want.

@@ -44,6 +44,8 @@ int virtual_hosts;
 int transproxy;
 int directory_index;
 int logging;
+int nouploads;
+int chmoduploads;
 int64 origdir;
 
 static void carp(const char* routine) {
@@ -82,6 +84,8 @@ enum ftpstate {
   WAITINGFORUSER,
   LOGGEDIN,
   WAITCONNECT,
+  DOWNLOADING,
+  UPLOADING,
 };
 
 struct http_data {
@@ -105,6 +109,35 @@ struct http_data {
   char* ftppath;
   uint64 ftp_rest;	/* offset to start transfer at */
 };
+
+
+static int open_for_reading(int64* fd,const char* name) {
+  /* only allow reading of world readable files */
+  if (io_readfile(fd,name)) {
+    struct stat ss;
+    if (fstat(*fd,&ss)==-1 || !(ss.st_mode&S_IROTH)) {
+      close(*fd);
+      return 0;
+    }
+    return 1;
+  }
+  return 0;
+}
+
+static int open_for_writing(int64* fd,const char* name) {
+  /* only allow creating files in world writable directories */
+  const char* c;
+  char* x;
+  struct stat ss;
+  c=name+str_rchr(name,'/');
+  if (!*c) return 0;	/* no slashes?  There's something fishy */
+  x=alloca(c-name+1);
+  byte_copy(x,c-name,name); x[c-name]=0;
+  if (stat(x,&ss)==-1) return 0;	/* better safe than sorry */
+  if (!(ss.st_mode&S_IWOTH)) return 0;
+  return io_createfile(fd,name);
+}
+
 
 /* "/foo" -> "/foo"
  * "/foo/./" -> "/foo"
@@ -489,7 +522,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     /* Damn.  Directory. */
     if (filename[1] && chdir(filename+1)==-1) return -1;
     h->mimetype="text/html";
-    if (!io_readfile(&fd,"index.html")) {
+    if (!open_for_reading(&fd,"index.html")) {
       DIR* d;
       if (!directory_index) return -1;
       if (!(d=opendir("."))) return -1;
@@ -526,7 +559,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     }
     if (doesbzip2) {
       int64 gfd;
-      if (io_readfile(&gfd,"index.html.bz2")) {
+      if (open_for_reading(&gfd,"index.html.bz2")) {
 	io_close(fd);
 	fd=gfd;
 	h->encoding=BZIP2;
@@ -534,7 +567,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     }
     if (doesgzip) {
       int64 gfd;
-      if (io_readfile(&gfd,"index.html.gz")) {
+      if (open_for_reading(&gfd,"index.html.gz")) {
 	io_close(fd);
 	fd=gfd;
 	h->encoding=GZIP;
@@ -542,7 +575,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss) {
     }
   } else {
     h->mimetype=mimetype(filename);
-    if (!io_readfile(&fd,filename+1))
+    if (!open_for_reading(&fd,filename+1))
       return -1;
     if (doesgzip || doesbzip2) {
       int64 gfd;
@@ -881,10 +914,11 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
 
   if (ftp_vhost(h)) return -1;
 
-  if (!(forreading?io_readfile(&fd,x+1):io_createfile(&fd,x+1))) {
-    h->hdrbuf="425 file not found.\r\n";
-    fd=-1;
-  }
+  errno=0; fd=-1; h->hdrbuf="550 Not a regular file.\r\n";
+  if (x[1])
+    if (!(forreading?open_for_reading(&fd,x+1):open_for_writing(&fd,x+1)))
+      if (errno!=EISDIR)
+	h->hdrbuf=forreading?"425 File not found.\r\n":"425 You can't upload here!\r\n";
 
   if (logging && what) {
     buffer_puts(buffer_1,what);
@@ -892,14 +926,14 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
     buffer_putspace(buffer_1);
     buffer_putulong(buffer_1,sock);
     buffer_putspace(buffer_1);
-    buffer_putlogstr(buffer_1,x+1);
+    buffer_putlogstr(buffer_1,x[1]?x+1:"/");
     buffer_putspace(buffer_1);
   }
 
   return fd;
 }
 
-static int ftp_retr(struct http_data* h,const char* s,int64 sock) {
+static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwriting) {
   uint64 range_first,range_last;
   struct stat ss;
   struct http_data* b;
@@ -919,7 +953,7 @@ static int ftp_retr(struct http_data* h,const char* s,int64 sock) {
     return -1;
   }
   if (b->filefd!=-1) { io_close(b->filefd); b->filefd=-1; }
-  b->filefd=ftp_open(h,s,1,sock,"RETR");
+  b->filefd=ftp_open(h,s,forwriting^1,sock,forwriting?"STOR":"RETR");
   if (b->filefd==-1) {
 
     if (logging) {
@@ -931,23 +965,29 @@ static int ftp_retr(struct http_data* h,const char* s,int64 sock) {
 
     return -1;
   }
-  if (fstat(b->filefd,&ss)==-1)
-    range_last=0;
-  else
-    range_last=ss.st_size;
-  range_first=h->ftp_rest; h->ftp_rest=0;
-  if (range_first>range_last) range_first=range_last;
-  iob_addfile(&b->iob,b->filefd,range_first,range_last);
+
+  if (!forwriting) {
+    if (fstat(b->filefd,&ss)==-1)
+      range_last=0;
+    else
+      range_last=ss.st_size;
+    range_first=h->ftp_rest; h->ftp_rest=0;
+    if (range_first>range_last) range_first=range_last;
+    iob_addfile(&b->iob,b->filefd,range_first,range_last);
+    if (logging) {
+      buffer_putulonglong(buffer_1,range_last-range_first);
+      buffer_putspace(buffer_1);
+    }
+  }
 
   if (logging) {
-    buffer_putulonglong(buffer_1,range_last-range_first);
-    buffer_putspace(buffer_1);
     buffer_putlogstr(buffer_1,buf);
     buffer_putnlflush(buffer_1);
   }
 
   h->f=WAITCONNECT;
   h->hdrbuf=malloc(100);
+  b->f=forwriting?UPLOADING:DOWNLOADING;
   if (!h->hdrbuf) {
     h->hdrbuf=(b->t==FTPSLAVE)?"125 go on\r\n":"150 go on\r\n";
     return -1;
@@ -955,7 +995,10 @@ static int ftp_retr(struct http_data* h,const char* s,int64 sock) {
     int i;
     if (b->t==FTPSLAVE) {
       i=fmt_str(h->hdrbuf,"125 go on (");
-      io_wantwrite(h->buddy);
+      if (forwriting)
+	io_wantread(h->buddy);
+      else
+	io_wantwrite(h->buddy);
       h->f=LOGGEDIN;
     } else if (b->t==FTPACTIVE)
       i=fmt_str(h->hdrbuf,"150 connecting (");
@@ -1023,7 +1066,7 @@ static int ftp_size(struct http_data* h,const char* s) {
 }
 
 
-static void ftp_ls(array* x,const char* s,const struct stat* const ss) {
+static void ftp_ls(array* x,const char* s,const struct stat* const ss,time_t now) {
   char buf[PATH_MAX];
   int i,j;
   struct tm* t;
@@ -1055,7 +1098,6 @@ static void ftp_ls(array* x,const char* s,const struct stat* const ss) {
   array_catb(x,buf+100,fmt_pad(buf+100,buf,i,j,j));
 
   {
-    time_t now=time(0);
     t=localtime(&ss->st_mtime);
     array_catb(x,months+3*t->tm_mon,3);
     array_cats(x," ");
@@ -1079,7 +1121,7 @@ static void ftp_ls(array* x,const char* s,const struct stat* const ss) {
   array_cats(x,"\r\n");
 }
 
-static int ftp_list(struct http_data* h,char* s,int _long) {
+static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   int i,l=h->ftppath?str_len(h->ftppath):0;
   char* x=alloca(l+strlen(s)+5);
   char* y;
@@ -1087,6 +1129,7 @@ static int ftp_list(struct http_data* h,char* s,int _long) {
   struct dirent* d;
   int rev=0;
   int what=0;
+  time_t now;
 
   unsigned long o,n;
   int (*sortfun)(de*,de*);
@@ -1177,6 +1220,7 @@ nomem:
   qsort(array_start(&a),n,sizeof(de),(int(*)(const void*,const void*))sortfun);
 
   ab=array_start(&a);
+  now=time(0);
   for (i=0; i<n; ++i) {
     char* name=base+ab[i].name;
 
@@ -1186,7 +1230,7 @@ nomem:
 	continue;
     }
     if (_long)
-      ftp_ls(&c,name,&ab[i].ss);
+      ftp_ls(&c,name,&ab[i].ss,now);
     else {
       array_cats(&c,name);
       array_cats(&c,"\r\n");
@@ -1199,6 +1243,7 @@ nomem:
     struct http_data* b=io_getcookie(h->buddy);
     if (b) {
       iob_addbuf_free(&b->iob,array_start(&c),array_bytes(&c));
+      b->f=DOWNLOADING;
       h->f=WAITCONNECT;
       if (b->t==FTPSLAVE) {
 	h->hdrbuf="125 go on\r\n";
@@ -1210,6 +1255,27 @@ nomem:
 	h->hdrbuf="150 I'm listening\r\n";
     }
   }
+  if (logging) {
+    buffer_puts(buffer_1,_long?"LIST ":"NLST ");
+    buffer_putulong(buffer_1,sock);
+    buffer_putspace(buffer_1);
+    buffer_putlogstr(buffer_1,x[1]?x+1:"/");
+    buffer_putspace(buffer_1);
+    buffer_putulong(buffer_1,array_bytes(&c));
+    buffer_putspace(buffer_1);
+    {
+      char buf[IP6_FMT+10];
+      int x;
+      if (byte_equal(h->myip,12,V4mappedprefix))
+	x=fmt_ip4(buf,h->myip+12);
+      else
+	x=fmt_ip6(buf,h->myip);
+      x+=fmt_str(buf+x,"/");
+      x+=fmt_ulong(buf+x,h->myport);
+      buffer_put(buffer_1,buf,x);
+    }
+    buffer_putnlflush(buffer_1);
+  }
   return 0;
 }
 
@@ -1218,7 +1284,7 @@ static int ftp_cwd(struct http_data* h,char* s) {
   char* x=alloca(l+strlen(s)+5);
   char* y;
   /* first, append to path */
-  if (h->ftppath)
+  if (s[0]!='/' && h->ftppath)
     y=x+fmt_str(x,h->ftppath);
   else
     y=x;
@@ -1457,16 +1523,28 @@ syntaxerror:
       h->hdrbuf="501 invalid number\r\n";
   } else if (case_starts(c,"RETR ")) {
     c+=5;
-    if (ftp_retr(h,c,s)==0)
+    if (ftp_retrstor(h,c,s,0)==0)
       c=h->hdrbuf;
+  } else if (case_starts(c,"STOR ")) {
+    if (nouploads)
+      h->hdrbuf="553 no upload allowed here.\r\n";
+    else {
+      c+=5;
+      if (ftp_retrstor(h,c,s,1)==0)
+	c=h->hdrbuf;
+    }
   } else if (case_starts(c,"LIST")) {
     c+=4;
     if (*c==' ') ++c;
-    ftp_list(h,c,1);
+    ftp_list(h,c,1,s);
   } else if (case_starts(c,"NLST")) {
     c+=4;
     if (*c==' ') ++c;
-    ftp_list(h,c,0);
+    ftp_list(h,c,0,s);
+  } else if (case_equals(c,"NOOP")) {
+    h->hdrbuf="200 no reply.\r\n";
+  } else if (case_starts(c,"HELP")) {
+    h->hdrbuf="214-This is gatling (www.fefe.de/gatling/); No help available.\r\n214 See http://cr.yp.to/ftp.html for FTP help.\r\n";
   } else {
     static int funny;
     switch (++funny) {
@@ -1609,9 +1687,15 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"hnfFi:p:vVdDtT:c:u:");
+    int c=getopt(argc,argv,"hnfFi:p:vVdDtT:c:u:Ua");
     if (c==-1) break;
     switch (c) {
+    case 'U':
+      nouploads=1;
+      break;
+    case 'a':
+      chmoduploads=1;
+      break;
     case 'n':
       logging=0;
       break;
@@ -1697,6 +1781,9 @@ usage:
 		  "\t-n\tdo not produce logging output\n"
 		  "\t-f\tprovide FTP; next -p is meant for the FTP port (default: 21)\n"
 		  "\t-F\tdo not provide FTP\n"
+		  "\t-U\tdisallow FTP uploads\n"
+		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
+		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  );
       return 0;
     case '?':
@@ -1941,7 +2028,10 @@ usage:
 #endif
 	  if (h->f==WAITCONNECT) {
 	    h->f=LOGGEDIN;
-	    io_wantwrite(h->buddy);
+	    if (H->f==DOWNLOADING)
+	      io_wantwrite(h->buddy);
+	    else
+	      io_wantread(h->buddy);
 	  }
 	}
       } else if (H->t==FTPACTIVE) {
@@ -1981,7 +2071,10 @@ usage:
 #endif
 	  if (h->f==WAITCONNECT) {
 	    h->f=LOGGEDIN;
-	    io_wantwrite(h->buddy);
+	    if (H->f==DOWNLOADING)
+	      io_wantwrite(h->buddy);
+	    else
+	      io_wantread(h->buddy);
 	  }
 	}
       } else if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4 || H->t==FTPSERVER6 || H->t==FTPSERVER4) {
@@ -2070,6 +2163,7 @@ usage:
 	char buf[8192];
 	int l=io_tryread(i,buf,sizeof buf);
 	if (l==-3) {
+ioerror:
 	  if (logging) {
 	    buffer_puts(buffer_1,"io_error ");
 	    buffer_putulong(buffer_1,i);
@@ -2086,35 +2180,64 @@ usage:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
+	  if (H->t==FTPSLAVE) {
+	    struct http_data* b=io_getcookie(H->buddy);
+	    assert(b);
+	    b->buddy=-1;
+	    iob_reset(&b->iob);
+	    iob_adds(&b->iob,"226 Got it.\r\n");
+	    io_dontwantread(H->buddy);
+	    io_wantwrite(H->buddy);
+	    if (chmoduploads)
+	      fchmod(H->filefd,0644);
+	    if (logging) {
+	      struct stat ss;
+	      if (fstat(H->filefd,&ss)==0) {
+		buffer_puts(buffer_1,"received ");
+		buffer_putulong(buffer_1,i);
+		buffer_putspace(buffer_1);
+		buffer_putulonglong(buffer_1,ss.st_size);
+		buffer_putnlflush(buffer_1);
+	      }
+	    }
+	  }
 	  cleanup(i);
 	} else if (l>0) {
 	  if (timeout_secs)
 	    io_timeout(i,next);
-	  array_catb(&H->r,buf,l);
-	  if (array_failed(&H->r)) {
-	    httperror(H,"500 Server Error","request too long.");
+
+	  if (H->t==FTPSLAVE) {
+	    /* receive an upload */
+	    int r;
+	    if ((r=write(H->filefd,buf,l))!=l)
+	      goto ioerror;
+	  } else {
+	    array_catb(&H->r,buf,l);
+	    if (array_failed(&H->r)) {
+	      httperror(H,"500 Server Error","request too long.");
 emerge:
-	    io_dontwantread(i);
-	    io_wantwrite(i);
-	  } else if (array_bytes(&H->r)>8192) {
-	    httperror(H,"500 request too long","You sent too much headers");
-	    array_reset(&H->r);
-	    goto emerge;
-	  } else if ((l=header_complete(H))) {
-	    long alen;
-pipeline:
-	    if (H->t==HTTPREQUEST)
-	      httpresponse(H,i);
-	    else
-	      ftpresponse(H,i);
-	    if (l < (alen=array_bytes(&H->r))) {
-	      char* c=array_start(&H->r);
-	      byte_copy(c,alen-l,c+l);
-	      array_truncate(&H->r,1,alen-l);
-	      l=header_complete(H);
-	      if (l) goto pipeline;
-	    } else
+	      io_dontwantread(i);
+	      io_wantwrite(i);
+	    } else if (array_bytes(&H->r)>8192) {
+	      httperror(H,"500 request too long","You sent too much headers");
 	      array_reset(&H->r);
+	      goto emerge;
+	    } else if ((l=header_complete(H))) {
+	      long alen;
+pipeline:
+	      if (H->t==HTTPREQUEST)
+		httpresponse(H,i);
+	      else
+		ftpresponse(H,i);
+	      if (l < (alen=array_bytes(&H->r))) {
+		char* c=array_start(&H->r);
+		byte_copy(c,alen-l,c+l);
+		array_truncate(&H->r,1,alen-l);
+		l=header_complete(H);
+		if (l) goto pipeline;
+	      } else
+		array_reset(&H->r);
+	    }
 	  }
 	}
       }
@@ -2161,7 +2284,6 @@ pipeline:
 	  iob_reset(&h->iob);
 	  h->hdrbuf=0;
 	  if (h->keepalive) {
-//	    array_reset(&h->r);
 	    iob_reset(&h->iob);
 	    if (h->filefd!=-1) { io_close(h->filefd); h->filefd=-1; }
 	    io_dontwantwrite(i);
