@@ -1,3 +1,5 @@
+#undef SUPPORT_SMB
+
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
 #include "io.h"
@@ -31,7 +33,9 @@
 #include "version.h"
 #include <assert.h>
 #include <fnmatch.h>
+#ifdef SUPPORT_SMB
 #include <iconv.h>
+#endif
 #include "havealloca.h"
 
 #ifdef TIMEOUT_DEBUG
@@ -79,10 +83,12 @@ int nouploads;
 int chmoduploads;
 int64 origdir;
 
+#ifdef SUPPORT_SMB
 char workgroup[20]="FNORD";
 int wglen;
 char workgroup_utf16[100];
 int wglen16;
+#endif
 
 static void carp(const char* routine) {
   buffer_puts(buffer_2,routine);
@@ -277,6 +283,11 @@ void httperror(struct http_data* r,const char* title,const char* message) {
   }
 }
 
+static unsigned int fmt_2digits(char* dest,int i) {
+  dest[0]=(i/10)+'0';
+  dest[1]=(i%10)+'0';
+  return 2;
+}
 
 
 
@@ -406,12 +417,6 @@ void cathtml(array* a,char* s) {
   unsigned int len=str_len(s);
   char* buf=alloca(fmt_html(0,s,len));
   array_catb(a,buf,fmt_html(buf,s,len));
-}
-
-static unsigned int fmt_2digits(char* dest,int i) {
-  dest[0]=(i/10)+'0';
-  dest[1]=(i%10)+'0';
-  return 2;
 }
 
 int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg) {
@@ -913,7 +918,6 @@ fini:
   io_dontwantread(s);
   io_wantwrite(s);
 }
-
 
 
 
@@ -1697,6 +1701,7 @@ ABEND:
 
 
 
+#ifdef SUPPORT_SMB
 
 #if 0
                _
@@ -1825,6 +1830,8 @@ void smbresponse(struct http_data* h,int64 s) {
   }
 }
 
+#endif /* SUPPORT_SMB */
+
 
 static uid_t __uid;
 static gid_t __gid;
@@ -1909,18 +1916,20 @@ void sighandler(int sig) {
 int main(int argc,char* argv[]) {
   int s=socket_tcp6();
   int f=-1;
+#ifdef SUPPORT_SMB
   int smbs=-1;
+  enum conntype sct=SMBSERVER6;
+#endif
   int doftp=0;
   int dosmb=0;
   enum { HTTP, FTP, SMB } lastopt=HTTP;
   enum conntype ct=HTTPSERVER6;
   enum conntype fct=FTPSERVER6;
-  enum conntype sct=SMBSERVER6;
 #ifdef __broken_itojun_v6__
 #warning "working around idiotic openbse ipv6 stupidity - please kick itojun for this!"
   int s4=socket_tcp4();
-  int f4=socket_tcp4();
   enum conntype ct4=HTTPSERVER4;
+  int f4=socket_tcp4();
   enum conntype fct4=FTPSERVER4;
 #endif
   uint32 scope_id;
@@ -2029,12 +2038,14 @@ int main(int argc,char* argv[]) {
 	buffer_putsflush(buffer_2,".\n");
       }
       break;
+#ifdef SUPPORT_SMB
     case 'w':
       if (str_len(optarg)>12)
 	buffer_putsflush(buffer_2,"gatling: workgroup name too long (12 max)\n");
       else
 	str_copy(workgroup,optarg);
       break;
+#endif
     case 'h':
 usage:
       buffer_putsflush(buffer_2,
@@ -2058,13 +2069,16 @@ usage:
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  "\t-P n\tensable experimental prefetching code (may actually be slower)\n"
+#ifdef SUPPORT_SMB
 		  "\t-w name\tset SMB workgroup\n"
+#endif
 		  );
       return 0;
     case '?':
       break;
     }
   }
+#ifdef SUPPORT_SMB
   {
     iconv_t i=iconv_open("UTF-16LE","ISO-8859-1");
     size_t X,Y;
@@ -2081,6 +2095,7 @@ usage:
     wglen=str_len(workgroup);
     wglen16=sizeof(workgroup_utf16)-Y;
   }
+#endif
   if (!directory_index)
     directory_index=virtual_hosts<1;
   else if (directory_index==-1)
@@ -2100,8 +2115,10 @@ usage:
     port=geteuid()?8000:80;
   if (fport==0)
     fport=geteuid()?2121:21;
+#ifdef SUPPORT_SMB
   if (sport==0)
     sport=445;
+#endif
 #ifdef __broken_itojun_v6__
   if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
     if (byte_equal(ip,16,V6any)) {
@@ -2154,6 +2171,7 @@ usage:
       io_close(f); f=-1;
     }
   }
+#ifdef SUPPORT_SMB
   if (dosmb>=0) {
     smbs=socket_tcp6();
     if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1) {
@@ -2163,6 +2181,7 @@ usage:
       io_close(smbs); smbs=-1;
     }
   }
+#endif
 #endif
 
   if (prepare_switch_uid(new_uid)==-1)
@@ -2193,6 +2212,7 @@ usage:
       buffer_putulong(buffer_1,fport);
       buffer_putnlflush(buffer_1);
     }
+#ifdef SUPPORT_SMB
     if (smbs!=-1) {
       buffer_puts(buffer_1,"start_smb 0 ");
       buffer_put(buffer_1,buf,fmt_ip6(buf,ip));
@@ -2200,6 +2220,7 @@ usage:
       buffer_putulong(buffer_1,sport);
       buffer_putnlflush(buffer_1);
     }
+#endif
   }
 
 #ifdef __broken_itojun_v6__
@@ -2256,6 +2277,7 @@ usage:
     io_setcookie(f,&fct);
     io_wantread(f);
   }
+#ifdef SUPPORT_SMB
   if (smbs!=-1) {
     if (socket_listen(smbs,16)==-1)
       panic("socket_listen");
@@ -2265,6 +2287,7 @@ usage:
     io_setcookie(smbs,&sct);
     io_wantread(smbs);
   }
+#endif
 #endif
 
   for (;;) {
@@ -2421,10 +2444,12 @@ pasverror:
 		h->t=HTTPREQUEST;
 		if (timeout_secs)
 		  io_timeout(n,next);
+#ifdef SUPPORT_SMB
 	      } else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
 		h->t=SMBREQUEST;
 		if (timeout_secs)
 		  io_timeout(n,next);
+#endif
 	      } else {
 		if (H->t==FTPSERVER6)
 		  h->t=FTPCONTROL6;
@@ -2542,8 +2567,10 @@ emerge:
 pipeline:
 	      if (H->t==HTTPREQUEST)
 		httpresponse(H,i);
+#ifdef SUPPORT_SMB
 	      else if (H->t==SMBREQUEST)
 		smbresponse(H,i);
+#endif
 	      else
 		ftpresponse(H,i);
 	      if (l < (alen=array_bytes(&H->r))) {
