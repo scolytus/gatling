@@ -4,8 +4,8 @@ BINDIR=${prefix}/bin
 all: gatling httpbench dl bindbench mmapbench forkbench
 
 CC=gcc
-CFLAGS=-pipe -Wall -O -g -I../libowfat/ -lowfat
-LDFLAGS=-g -L../libowfat/
+CFLAGS=-pipe -Wall -O -g -I../libowfat/
+LDFLAGS=-g -L../libowfat/ -lowfat
 
 gatling: gatling.o
 	$(CC) -o $@ gatling.o $(LDFLAGS)
