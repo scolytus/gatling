@@ -54,7 +54,7 @@ version.h: CHANGES
 	$(CC) -c $< -I. $(CFLAGS)
 
 tlsgatling: gatling.c ssl.o
-	$(CC) -o $@ $(CFLAGS) $^ $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+	-$(CC) -o $@ $(CFLAGS) $^ $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 libsocket: trysocket.c
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
@@ -79,3 +79,21 @@ uninstall:
 
 clean:
 	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c
+
+cert: server.pem
+
+rand.dat:
+	-dd if=/dev/random of=rand.dat bs=1024 count=1
+
+cakey.key: rand.dat
+	openssl genrsa -out cakey.key -rand rand.dat 2048
+
+cakey.csr: cakey.key
+	openssl req -new -key cakey.key -out cakey.csr
+
+cakey.pem: cakey.key cakey.csr
+	openssl x509 -req -days 1780 -set_serial 1 -in cakey.csr \
+	  -signkey cakey.key -out $@
+
+server.pem: cakey.key cakey.pem
+	cat cakey.key cakey.pem > server.pem

@@ -7,3 +7,8 @@ mktestdata
 libiconv
 libsocket
 dummy.c
+rand.dat
+cakey.key
+cakey.csr
+server.pem
+cakey.pem

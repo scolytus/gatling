@@ -64,7 +64,7 @@ forksbench: forkbench.o
 gatling.o: version.h
 
 tlsgatling: gatling.c ssl.o
-	$(CC) -o $@ $^ -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+	-$(CC) -o $@ $^ -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
@@ -117,3 +117,20 @@ tar: clean rename
 	rm -f dep libdep
 	cd ..; tar cvvf $(VERSION).tar.bz2 --use=bzip2 --exclude CVS $(VERSION)
 
+cert: server.pem
+
+rand.dat:
+	-dd if=/dev/random of=rand.dat bs=1024 count=1
+
+cakey.key: rand.dat
+	openssl genrsa -out cakey.key -rand rand.dat 2048
+
+cakey.csr: cakey.key
+	openssl req -new -key cakey.key -out cakey.csr
+
+cakey.pem: cakey.key cakey.csr
+	openssl x509 -req -days 1780 -set_serial 1 -in cakey.csr \
+	  -signkey cakey.key -out $@
+
+server.pem: cakey.key cakey.pem
+	cat cakey.key cakey.pem > server.pem
