@@ -5,3 +5,7 @@ forkbench
 mmapbench
 dl
 bindbench
+ioerr
+pthreadbench
+mktestdata
+manymapbench
