@@ -43,5 +43,5 @@ OS specific performance hacks on the following operating systems:
     other library.
 
   AIX:
-    AIX apparently has a send_file, but I'm still waiting for someone to
-    give me an AIX account to implement it.
+    AIX 5 has send_file.  I am not aware of any way to speed up poll on
+    AIX.
