@@ -135,6 +135,7 @@ struct http_data {
   enum encoding encoding;
   char* ftppath;
   uint64 ftp_rest;	/* offset to start transfer at */
+  uint64 sent_until,prefetched_until;
 };
 
 
@@ -1586,9 +1587,8 @@ syntaxerror:
     h->hdrbuf="215 UNIX Type: L8\r\n";
   } else if (case_starts(c,"REST ")) {
     uint64 x;
-    int i;
     c+=5;
-    if (c[i=scan_ulonglong(c,&x)]=='\r' || c[i]=='\n') {
+    if (!c[scan_ulonglong(c,&x)]) {
       h->hdrbuf="350 ok.\r\n";
       h->ftp_rest=x;
     } else
@@ -1742,6 +1742,7 @@ int main(int argc,char* argv[]) {
   unsigned long ftptimeout_secs=600;
   char* new_uid=0;
   char* chroot_to=0;
+  uint64 prefetchquantum=0;
 
   signal(SIGPIPE,SIG_IGN);
 
@@ -1773,7 +1774,7 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"hnfFi:p:vVdDtT:c:u:Ua");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Ua");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -1790,6 +1791,16 @@ int main(int argc,char* argv[]) {
       break;
     case 'c':
       chroot_to=optarg;
+      break;
+    case 'P':
+      i=scan_ulonglong(optarg,&prefetchquantum);
+      if (i==0) {
+	buffer_puts(buffer_2,"gatling: warning: could not parse prefetch quantum");
+	buffer_puts(buffer_2,optarg+i+1);
+	buffer_putsflush(buffer_2,".\n");
+      }
+      if (optarg[i]=='M') prefetchquantum*=1024*1024;
+      if (optarg[i]=='G') prefetchquantum*=1024*1024*1024;
       break;
     case 'i':
       i=scan_ip6if(optarg,ip,&scope_id);
@@ -1861,6 +1872,7 @@ usage:
 		  "\t-F\tdo not provide FTP\n"
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
+		  "\t-P\tdisable experimental prefetching code (may actually be slower)\n"
 		  );
       return 0;
     case '?':
@@ -2068,6 +2080,7 @@ usage:
 	buffer_putsflush(buffer_1,"no_cookie\n");
 	return 111;
       }
+      H->sent_until=H->prefetched_until=0;
       if (H->t==FTPPASSIVE) {
 	struct http_data* h;
 	int n;
@@ -2404,6 +2417,15 @@ pipeline:
 		  buffer_putsflush(buffer_2,"ARGH: no cookie or no buddy for FTP slave!\n");
 	      }
 	      cleanup(i);
+	    }
+	  }
+	} else {
+	  /* write OK, now would be a good time to do some prefetching */
+	  h->sent_until+=r;
+	  if (prefetchquantum) {
+	    if (h->prefetched_until<h->sent_until || h->prefetched_until+prefetchquantum<h->sent_until) {
+	      if (prefetchquantum) iob_prefetch(&h->iob,2*prefetchquantum);
+	      h->prefetched_until+=2*prefetchquantum;
 	    }
 	  }
 	}
