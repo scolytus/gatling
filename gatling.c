@@ -28,6 +28,7 @@
 #include <netinet/tcp.h>
 #include "version.h"
 #include <assert.h>
+#include <fnmatch.h>
 
 #ifdef TIMEOUT_DEBUG
 void new_io_timeout(int64 d,tai6464 t) {
@@ -926,7 +927,7 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
   int64 fd;
 
   /* first, append to path */
-  if (h->ftppath)
+  if (s[0]!='/' && h->ftppath)
     y=x+fmt_str(x,h->ftppath);
   else
     y=x;
@@ -1091,7 +1092,7 @@ static int ftp_size(struct http_data* h,const char* s) {
 }
 
 
-static void ftp_ls(array* x,const char* s,const struct stat* const ss,time_t now) {
+static void ftp_ls(array* x,const char* s,const struct stat* const ss,time_t now,const char* pathprefix) {
   char buf[2048];
   int i,j;
   struct tm* t;
@@ -1138,6 +1139,7 @@ static void ftp_ls(array* x,const char* s,const struct stat* const ss,time_t now
     }
   }
   array_cats(x," ");
+  array_cats(x,pathprefix);
   array_cats(x,s);
   if (S_ISLNK(ss->st_mode)) {
     array_cats(x," -> ");
@@ -1155,6 +1157,9 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   int rev=0;
   int what=0;
   time_t now;
+
+  char* pathprefix="";
+  char* match=0;
 
   unsigned long o,n;
   int (*sortfun)(de*,de*);
@@ -1198,7 +1203,7 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   }
 
   /* first, append to path */
-  if (h->ftppath)
+  if (h->ftppath && s[0]!='/')
     y=x+fmt_str(x,h->ftppath);
   else
     y=x;
@@ -1213,27 +1218,61 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
 
   if (ftp_vhost(h)) return 0;
 
-  D=opendir(x[1]?x+1:".");
-  if (!D) {
-    de* X=array_allocate(&a,sizeof(de),n);
-    X->name=o;
-    if (lstat(x+1,&X->ss)==-1) {
-      h->hdrbuf="450 no such file or directory\r\n";
-      return -1;
-    }
-    array_cats0(&b,s);
-    o+=str_len(s)+1;
-    ++n;
+  /* cases:
+   *   it's a directory
+   *     -> opendir(foo/bar), ...
+   *   foo/$fnord
+   *     -> pathprefix="foo/"; chdir(foo); opendir(...); fnmatch($fnord)
+   *   /pub/$fnord
+   *     -> pathprefix="/pub/"; chdir(/pub); opendir(...); fnmatch($fnord)
+   */
+
+  if (!x[1] || chdir(x+1)==0) {		/* it's a directory */
+    pathprefix="";
+    match=0;
   } else {
-    chdir(x+1);
+    if (s[0]!='/') {	/* foo/$fnord */
+      int z=str_rchr(s,'/');
+      pathprefix=alloca(z+2);
+      byte_copy(pathprefix,z,s);
+      pathprefix[z]='/';
+      pathprefix[z+1]=0;
+      match=0;
+      z=str_rchr(x,'/');
+      x[z]=0;
+      if (x[0]=='/' && x[1] && chdir(x+1)==-1) {
+notfound:
+	h->hdrbuf="450 no such file or directory.\r\n";
+	return -1;
+      }
+      x[z]='/';
+      match=x+z+1;
+    } else {		/* /pub/$fnord */
+      int z=str_rchr(x,'/');
+      x[z]=0;
+      if (x[0]=='/' && x[1] && chdir(x+1)==-1) goto notfound;
+      match=x+z+1;
+      pathprefix=alloca(z+2);
+      byte_copy(pathprefix,z,x);
+      pathprefix[z]='/';
+      pathprefix[z+1]=0;
+    }
+  }
+
+  D=opendir(".");
+  if (!D)
+    goto notfound;
+  else {
     while ((d=readdir(D))) {
       de* X=array_allocate(&a,sizeof(de),n);
       if (!X) break;
       X->name=o;
       if (lstat(d->d_name,&X->ss)==-1) continue;
-      array_cats0(&b,d->d_name);
-      o+=str_len(d->d_name)+1;
-      ++n;
+      if (!match || fnmatch(match,d->d_name,FNM_PATHNAME)==0) {
+	array_cats0(&b,d->d_name);
+	o+=str_len(d->d_name)+1;
+	++n;
+      }
     }
     closedir(D);
   }
@@ -1258,8 +1297,9 @@ nomem:
 	continue;
     }
     if (_long)
-      ftp_ls(&c,name,&ab[i].ss,now);
+      ftp_ls(&c,name,&ab[i].ss,now,pathprefix);
     else {
+      array_cats(&c,pathprefix);
       array_cats(&c,name);
       array_cats(&c,"\r\n");
     }
@@ -1288,7 +1328,7 @@ nomem:
     buffer_puts(buffer_1,_long?"LIST ":"NLST ");
     buffer_putulong(buffer_1,sock);
     buffer_putspace(buffer_1);
-    buffer_putlogstr(buffer_1,x[1]?x+1:"/");
+    buffer_putlogstr(buffer_1,x[1]?x:"/");
     buffer_putspace(buffer_1);
     buffer_putulong(buffer_1,array_bytes(&c));
     buffer_putspace(buffer_1);
@@ -1657,14 +1697,18 @@ static void cleanup(int64 fd) {
     free(h->ftppath);
     free(h);
   }
+#if 0
   buffer_puts(buffer_2,"cleaning up fd #");
   buffer_putulong(buffer_2,fd);
   buffer_putnlflush(buffer_2);
+#endif
   io_close(fd);
   if (buddyfd>=0) {
+#if 0
     buffer_puts(buffer_2,"cleaning up buddy fd #");
     buffer_putulong(buffer_2,buddyfd);
     buffer_putnlflush(buffer_2);
+#endif
     h=io_getcookie(buddyfd);
     if (h) h->buddy=-1;
     cleanup(buddyfd);
