@@ -1757,7 +1757,7 @@ void smbresponse(struct http_data* h,int64 s) {
 	  t=localtime(&now);
 	  uint16_pack(c+0x35,mksmbdate(t->tm_mday,t->tm_mon+1,t->tm_year+1900));
 	  uint16_pack(c+0x37,mksmbtime(t->tm_hour,t->tm_min,t->tm_sec));
-	  uint16_pack(c+0x39,t->tm_gmtoff);
+	  uint16_pack(c+0x39,-t->tm_gmtoff);
 	  byte_zero(c+0x3b,4);
 	  c[0x3f]=0; c[0x40]=wglen16;	/* byte count */
 	  byte_copy(c+0x41,wglen16,workgroup_utf16);
