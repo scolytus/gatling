@@ -666,6 +666,8 @@ int main(int argc,char* argv[]) {
   uint32 scope_id;
   char ip[16];
   uint16 port;
+  tai6464 now,last,next,tick;
+  unsigned long timeout_secs=23;
 
   signal(SIGPIPE,SIG_IGN);
 
@@ -674,7 +676,7 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"hi:p:vVdDt");
+    int c=getopt(argc,argv,"hi:p:vVdDtT:");
     if (c==-1) break;
     switch (c) {
     case 'i':
@@ -716,9 +718,17 @@ int main(int argc,char* argv[]) {
     case 'D':
       directory_index=1;
       break;
+    case 'T':
+      i=scan_ulong(optarg,&timeout_secs);
+      if (i==0) {
+	buffer_puts(buffer_2,"gatling: warning: could not parse timeout in seconds ");
+	buffer_puts(buffer_2,optarg+i+1);
+	buffer_putsflush(buffer_2,".\n");
+      }
+      break;
     case 'h':
       buffer_putsflush(buffer_2,
-		  "usage: gatling [-hvVtdD] [-i bind-to-ip] [-p bind-to-port]\n"
+		  "usage: gatling [-hvVtdD] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -727,6 +737,7 @@ int main(int argc,char* argv[]) {
 		  "\t-t\ttransproxy mode: do not replace :port in Host headers\n"
 		  "\t-d\tgenerate directory index\n"
 		  "\t-D\tdo not generate directory index\n"
+		  "\t-T n\tset timeout in seconds (0 to disable, default 23)\n"
 		  "\t\t(default is -d unless in virtual hosting mode)\n"
 		  );
       return 0;
@@ -738,6 +749,14 @@ int main(int argc,char* argv[]) {
     directory_index=virtual_hosts<1;
   else if (directory_index==-1)
     directory_index=0;
+
+  if (timeout_secs) {
+    taia_now(&last);
+    byte_copy(&next,sizeof(next),&last);
+    next.sec.x += timeout_secs;
+    byte_copy(&tick,sizeof(next),&last);
+    ++tick.sec.x;
+  }
 
   if (!io_readfile(&origdir,".")) panic("open()");
   /* get fd for . so we can always fchdir back */
@@ -765,9 +784,33 @@ int main(int argc,char* argv[]) {
   if (!io_fd(s))
     panic("io_fd");
   io_wantread(s);
+
   for (;;) {
     int64 i;
-    io_wait();
+    if (timeout_secs)
+      io_waituntil(tick);
+    else
+      io_wait();
+
+    if (timeout_secs) {
+      taia_now(&now);
+      if (now.sec.x != last.sec.x) {
+	byte_copy(&last,sizeof(now),&now);
+	byte_copy(&next,sizeof(now),&now);
+	next.sec.x += timeout_secs;
+	byte_copy(&tick,sizeof(next),&now);
+	++tick.sec.x;
+	while ((i=io_timeouted())!=-1) {
+	  buffer_puts(buffer_1,"timeout ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_puts(buffer_1,"\nclose ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putnlflush(buffer_1);
+	  io_close(i);
+	}
+      }
+    }
+
     while ((i=io_canread())!=-1) {
       if (i==s) {
 	int n;
@@ -790,6 +833,8 @@ int main(int argc,char* argv[]) {
 	      byte_zero(h,sizeof(struct http_data));
 	      socket_local6(s,h->myip,&h->myport,0);
 	      io_setcookie(n,h);
+	      if (timeout_secs)
+		io_timeout(n,next);
 	    } else
 	      io_close(n);
 	  } else {
@@ -815,6 +860,8 @@ int main(int argc,char* argv[]) {
 	  buffer_putulong(buffer_1,i);
 	  buffer_puts(buffer_1," ");
 	  buffer_puterror(buffer_1);
+	  buffer_puts(buffer_1,"\nclose ");
+	  buffer_putulong(buffer_1,i);
 	  buffer_putnlflush(buffer_1);
 	  io_close(i);
 	} else if (l==0) {
@@ -828,6 +875,8 @@ int main(int argc,char* argv[]) {
 	  buffer_putnlflush(buffer_1);
 	  io_close(i);
 	} else if (l>0) {
+	  if (timeout_secs)
+	    io_timeout(i,next);
 	  array_catb(&h->r,buf,l);
 	  if (array_failed(&h->r)) {
 	    httperror(h,"500 Server Error","request too long.");

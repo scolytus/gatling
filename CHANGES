@@ -1,5 +1,6 @@
 0.2:
   zlib support (directory listings only)
+  add timeout support
 
 0.1:
   directory listings

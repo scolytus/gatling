@@ -1,7 +1,5 @@
 
-  - timeouts
   - http pipelining
-  - transparent .gz and .png substitution
   - a benchmark program
   - ftp
 
