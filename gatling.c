@@ -31,6 +31,7 @@
 #include <assert.h>
 #include <fnmatch.h>
 #include <iconv.h>
+#include "havealloca.h"
 
 #ifdef TIMEOUT_DEBUG
 void new_io_timeout(int64 d,tai6464 t) {
