@@ -745,6 +745,17 @@ static int switch_uid() {
   return 0;
 }
 
+static void cleanup(int64 fd) {
+  struct http_data* h=io_getcookie(fd);
+  if (h) {
+    array_reset(&h->r);
+    iob_reset(&h->iob);
+    if (h->filefd!=-1) io_close(h->filefd);
+    free(h);
+  }
+  io_close(fd);
+}
+
 static int fini;
 
 void sighandler(int sig) {
@@ -995,7 +1006,7 @@ usage:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
-	  io_close(i);
+	  cleanup(i);
 	}
       }
     }
@@ -1070,11 +1081,6 @@ usage:
 	struct http_data* h=io_getcookie(i);
 	int l=io_tryread(i,buf,sizeof buf);
 	if (l==-3) {
-	  if (h) {
-	    array_reset(&h->r);
-	    iob_reset(&h->iob);
-	    free(h);
-	  }
 	  if (logging) {
 	    buffer_puts(buffer_1,"io_error ");
 	    buffer_putulong(buffer_1,i);
@@ -1084,20 +1090,14 @@ usage:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
-	  io_close(i);
+	  cleanup(i);
 	} else if (l==0) {
-	  if (h) {
-	    array_reset(&h->r);
-	    iob_reset(&h->iob);
-	    h->hdrbuf=0;
-	    free(h);
-	  }
 	  if (logging) {
 	    buffer_puts(buffer_1,"close ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
-	  io_close(i);
+	  cleanup(i);
 	} else if (l>0) {
 	  if (timeout_secs)
 	    io_timeout(i,next);
@@ -1123,37 +1123,37 @@ emerge:
       if (r==-1)
 	io_eagain(i);
       else if (r<=0) {
-	if (h->filefd!=-1) io_close(h->filefd);
 	if (r==-3) {
 	  if (logging) {
 	    buffer_puts(buffer_1,"socket_error ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_puts(buffer_1," ");
 	    buffer_puterror(buffer_1);
+	    buffer_puts(buffer_1,"\nclose ");
+	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
+	  cleanup(i);
 	} else {
 	  if (logging) {
 	    buffer_puts(buffer_1,"request_done ");
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
-	}
-	array_trunc(&h->r);
-	iob_reset(&h->iob);
-	h->hdrbuf=0;
-	if (h->keepalive) {
-	  io_dontwantwrite(i);
-	  io_wantread(i);
-	} else {
-	  if (logging) {
-	    buffer_puts(buffer_1,"close ");
-	    buffer_putulong(buffer_1,i);
-	    buffer_putnlflush(buffer_1);
+	  array_trunc(&h->r);
+	  iob_reset(&h->iob);
+	  h->hdrbuf=0;
+	  if (h->keepalive) {
+	    io_dontwantwrite(i);
+	    io_wantread(i);
+	  } else {
+	    if (logging) {
+	      buffer_puts(buffer_1,"close ");
+	      buffer_putulong(buffer_1,i);
+	      buffer_putnlflush(buffer_1);
+	    }
+	    cleanup(i);
 	  }
-	  io_close(i);
-	  array_reset(&h->r);
-	  free(h);
 	}
       } else
 	if (timeout_secs)
