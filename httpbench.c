@@ -167,7 +167,7 @@ int main(int argc,char* argv[]) {
 
   signal(SIGPIPE,SIG_IGN);
 
-  {
+  if (!geteuid()) {
     struct rlimit rl;
     long l;
     rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
