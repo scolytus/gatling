@@ -975,7 +975,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
   buf[x]=0;
 
   if (h->buddy==-1 || !(b=io_getcookie(h->buddy))) {
-    h->hdrbuf="425 Need data connection!?\r\n";
+    h->hdrbuf="425 Could not establish data connection.\r\n";
     return -1;
   }
   if (b->filefd!=-1) { io_close(b->filefd); b->filefd=-1; }
@@ -1162,7 +1162,7 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   de* ab;
 
   if (h->buddy==-1 || !io_getcookie(h->buddy)) {
-    h->hdrbuf="425 Need data connection!?\r\n";
+    h->hdrbuf="425 Could not establish data connection\r\n";
     return -1;
   }
 
@@ -1191,9 +1191,9 @@ static int ftp_list(struct http_data* h,char* s,int _long,int sock) {
   }
   {
     switch (what) {
-    case 0: sortfun=rev?sort_name_d:sort_name_a; break;
     case 1: sortfun=rev?sort_size_a:sort_size_d; break;
     case 2: sortfun=rev?sort_mtime_a:sort_mtime_d; break;
+    default: sortfun=rev?sort_name_d:sort_name_a; break;
     }
   }
 
@@ -1498,7 +1498,7 @@ syntaxerror:
       if (!x) goto closeandgo;
       byte_zero(x,sizeof(struct http_data));
       x->buddy=s; x->filefd=-1;
-      x->t=FTPSLAVE;
+      x->t=FTPACTIVE;
       x->destport=port;
       io_setcookie(h->buddy,x);
     } else
@@ -1515,6 +1515,7 @@ syntaxerror:
       buffer_putulong(buffer_1,port);
       buffer_putnlflush(buffer_1);
     }
+    io_wantwrite(h->buddy);
   } else if (case_equals(c,"PWD") || case_equals(c,"XPWD") /* fsck windoze */) {
     c=h->ftppath; if (!c) c="/";
     h->hdrbuf=malloc(50+str_len(c));
@@ -1641,7 +1642,14 @@ static void cleanup(int64 fd) {
   int buddyfd=-1;
   if (h) {
     buddyfd=h->buddy;
-    if (h->t==FTPSLAVE) buddyfd=-1;
+    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE) {
+      if (buddyfd!=-1) {
+	struct http_data* b=io_getcookie(buddyfd);
+	if (b)
+	  b->buddy=-1;
+      }
+      buddyfd=-1;
+    }
     array_reset(&h->r);
     iob_reset(&h->iob);
     if (h->filefd!=-1) io_close(h->filefd);
@@ -2314,8 +2322,9 @@ pipeline:
 	    buffer_putulong(buffer_1,i);
 	    buffer_putnlflush(buffer_1);
 	  }
-	  if (h->t==FTPSLAVE) {
+	  if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
 	    struct http_data* b=io_getcookie(h->buddy);
+	    assert(b);
 	    if (b) {
 	      b->buddy=-1;
 	      iob_reset(&b->iob);
