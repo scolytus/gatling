@@ -230,7 +230,12 @@ int main(int argc,char* argv[]) {
       break;
     case '?':
 usage:
-      buffer_putsflush(buffer_2,"usage: dl url\n");
+      buffer_putsflush(buffer_2,"usage: dl [-i file] [-no4v] url\n"
+		       "	-i fn	only fetch file if it is newer than fn\n"
+		       "	-n	only fetch file if it is newer than local copy\n"
+		       "	-4	use PORT and PASV instead of EPRT and EPSV\n"
+		       "	-o	use PORT and EPRT instead of EPRT and EPSV\n"
+		       "	-v	be verbose\n");
       return 0;
     }
   }
