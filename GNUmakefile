@@ -1,4 +1,4 @@
-DEBUG=1
+#DEBUG=1
 ZLIB=1
 prefix=/opt/diet
 BINDIR=${prefix}/bin

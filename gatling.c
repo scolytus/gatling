@@ -3,7 +3,7 @@
 #define SUPPORT_CGI
 /* #define DEBUG to enable more verbose debug messages for tracking fd
  * leaks */
-#define DEBUG
+/* #define DEBUG */
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
