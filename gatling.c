@@ -5,6 +5,7 @@
  * leaks */
 /* #define DEBUG */
 #define SUPPORT_CGI
+#define SUPPORT_HTACCESS
 
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
@@ -24,6 +25,7 @@
 #include "textcode.h"
 #include "uint32.h"
 #include "uint16.h"
+#include "mmap.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -43,6 +45,7 @@
 #include <assert.h>
 #include <fnmatch.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #ifdef SUPPORT_SMB
 #include <iconv.h>
 #endif
@@ -278,6 +281,7 @@ static int add_proxy(const char* c) {
 
 static char* http_header(struct http_data* r,char* h);
 int buffer_putlogstr(buffer* b,const char* s);
+void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm);
 void httperror(struct http_data* r,const char* title,const char* message);
 static int header_complete(struct http_data* r);
 
@@ -374,6 +378,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	  buffer_putnlflush(buffer_1);
 	}
 	io_wantwrite(s);
+#ifdef SUPPORT_CGI
       } else {
 	/* local CGI mode */
 	uint32 a,len; uint16 b;
@@ -429,6 +434,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	  buffer_putnlflush(buffer_1);
 #endif
 	}
+#endif
       }
       h->buddy=sockfd;
       d->buddy=s;
@@ -616,9 +622,13 @@ static int open_for_writing(int64* fd,const char* name) {
   char* x;
   struct stat ss;
   c=name+str_rchr(name,'/');
-  if (!*c) return 0;	/* no slashes?  There's something fishy */
-  x=alloca(c-name+1);
-  byte_copy(x,c-name,name); x[c-name]=0;
+//  if (!*c) return 0;	/* no slashes?  There's something fishy */
+  if (!*c) {
+    x=".";
+  } else {
+    x=alloca(c-name+1);
+    byte_copy(x,c-name,name); x[c-name]=0;
+  }
   if (stat(x,&ss)==-1) return 0;	/* better safe than sorry */
   if (!(ss.st_mode&S_IWOTH)) return 0;
   return io_createfile(fd,name);
@@ -694,7 +704,7 @@ static int header_complete(struct http_data* r) {
 
 static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nout of memory\n";
 
-void httperror(struct http_data* r,const char* title,const char* message) {
+void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm) {
   char* c;
   if (r->t==HTTPSERVER4 || r->t==HTTPSERVER6 || r->t==HTTPREQUEST
 #ifdef SUPPORT_HTTPS
@@ -702,7 +712,7 @@ void httperror(struct http_data* r,const char* title,const char* message) {
       || r->t==HTTPSREQUEST || r->t==HTTPSRESPONSE
 #endif
 								) {
-    c=r->hdrbuf=(char*)malloc(str_len(message)+str_len(title)+250);
+    c=r->hdrbuf=(char*)malloc(str_len(message)+str_len(title)+str_len(realm?realm:"")+300);
     if (!c) {
       r->hdrbuf=oom;
       r->hlen=str_len(r->hdrbuf);
@@ -715,6 +725,11 @@ void httperror(struct http_data* r,const char* title,const char* message) {
       c+=fmt_str(c,r->keepalive?"keep-alive":"close");
       c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
       c+=fmt_ulong(c,str_len(message)+str_len(title)+16-4);
+      if (realm) {
+	c+=fmt_str(c,"\r\nWWW-Authenticate: Basic realm=\"");
+	c+=fmt_str(c,realm);
+	c+=fmt_str(c,"\"");
+      }
       c+=fmt_str(c,"\r\n\r\n<title>");
       c+=fmt_str(c,title+4);
       c+=fmt_str(c,"</title>\n");
@@ -731,6 +746,10 @@ void httperror(struct http_data* r,const char* title,const char* message) {
     r->hlen=c-r->hdrbuf;
     iob_addbuf_free(&r->iob,r->hdrbuf,r->hlen);
   }
+}
+
+void httperror(struct http_data* r,const char* title,const char* message) {
+  httperror_realm(r,title,message,0);
 }
 
 static unsigned int fmt_2digits(char* dest,int i) {
@@ -973,6 +992,80 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
   return 1;
 }
 
+#ifdef SUPPORT_HTACCESS
+/* check whether there is a .htaccess file in the current directory.
+ * if it is, expect the following format:
+
+Realm
+username:password
+username2:password2
+...
+
+ * Realm is the HTTP realm (transmitted in the http authentication
+ * required message and usually displayed by the browser).  Only basic
+ * authentication is supported.  Please note that .htaccess files are
+ * not looked for in other directories.  If you want subdirectories
+ * covered, use hard or symbolic links.  The function returns 0 if the
+ * authentication was OK or -1 if authentication is needed (the HTTP
+ * response was then already written to the iob). */
+int http_dohtaccess(struct http_data* h) {
+  unsigned long filesize;
+  char* map;
+  char* s;
+  char* auth;
+  char* realm;
+  int r=0;
+  map=mmap_read(".htaccess",&filesize);
+  if (!map) return 0;
+  for (s=map; (s<map+filesize) && (*s!='\n'); ++s);		/* XXX */
+  if (s>=map+filesize) goto done;
+  realm=alloca(s-map+1);
+  memmove(realm,map,s-map);
+  realm[s-map]=0;
+  ++s;
+  auth=http_header(h,"Authorization");
+  if (auth) {
+    if (str_start(auth,"Basic ")) {
+      char* username,* password;
+      char* decoded;
+      int i;
+      unsigned long l,dl,ul;
+      auth+=6;
+      while (*auth==' ' || *auth=='\t') ++auth;
+      i=str_chr(auth,'\n');
+      if (i && auth[i-1]=='\r') --i;
+      decoded=alloca(i+1);
+      l=scan_base64(auth,decoded,&dl);
+      if (auth[l]!='\n' && auth[l]!='\r') goto needauth;
+      decoded[dl]=0;
+      l=str_rchr(decoded,':');
+      if (decoded[l]!=':') goto needauth;
+      username=decoded; ul=l;
+      decoded[l]=0; password=decoded+l+1;
+
+      for (l=0; l<filesize; ) {
+	while (l<filesize && map[l]!='\n') ++l; if (map[l]=='\n') ++l;
+	if (l>=filesize) break;
+	if (byte_equal(map+l,ul,username) && map[l+ul]==':') {
+	  char* crypted=crypt(password,map+l+ul+1);
+	  i=str_len(crypted);
+	  if (l+ul+1+i <= filesize)
+	    if (byte_equal(map+l+ul+1,i,crypted)) {
+	      r=1;
+	      goto done;
+	    }
+	}
+      }
+    }
+  }
+needauth:
+  httperror_realm(h,"401 Authorization Required","Authorization required to view this web page",realm);
+done:
+  munmap(map,filesize);
+  return r;
+}
+#endif
+
 int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd) {
   char* dir=0;
   char* s;
@@ -1047,6 +1140,10 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	  return -1;
   }
   while (Filename[1]=='/') ++Filename;
+
+#ifdef SUPPORT_HTACCESS
+  if (http_dohtaccess(h)==0) return -5;
+#endif
 
 #ifdef SUPPORT_PROXY
   switch ((i=proxy_connection(sockfd,Filename,dir,h))) {
@@ -1284,6 +1381,8 @@ e404:
       if (fd==-4) {	/* redirect */
 	iob_addbuf_free(&h->iob,h->hdrbuf,h->hlen);
 	iob_addbuf_free(&h->iob,h->bodybuf,h->blen);
+      } else if (fd==-5) {
+	/* 401 -> log nothing. */
       } else if (fd==-2) {
 	char* c;
 	c=h->hdrbuf=(char*)malloc(250);
@@ -1535,7 +1634,7 @@ static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,co
   if (ftp_vhost(h)) return -1;
 
   errno=0; fd=-1;
-  h->hdrbuf=forreading?"550 No such file or directory.\r\n":"550 You can't upload here!\r\n";
+  h->hdrbuf=forreading?"550 No such file or directory.\r\n":"550 Uploading not permitted here!\r\n";
   if (x[1]) {
     switch (forreading) {
     case 1: open_for_reading(&fd,x+1,ss); break;
@@ -2005,7 +2104,7 @@ void ftpresponse(struct http_data* h,int64 s) {
   {
     char* d,* e=c+array_bytes(&h->r);
 
-    write(1,c,e-c);
+/*    write(1,c,e-c); */
 
     for (d=c; d<e; ++d) {
       if (*d=='\n') {
@@ -2555,6 +2654,7 @@ static const char *cgivars[] = {
   "QUERY_STRING=",
   "PATH_INFO=",
   "PATH_TRANSLATED=",
+  "REMOTE_USER=",
   0
 };
 
@@ -2589,7 +2689,7 @@ void forkslave(int fd,buffer* in) {
       char* httpreq=alloca(reqlen+1);
       char* path=alloca(dirlen+1);
       char* remoteaddr=alloca(ralen+1);
-      char* servername,* httpversion,* httpaccept,* authtype,* contenttype,* contentlength;
+      char* servername,* httpversion,* httpaccept,* authtype,* contenttype,* contentlength,* remoteuser;
       char* path_translated;
 
       if (buffer_get(in,httpreq,reqlen) == reqlen &&
@@ -2695,15 +2795,29 @@ void forkslave(int fd,buffer* in) {
 	      } else
 		path_translated=0;
 
-	      x=http_header_blob(httpreq,reqlen,"WWW-Authenticate");
+	      x=http_header_blob(httpreq,reqlen,"Authorization");
 	      if (x) {
+		int k;
+		remoteuser=0;
+
 		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+		k=str_chr(x,' ');
+		if (k<j) {
+		  unsigned long dl;
+		  remoteuser=alloca(20+k-j);
+		  i=fmt_str(remoteuser,"REMOTE_USER=");
+		  scan_base64(x+k+1,remoteuser+i,&dl);
+		  remoteuser[i+dl]=0;
+		  dl=str_chr(remoteuser+i,':');
+		  if (remoteuser[i+dl]==':') remoteuser[i+dl]=0;
+		  j=k;
+		}
 		authtype=alloca(20+j+1);
 		i=fmt_str(authtype,"AUTH_TYPE=");
 		byte_copy(authtype+i,j,x);
 		authtype[i+j]=0;
 	      } else
-		authtype=0;
+		authtype=remoteuser=0;
 
 	      x=http_header_blob(httpreq,reqlen,"Content-Type");
 	      if (x) {
@@ -2750,7 +2864,7 @@ void forkslave(int fd,buffer* in) {
 			if (str_start(_envp[i],cgivars[j])) { found=1; break; }
 		      if (!found) ++envc;
 		    }
-		    envp=(char**)alloca(sizeof(char*)*(envc+20));
+		    envp=(char**)alloca(sizeof(char*)*(envc+21));
 		    envc=0;
 
 		    for (i=0; _envp[i]; ++i) {
@@ -2802,6 +2916,7 @@ void forkslave(int fd,buffer* in) {
 		    ++envc;
 
 		    if (authtype) envp[envc++]=authtype;
+		    if (remoteuser) envp[envc++]=remoteuser;
 		    if (contenttype) envp[envc++]=contenttype;
 		    if (contentlength) envp[envc++]=contentlength;
 		    envp[envc]=0;
