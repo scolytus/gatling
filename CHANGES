@@ -1,6 +1,8 @@
 0.2:
   zlib support (directory listings only)
   add timeout support
+  add major kludgery to work around deliberate IPv6 breakage on OpenBSD
+    from that itojun maniac.  Friends don't let friends run OpenBSD!
 
 0.1:
   directory listings
