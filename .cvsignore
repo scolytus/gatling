@@ -9,3 +9,4 @@ ioerr
 pthreadbench
 mktestdata
 manymapbench
+forksbench

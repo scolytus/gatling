@@ -4,7 +4,7 @@ prefix=/opt/diet
 BINDIR=${prefix}/bin
 
 TARGETS=gatling httpbench bindbench mmapbench forkbench dl pthreadbench \
-mktestdata manymapbench ioerr
+mktestdata manymapbench ioerr forksbench
 
 all: $(TARGETS)
 
@@ -55,6 +55,9 @@ CC:=$(DIET) $(CC)
 
 pthreadbench: pthreadbench.o
 	$(CC) $< -o $@ -I. $(CFLAGS) $(LDFLAGS) $(LDLIBS) -lpthread
+
+forksbench: forkbench.o
+	$(CC) -static -o $@ forkbench.o $(LDFLAGS) $(LDLIBS)
 
 gatling.o: version.h
 

@@ -2,7 +2,7 @@ prefix=/usr/local
 BINDIR=${prefix}/bin
 
 TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
-mktestdata manymapbench ioerr
+mktestdata manymapbench ioerr forksbench
 
 all: $(TARGET)
 
@@ -27,6 +27,9 @@ mmapbench: mmapbench.o
 
 forkbench: forkbench.o
 	$(CC) -o $@ forkbench.o $(LDFLAGS)
+
+forksbench: forkbench.o
+	$(CC) -static -o $@ forkbench.o $(LDFLAGS)
 
 pthreadbench: pthreadbench.o
 	$(CC) -o $@ pthreadbench.o $(LDFLAGS) -lpthread
