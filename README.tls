@@ -1,0 +1,10 @@
+gatling now has primitive SSL/TLS support using OpenSSL.
+I took the code from the excellent qmail STARTTLS patch.
+No support for much of anything yet, you just get an HTTPS server
+using the certificate in "server.pem" in the gatling root directory.
+
+If you want OpenSSL to verify client certs, put the CA cert in
+"clientca.pem".  If you need a revocation list, use OpenSSL 0.9.7 or
+later, and put it in "clientcrl.pem".
+
+No way to communicate anything about the client cert to CGIs yet.
