@@ -1,5 +1,6 @@
 0.3:
   add chroot+setuid support
+  compiler warnings removed (Julien Touche)
 
 0.2:
   zlib support (directory listings only)

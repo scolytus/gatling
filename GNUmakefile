@@ -71,4 +71,4 @@ uninstall:
 	rm -f $(BINDIR)/gatling
 
 clean:
-	rm -f gatling httpbench bindbench mmapbench forkbench dl *.o version.h
+	rm -f gatling httpbench bindbench mmapbench forkbench dl *.o version.h core *.core

@@ -78,7 +78,7 @@ static int readanswer(int s,int measurethroughput) {
   char buf[8192];
   int i,j,body=-1,r;
   unsigned long rest;
-  unsigned long done;
+  unsigned long done=0;
   struct timeval a,b;
   i=0;
   while ((r=read(s,buf+i,sizeof(buf)-i)) > 0) {
@@ -343,7 +343,7 @@ usage:
       struct timeval a,b;
       long d;
       if (j==0) {
-	int k,s;
+	int k,s=0;
 	long x=0,y=0;
 	for (k=0; k<sample; ++k) {
 	  if (!keepalive || !k) {

@@ -1,4 +1,5 @@
 #include "buffer.h"
+#include "scan.h"
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -40,7 +41,6 @@ int main(int argc,char* argv[]) {
       }
       break;
     case 'h':
-usage:
       buffer_putsflush(buffer_2,
 		  "usage: pthreadbench [-h] [-c count]\n"
 		  "\n"
@@ -51,7 +51,7 @@ usage:
   }
 
   {
-    unsigned long i,j;
+    unsigned long i;
     int pfd[2];
     char buf[100];
     pthread_t *p=malloc(count*sizeof(pthread_t));
@@ -67,7 +67,7 @@ usage:
     for (i=0; i<count; ++i) {
       int r;
       gettimeofday(&a,0);
-      switch ((r=pthread_create(p+i,0,mythread,pfd))) {
+      switch ((r=pthread_create(p+i,0,(void*(*)(void*))mythread,pfd))) {
       case 0: /* ok */
 	break;
       default:
