@@ -4,7 +4,7 @@ MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
 TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
-mktestdata manymapbench ioerr tlsgatling forksbench
+mktestdata manymapbench ioerr tlsgatling forksbench cgi
 
 all: $(TARGET)
 
@@ -44,6 +44,9 @@ manymapbench: manymapbench.o
 
 ioerr: ioerr.o libsocket
 	$(CC) -o $@ ioerr.o $(LDFLAGS) `cat libsocket`
+
+cgi: cgi.c
+	$(CC) -o $@ cgi.c $(LDFLAGS)
 
 gatling.o: version.h
 

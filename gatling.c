@@ -2767,10 +2767,6 @@ static const char *cgivars[] = {
   "REMOTE_ADDR=",
   "REMOTE_PORT=",
   "REMOTE_IDENT=",
-  "HTTP_USER_AGENT=",
-  "HTTP_COOKIE=",
-  "HTTP_REFERER=",
-  "HTTP_ACCEPT_ENCODING=",
   "AUTH_TYPE=",
   "CONTENT_TYPE=",
   "CONTENT_LENGTH=",
@@ -2812,7 +2808,7 @@ void forkslave(int fd,buffer* in) {
       char* httpreq=alloca(reqlen+1);
       char* path=alloca(dirlen+1);
       char* remoteaddr=alloca(ralen+1);
-      char* servername,* httpversion,* httpaccept,* authtype,* contenttype,* contentlength,* remoteuser;
+      char* servername,* httpversion,* authtype,* contenttype,* contentlength,* remoteuser;
       char* path_translated;
 
       if (buffer_get(in,httpreq,reqlen) == reqlen &&
@@ -2890,16 +2886,6 @@ void forkslave(int fd,buffer* in) {
 	      byte_copy(servername+i,j,x);
 	      servername[i+j]=0;
 
-	      x=http_header_blob(httpreq,reqlen,"Accept");
-	      if (x) {
-		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
-		httpaccept=alloca(20+j+1);
-		i=fmt_str(httpaccept,"HTTP_ACCEPT=");
-		byte_copy(httpaccept+i,j,x);
-		httpaccept[i+j]=0;
-	      } else
-		httpaccept="HTTP_ACCEPT=*/*";
-
 	      if (pathinfo) {
 		path_translated=alloca(PATH_MAX+30);
 		i=fmt_str(path_translated,"PATH_TRANSLATED=");
@@ -2973,17 +2959,35 @@ void forkslave(int fd,buffer* in) {
 		    int envc;
 		    for (i=envc=0; _envp[i]; ++i) {
 		      int found=0;
-		      for (j=0; cgivars[j]; ++j)
-			if (str_start(_envp[i],cgivars[j])) { found=1; break; }
+		      if (str_start(_envp[i],"HTTP_"))
+			found=1;
+		      else
+			for (j=0; cgivars[j]; ++j)
+			  if (str_start(_envp[i],cgivars[j])) { found=1; break; }
 		      if (!found) ++envc;
 		    }
-		    envp=(char**)alloca(sizeof(char*)*(envc+21));
+
+		    /* now collect all normal HTTP headers */
+
+		    {
+		      char* x=httpreq;
+		      char* max=x+reqlen;
+		      for (;x<max && *x!='\n';++x) ;	/* Skip GET */
+		      for (;x<max;++x)
+			if (*x=='\n')
+			  ++envc;
+		    }
+
+		    envp=(char**)alloca(sizeof(char*)*(envc+20));
 		    envc=0;
 
 		    for (i=0; _envp[i]; ++i) {
 		      int found=0;
-		      for (j=0; cgivars[j]; ++j)
-			if (str_start(_envp[i],cgivars[j])) { found=1; break; }
+		      if (str_start(_envp[i],"HTTP_"))
+			found=1;
+		      else
+			for (j=0; cgivars[j]; ++j)
+			  if (str_start(_envp[i],cgivars[j])) { found=1; break; }
 		      if (!found) envp[envc++]=_envp[i];
 		    }
 		    envp[envc++]="SERVER_SOFTWARE=" RELEASE;
@@ -2998,7 +3002,6 @@ void forkslave(int fd,buffer* in) {
 		    ++envc;
 
 		    envp[envc++]=httpreq[0]=='G'?"REQUEST_METHOD=GET":"REQUEST_METHOD=POST";
-		    envp[envc++]=httpaccept;
 		    if (pathinfo) envp[envc++]=pathinfo;
 		    if (path_translated) envp[envc++]=path_translated;
 
@@ -3032,6 +3035,56 @@ void forkslave(int fd,buffer* in) {
 		    if (remoteuser) envp[envc++]=remoteuser;
 		    if (contenttype) envp[envc++]=contenttype;
 		    if (contentlength) envp[envc++]=contentlength;
+
+		    {
+		      char* x=httpreq;
+		      char* max=x+reqlen;
+		      char* y;
+
+		      for (;x<max && *x!='\n';++x) ;	/* Skip GET */
+
+		      for (y=++x;x<max;++x)
+			if (*x=='\n') {
+
+			  if (x>y && x[-1]=='\r') --x;
+
+			  if (x>y) {
+			    char* s=alloca(x-y+7);
+			    int i,j;
+
+			    byte_copy(s,5,"HTTP_");
+			    j=5;
+			    for (i=0; i<x-y; ++i) {
+			      if (y[i]==':') {
+				++i;
+				while (i<x-y && (y[i]==' ' || y[i]=='\t')) ++i;
+				s[j]='='; ++j;
+				for (; i<x-y; ++i) {
+				  s[j]=y[i];
+				  ++j;
+				}
+				s[j]=0;
+				envp[envc]=s;
+				++envc;
+				break;
+			      }
+			      if (y[i]=='-')
+				s[j]='_';
+			      else if (y[i]>='a' && y[i]<='z')
+				s[j]=y[i]-'a'+'A';
+			      else if (y[i]>='A' && y[i]<='Z')
+				s[j]=y[i];
+			      else {
+				s=0; break;
+			      }
+			      ++j;
+			    }
+			  }
+			  if (*x=='\r') ++x;
+			  y=x+1;
+			}
+		    }
+
 		    envp[envc]=0;
 
 		    dup2(sock[1],0);
