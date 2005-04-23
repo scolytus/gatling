@@ -483,8 +483,8 @@ usage:
 
     if (useport) {
       uint16 port;
-      unsigned char ip2[16];
-      unsigned char ip3[16];
+      char ip2[16];
+      char ip3[16];
       char buf[200];
       if (usev4) {
 	int i,j;

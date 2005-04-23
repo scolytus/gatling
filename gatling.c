@@ -196,8 +196,8 @@ struct http_data {
 #endif
   array r;
   io_batch iob;
-  unsigned char myip[16];	/* this is needed for virtual hosting */
-  uint32 myscope_id;		/* in the absence of a Host header */
+  char myip[16];	/* this is needed for virtual hosting */
+  uint32 myscope_id;	/* in the absence of a Host header */
   uint16 myport,peerport;
   uint16 destport;	/* port on remote system, used for active FTP */
   char* hdrbuf,* bodybuf;
@@ -205,9 +205,9 @@ struct http_data {
   int hlen,blen;	/* hlen == length of hdrbuf, blen == length of bodybuf */
   int keepalive;	/* 1 if we want the TCP connection to stay connected */
 			/* this is always 1 for FTP except after the client said QUIT */
-  int filefd;	/* -1 or the descriptor of the file we are sending out */
-  int buddy;	/* descriptor for the other connection, only used for FTP */
-  unsigned char peerip[16];	/* needed for active FTP */
+  int filefd;		/* -1 or the descriptor of the file we are sending out */
+  int buddy;		/* descriptor for the other connection, only used for FTP */
+  char peerip[16];	/* needed for active FTP */
   enum encoding encoding;
 #ifdef SUPPORT_FTP
   char* ftppath;
@@ -813,7 +813,7 @@ const char* mimetype(const char* filename) {
   return "application/octet-stream";
 }
 
-static int tolower(char a) {
+static int tolower(int a) {
   return a>='A' && a<='Z' ? a-'A'+'a' : a;
 }
 
@@ -1168,18 +1168,18 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 #ifdef USE_ZLIB
       if (doesgzip) {
 	uLongf destlen=h->blen+30+h->blen/1000;
-	char *compressed=malloc(destlen+15);
+	unsigned char *compressed=malloc(destlen+15);
 	if (!compressed) return -2;
-	if (compress2(compressed+8,&destlen,h->bodybuf,h->blen,3)==Z_OK && destlen<h->blen) {
+	if (compress2(compressed+8,&destlen,(unsigned char*)h->bodybuf,h->blen,3)==Z_OK && destlen<h->blen) {
 	  /* I am absolutely _not_ sure why this works, but we
 	   * apparently have to ignore the first two and the last four
 	   * bytes of the output of compress2.  I got this from googling
 	   * for "compress2 header" and finding some obscure gzip
 	   * integration in aolserver */
 	  unsigned int crc=crc32(0,0,0);
-	  crc=crc32(crc,h->bodybuf,h->blen);
+	  crc=crc32(crc,(unsigned char*)h->bodybuf,h->blen);
 	  free(h->bodybuf);
-	  h->bodybuf=compressed;
+	  h->bodybuf=(char*)compressed;
 	  h->encoding=GZIP;
 	  byte_zero(compressed,10);
 	  compressed[0]=0x1f; compressed[1]=0x8b;
