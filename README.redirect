@@ -7,3 +7,6 @@ To do it, create a symlink like this:
 Then, if someone tries to access search.html via HTTP, gatling will
 detect the special broken symlink and send the user a HTTP redirect to
 www.google.com.
+
+To redirect an URL ending in /, create that directory and create a
+symlink as above for index.html.
