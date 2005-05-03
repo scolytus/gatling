@@ -1064,6 +1064,37 @@ done:
 }
 #endif
 
+int http_redirect(struct http_data* h,const char* Filename) {
+  char buf[2048];
+  int i;
+  if ((i=readlink(Filename,buf,sizeof(buf)))!=-1) {
+    buf[i]=0;
+    if (strstr(buf,"://")) {
+      h->bodybuf=malloc(strlen(buf)+300);
+      h->hdrbuf=malloc(strlen(buf)+300);
+      if (h->bodybuf && h->hdrbuf) {
+	int i;
+	i=fmt_str(h->bodybuf,"Look <a href=\"");
+	i+=fmt_str(h->bodybuf+i,buf);
+	i+=fmt_str(h->bodybuf+i,"\">here</a>!\n");
+	h->blen=i;
+
+	i=fmt_str(h->hdrbuf,"HTTP/1.0 301 Go Away\r\nConnection: ");
+	i+=fmt_str(h->hdrbuf+i,h->keepalive?"keep-alive":"close");
+	i+=fmt_str(h->hdrbuf+i,"\r\nServer: " RELEASE "\r\nContent-Length: ");
+	i+=fmt_ulong(h->hdrbuf+i,h->blen);
+	i+=fmt_str(h->hdrbuf+i,"\r\nLocation: ");
+	i+=fmt_str(h->hdrbuf+i,buf);
+	i+=fmt_str(h->hdrbuf+i,"\r\n\r\n");
+	h->hlen=i;
+	return -4;
+      }
+      free(h->bodybuf); free(h->hdrbuf);
+    }
+  }
+  return 0;
+}
+
 int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd) {
   char* dir=0;
   char* s;
@@ -1162,6 +1193,8 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     h->mimetype="text/html";
     if (!open_for_reading(&fd,"index.html",ss)) {
       DIR* d;
+      if (errno==ENOENT)
+	if (http_redirect(h,"index.html")) return -4;
       if (!directory_index) return -1;
       if (!(d=opendir("."))) return -1;
       if (!http_dirlisting(h,d,Filename,args)) return -1;
@@ -1215,35 +1248,8 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   } else {
     h->mimetype=mimetype(Filename);
     if (!open_for_reading(&fd,Filename+1,ss)) {
-      if (errno==ENOENT) {
-	char buf[2048];
-	int i;
-	if ((i=readlink(Filename+1,buf,sizeof(buf)))!=-1) {
-	  buf[i]=0;
-	  if (strstr(buf,"://")) {
-	    h->bodybuf=malloc(strlen(buf)+300);
-	    h->hdrbuf=malloc(strlen(buf)+300);
-	    if (h->bodybuf && h->hdrbuf) {
-	      int i;
-	      i=fmt_str(h->bodybuf,"Look <a href=\"");
-	      i+=fmt_str(h->bodybuf+i,buf);
-	      i+=fmt_str(h->bodybuf+i,"\">here</a>!\n");
-	      h->blen=i;
-
-	      i=fmt_str(h->hdrbuf,"HTTP/1.0 301 Go Away\r\nConnection: ");
-	      i+=fmt_str(h->hdrbuf+i,h->keepalive?"keep-alive":"close");
-	      i+=fmt_str(h->hdrbuf+i,"\r\nServer: " RELEASE "\r\nContent-Length: ");
-	      i+=fmt_ulong(h->hdrbuf+i,h->blen);
-	      i+=fmt_str(h->hdrbuf+i,"\r\nLocation: ");
-	      i+=fmt_str(h->hdrbuf+i,buf);
-	      i+=fmt_str(h->hdrbuf+i,"\r\n\r\n");
-	      h->hlen=i;
-	      return -4;
-	    }
-	    free(h->bodybuf); free(h->hdrbuf);
-	  }
-	}
-      }
+      if (errno==ENOENT)
+	if (http_redirect(h,Filename+1)) return -4;
       return -1;
     }
 #ifdef DEBUG
