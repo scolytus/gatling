@@ -47,6 +47,8 @@ CFLAGS+=-DUSE_ZLIB
 LDLIBS+=-lz
 endif
 
+LDLIBS+=-lcrypt
+
 libowfat_path = $(strip $(foreach dir,../libowfat*,$(wildcard $(dir)/textcode.h)))
 ifneq ($(libowfat_path),)
 CFLAGS+=$(foreach fnord,$(libowfat_path),-I$(dir $(fnord)))

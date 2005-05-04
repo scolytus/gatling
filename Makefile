@@ -10,7 +10,7 @@ all: $(TARGET)
 
 CC=gcc
 CFLAGS=-pipe -Wall -O -I../libowfat/
-LDFLAGS=-s -L../libowfat/ -lowfat
+LDFLAGS=-s -L../libowfat/ -lowfat -lcrypt
 
 gatling: gatling.o libsocket libiconv
 	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket libiconv`
