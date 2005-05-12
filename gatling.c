@@ -4511,8 +4511,12 @@ usage:
     while ((i=io_canread())!=-1) {
       struct http_data* H=io_getcookie(i);
       if (!H) {
-	buffer_putsflush(buffer_1,"no_cookie\n");
-	return 111;
+	char a[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	buffer_putmflush(buffer_2,"canthappen ",a,": got read event on socket with no cookie!\n");
+	io_dontwantread(i);
+	io_close(i);
+	continue;
       }
       H->sent_until=H->prefetched_until=0;
 
@@ -4548,6 +4552,14 @@ usage:
     /* HANDLE WRITABLE EVENTS */
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
+      if (!h) {
+	char a[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	buffer_putmflush(buffer_2,"canthappen ",a,": got write event on socket with no cookie!\n");
+	io_dontwantwrite(i);
+	io_close(i);
+	continue;
+      }
 
 #ifdef SUPPORT_FTP
       if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
