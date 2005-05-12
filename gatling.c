@@ -801,6 +801,7 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "txt",	"text/plain" },
   { "m3u",	"audio/x-mpegurl" },
   { "htm",	"text/html" },
+  { "swf",	"application/x-shockwave-flash" },
   { 0 } };
 
 const char* mimetype(const char* filename) {
