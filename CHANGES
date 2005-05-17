@@ -2,6 +2,7 @@
   fix pipelining bug
   send all HTTP headers als HTTP_FOO=bar environment to CGIs
   gcc 4 unsigned char* <-> char* cleanups
+  add temporary fallback redirect (see README.redir)
 
 0.7:
   use the new scan_urlencoded2 (libowfat cvs); properly serve

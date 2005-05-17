@@ -7,6 +7,9 @@
 #define SUPPORT_CGI
 #define SUPPORT_HTACCESS
 
+/* if you want a redirect instead of a 404, #define this */
+#define SUPPORT_FALLBACK_REDIR
+
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
 
@@ -1302,6 +1305,35 @@ int buffer_putlogstr(buffer* b,const char* s) {
   return buffer_put(b,x,fmt_foldwhitespace(x,s,l));
 }
 
+#ifdef SUPPORT_FALLBACK_REDIR
+const char* redir;
+
+void do_redirect(struct http_data* h,const char* filename,int64 s) {
+  char* nh=malloc((strlen(filename)+strlen(redir))*2+300);
+  int i;
+  if (!nh) {
+    if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,s)]=0;
+      buffer_putmflush(buffer_1,"outofmemory ",numbuf,"\n");
+    }
+    cleanup(s);
+    return;
+  }
+  i=fmt_str(nh,"HTTP/1.0 302 Over There\r\nServer: " RELEASE "\r\nLocation: ");
+  i+=fmt_str(nh+i,redir);
+  i+=fmt_str(nh+i,filename);
+  i+=fmt_str(nh+i,"\r\nContent-Type: text/html\r\nContent-Length: ");
+  i+=fmt_ulong(nh+i,strlen(filename)+strlen(redir)+23);
+  i+=fmt_str(nh+i,"\r\n\r\n");
+  i+=fmt_str(nh+i,"Look <a href=");
+  i+=fmt_str(nh+i,redir);
+  i+=fmt_str(nh+i,filename);
+  i+=fmt_str(nh+i,">here!</a>\n");
+  iob_addbuf_free(&h->iob,nh,strlen(nh));
+}
+#endif
+
 void httpresponse(struct http_data* h,int64 s,long headerlen) {
   int head;
   int post;
@@ -1351,8 +1383,10 @@ e400:
     fd=http_openfile(h,c,&ss,s);
     if (fd==-1) {
 e404:
-      httperror(h,"404 Not Found","No such file or directory.");
-
+#ifdef SUPPORT_FALLBACK_REDIR
+      if (redir)
+	do_redirect(h,c,s);
+#endif
       if (logging) {
 	char buf[IP6_FMT+10];
 	int x;
@@ -1376,6 +1410,11 @@ e404:
 	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
 	buffer_putsflush(buffer_1,"\n");
       }
+#ifdef SUPPORT_FALLBACK_REDIR
+      if (redir)
+	goto fini;
+#endif
+      httperror(h,"404 Not Found","No such file or directory.");
 
     } else {
       char* filename=c;
@@ -4101,7 +4140,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leE");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -4210,11 +4249,20 @@ int main(int argc,char* argv[],char* envp[]) {
       }
       break;
 #endif
+#ifdef SUPPORT_FALLBACK_REDIR
+    case 'r':
+      if (strstr(optarg,"://"))
+	redir=optarg;
+      else
+	buffer_putmflush(buffer_2,"gatling: -r needs something like http://fallback.example.com as argument!\n");
+      break;
+#endif
     case 'h':
 usage:
       buffer_putsflush(buffer_2,
 		  "usage: gatling [-hnvVtdDfFUa] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
 		  "               [-u uid] [-c dir] [-w workgroup] [-P bytes] [-O ip/port/regex]\n"
+		  "               [-r redirurl]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -4246,6 +4294,9 @@ usage:
 #ifdef SUPPORT_HTTPS
 		  "\t-e\tprovide encryption (https://...)\n"
 		  "\t-E\tdo not provide encryption\n"
+#endif
+#ifdef SUPPORT_FALLBACK_REDIR
+		  "\t-r url\tinstead of a 404, generate a redirect to url+localpart\n"
 #endif
 		  );
       return 0;

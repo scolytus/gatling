@@ -55,6 +55,10 @@ CFLAGS+=$(foreach fnord,$(libowfat_path),-I$(dir $(fnord)))
 LDFLAGS+=$(foreach fnord,$(libowfat_path),-L$(dir $(fnord)))
 endif
 
+ifneq ($(REDIRECT),)
+CFLAGS+="-DREDIRECT=\"$(REDIRECT)\""
+endif
+
 CC:=$(DIET) $(CC)
 
 pthreadbench: pthreadbench.o
