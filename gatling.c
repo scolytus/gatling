@@ -4029,31 +4029,43 @@ int main(int argc,char* argv[],char* envp[]) {
 
 #ifdef SUPPORT_CGI
   _envp=envp;
-  if (socketpair(AF_UNIX,SOCK_STREAM,0,forksock)==-1)
-    panic("socketpair");
-  switch (fork()) {
-  case -1:
-    panic("fork");
-  case 0:
-    close(forksock[0]);
-    {
-      int64 savedir;
-      buffer fsb;
-      if (!io_readfile(&savedir,".")) panic("open()");
-      buffer_init(&fsb,read,forksock[1],fsbuf,sizeof fsbuf);
-      while (1) {
-	pid_t r;
-	do {
-	  r=waitpid(-1,0,WNOHANG);
-	} while (r!=0 && r!=-1);
-	forkslave(forksock[1],&fsb);
-	fchdir(savedir);
+  {
+    int i,found;
+    found=0;
+    for (i=1; i<argc; ++i)
+      if (strchr(argv[i],'C')) {
+	found=1;
+	break;
+      }
+    forksock[0]=forksock[1]=-1;
+    if (found) {
+      if (socketpair(AF_UNIX,SOCK_STREAM,0,forksock)==-1)
+	panic("socketpair");
+      switch (fork()) {
+      case -1:
+	panic("fork");
+      case 0:
+	close(forksock[0]);
+	{
+	  int64 savedir;
+	  buffer fsb;
+	  if (!io_readfile(&savedir,".")) panic("open()");
+	  buffer_init(&fsb,read,forksock[1],fsbuf,sizeof fsbuf);
+	  while (1) {
+	    pid_t r;
+	    do {
+	      r=waitpid(-1,0,WNOHANG);
+	    } while (r!=0 && r!=-1);
+	    forkslave(forksock[1],&fsb);
+	    fchdir(savedir);
+	  }
+	}
+	break;
+      default:
+	close(forksock[1]);
+	break;
       }
     }
-    break;
-  default:
-    close(forksock[1]);
-    break;
   }
 
 #if 0
