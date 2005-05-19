@@ -105,13 +105,13 @@ LDLIBS+=`cat libsocket libiconv`
 $(TARGETS): libsocketkludge.a
 
 install: gatling
-	install -d $(BINDIR) $(man1dir)
-	install $< $(BINDIR)
-	test -f tlsgatling && install tlsgatling $(BINDIR)
-	install -m 644 gatling.1 $(man1dir)
+	install -d $(DESTDIR)$(BINDIR) $(man1dir)
+	install $< $(DESTDIR)$(BINDIR)
+	if test -f tlsgatling; then install tlsgatling $(DESTDIR)$(BINDIR); fi
+	install -m 644 gatling.1 $(DESTDIR)$(man1dir)
 
 uninstall:
-	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1
+	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1
 
 clean:
 	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv

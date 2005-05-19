@@ -817,7 +817,7 @@ const char* mimetype(const char* filename) {
   return "application/octet-stream";
 }
 
-static int tolower(int a) {
+static int mytolower(int a) {
   return a>='A' && a<='Z' ? a-'A'+'a' : a;
 }
 
@@ -826,7 +826,7 @@ static int header_diff(const char* s,const char* t) {
   register int j;
   j=0;
   for (;;) {
-    if ((j=(tolower(*s)-tolower(*t)))) break; if (!*t) break; ++s; ++t;
+    if ((j=(mytolower(*s)-mytolower(*t)))) break; if (!*t) break; ++s; ++t;
   }
   if (*s=='\r' || *s=='\n') j=-*t;
   return j;

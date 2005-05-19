@@ -411,7 +411,7 @@ usage:
     char buf[2048];
     int i;
     int dataconn;
-    buffer_init(&ftpbuf,read,s,buf,sizeof buf);
+    buffer_init(&ftpbuf,(void*)read,s,buf,sizeof buf);
     if (verbose) buffer_putsflush(buffer_1,"Waiting for FTP greeting...");
     if ((readftpresponse(&ftpbuf)/100)!=2) panic("no 2xx ftp greeting.\n");
     if (verbose) buffer_putsflush(buffer_1,"\nUSER ftp...");
@@ -465,7 +465,7 @@ usage:
       if (verbose) buffer_putsflush(buffer_1,"failed.\n");
 
     if (resume) {
-      char* buf=alloca(strlen(filename)+10);
+      char* buf=alloca(str_len(filename)+10);
       int i;
       i=fmt_str(buf,"REST ");
       i+=fmt_ulonglong(buf+i,resumeofs);
