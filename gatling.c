@@ -4586,7 +4586,9 @@ usage:
 	io_close(i);
 	continue;
       }
-      H->sent_until=H->prefetched_until=0;
+      if (!(((void*)H >= (void*)&s && (void*)H <= (void*)&prefetchquantum) ||
+	    ((void*)H <= (void*)&s && (void*)H >= (void*)&prefetchquantum)))
+	H->sent_until=H->prefetched_until=0;
 
 #ifdef SUPPORT_PROXY
       if (H->t==PROXYPOST)
