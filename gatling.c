@@ -2988,7 +2988,11 @@ void forkslave(int fd,buffer* in) {
 	    {
 	      int sock[2];
 	      if (socketpair(AF_UNIX,SOCK_STREAM,0,sock)==0) {
+#ifdef sgi
+		int r=fork();
+#else
 		int r=vfork();
+#endif
 		if (r==-1)
 		  msg="vfork failed!";
 		else if (r==0) {
