@@ -4586,8 +4586,17 @@ usage:
 	io_close(i);
 	continue;
       }
-      if (!(((void*)H >= (void*)&s && (void*)H <= (void*)&prefetchquantum) ||
-	    ((void*)H <= (void*)&s && (void*)H >= (void*)&prefetchquantum)))
+      if (H->t == HTTPREQUEST
+#ifdef SUPPORT_FTP
+	  || H->t == FTPSLAVE
+#endif
+#ifdef SUPPORT_SMB
+	  || H->t == SMBREQUEST
+#endif
+#ifdef SUPPORT_HTTPS
+	  || H->t == HTTPSRESPONSE
+#endif
+	 )
 	H->sent_until=H->prefetched_until=0;
 
 #ifdef SUPPORT_PROXY
