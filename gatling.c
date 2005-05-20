@@ -3784,10 +3784,9 @@ ioerror:
 
     if (H->t==FTPSLAVE) {
       /* receive an upload */
-      int r;
       if (ftptimeout_secs)
 	io_timeout(H->buddy,nextftp);
-      if ((r=write(H->filefd,buf,l))!=l)
+      if (write(H->filefd,buf,l)!=l)
 	goto ioerror;
     } else
 #endif
