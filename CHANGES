@@ -1,3 +1,5 @@
+0.9:
+
 0.8:
   fix pipelining bug
   send all HTTP headers als HTTP_FOO=bar environment to CGIs
