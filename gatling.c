@@ -3653,17 +3653,17 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 }
 
 #ifdef SUPPORT_HTTPS
-void handle_ssl_error_code(int sock,int code,int reading) {
+int handle_ssl_error_code(int sock,int code,int reading) {
 //  printf("handle_ssl_error_code(sock %d,code %d,reading %d)\n",sock,code,reading);
   switch (code) {
   case SSL_ERROR_WANT_READ:
     io_wantread(sock);
     io_dontwantwrite(sock);
-    return;
+    return 0;
   case SSL_ERROR_WANT_WRITE:
     io_wantwrite(sock);
     io_dontwantread(sock);
-    return;
+    return 0;
   case SSL_ERROR_SYSCALL:
     if (logging) {
       int olderrno=errno;
@@ -3676,7 +3676,7 @@ void handle_ssl_error_code(int sock,int code,int reading) {
       buffer_putnlflush(buffer_1);
       errno=olderrno;
     }
-    return;
+    return -1;
   default:
     if (logging) {
       buffer_puts(buffer_1,"ssl_protocol_error ");
@@ -3685,7 +3685,7 @@ void handle_ssl_error_code(int sock,int code,int reading) {
       buffer_putulong(buffer_1,sock);
       buffer_putnlflush(buffer_1);
     }
-    return;
+    return -1;
   }
 }
 
@@ -3702,7 +3702,8 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
     }
     return;
   } else
-    handle_ssl_error_code(sock,r,reading);
+    if (handle_ssl_error_code(sock,r,reading)==-1)
+      cleanup(sock);
 }
 #endif
 
@@ -3723,7 +3724,10 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
       l=SSL_get_error(H->ssl,l);
 //      printf("  error %d %s\n",l,ERR_error_string(l,0));
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
-	handle_ssl_error_code(i,l,1);
+	if (handle_ssl_error_code(i,l,1)==-1) {
+	  cleanup(i);
+	  return;
+	}
 	l=-1;
       } else l=-3;
     }
@@ -3867,7 +3871,10 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
   l=SSL_write(H->ssl,buf,n);
   if (l<0) {
     l=SSL_get_error(H->ssl,l);
-    handle_ssl_error_code(sock,l,0);
+    if (handle_ssl_error_code(sock,l,0)==-1) {
+      cleanup(sock);
+      return -3;
+    }
     if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
       l=-1; errno=EAGAIN;
     } else
