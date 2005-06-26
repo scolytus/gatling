@@ -22,6 +22,13 @@
 #include <sys/stat.h>
 #include "havealloca.h"
 
+char* todel;
+
+int alarm_handler() {
+  if (todel) unlink(todel);
+  exit(0);
+}
+
 static void carp(const char* routine) {
   buffer_puts(buffer_2,"dl: ");
   buffer_puts(buffer_2,routine);
@@ -68,7 +75,7 @@ static int readanswer(int s,const char* filename) {
   int64 d;
   unsigned long httpcode;
   unsigned long long rest;
-  i=0; d=-1; httpcode=0;
+  i=0; d=-1; httpcode=0; todel=(char*)filename;
   while ((r=read(s,buf+i,sizeof(buf)-i)) > 0) {
     i+=r;
     for (j=0; j+3<i; ++j) {
@@ -130,6 +137,7 @@ static int readanswer(int s,const char* filename) {
     }
   }
   close(d);
+  chmod(filename,0644);
   return 0;
 }
 
@@ -230,7 +238,7 @@ int main(int argc,char* argv[]) {
   signal(SIGPIPE,SIG_IGN);
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nvr");
+    int c=getopt(argc,argv,"i:ko4nvra:");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -258,6 +266,14 @@ int main(int argc,char* argv[]) {
     case 'v':
       verbose=1;
       break;
+    case 'a':
+      {
+	unsigned long n;
+	signal(SIGALRM,(sighandler_t)alarm_handler);
+	if (optarg[scan_ulong(optarg,&n)]==0)
+	  alarm(n);
+	break;
+      }
     case '?':
 usage:
       buffer_putsflush(buffer_2,"usage: dl [-i file] [-no4v] url\n"
@@ -266,6 +282,7 @@ usage:
 		       "	-r	resume\n"
 		       "	-4	use PORT and PASV instead of EPRT and EPSV, only connect using IPv4\n"
 		       "	-o	use PORT and EPRT instead of PASV and EPSV\n"
+		       "	-a n	abort after n seconds\n"
 		       "	-v	be verbose\n");
       return 0;
     }
@@ -379,7 +396,6 @@ usage:
 	rlen=i; request[rlen]=0;
       }
     }
-
   }
 
   {

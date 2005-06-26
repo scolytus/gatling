@@ -1,3 +1,4 @@
+#define SUPPORT_SERVERSTATUS
 // #define SUPPORT_SMB
 #define SUPPORT_FTP
 #define SUPPORT_PROXY
@@ -231,6 +232,14 @@ struct http_data {
 #endif
 };
 
+static unsigned long connections;
+static unsigned long http_connections, https_connections, ftp_connections, smb_connections;
+static unsigned long cps,cps1;	/* connections per second */
+static unsigned long rps,rps1;	/* requests per second */
+static unsigned long eps,eps1;	/* events per second */
+static unsigned long long tin,tin1;	/* traffic inbound */
+static unsigned long long tout,tout1;	/* traffic outbound */
+
 #if defined(SUPPORT_PROXY) || defined(SUPPORT_CGI)
 /* You configure a list of regular expressions, and if a request matches
  * one of them, the request is forwarded to some other IP:port.  You can
@@ -340,6 +349,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	buffer_putlogstr(buffer_1,(tmp=http_header(d,"Host"))?tmp:buf);
 	buffer_putsflush(buffer_1,"\n");
       }
+      ++rps1;
 
       if (x->port) {
 	/* proxy mode */
@@ -1334,6 +1344,91 @@ void do_redirect(struct http_data* h,const char* filename,int64 s) {
 }
 #endif
 
+#ifdef SUPPORT_SERVERSTATUS
+void do_server_status(struct http_data* h,int64 s) {
+  char* nh=malloc(1000);
+  int i,l;
+  char buf[FMT_ULONG*10+600];
+  if (!nh) {
+    if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,s)]=0;
+      buffer_putmflush(buffer_1,"outofmemory ",numbuf,"\n");
+    }
+    cleanup(s);
+    return;
+  }
+  i=fmt_str(buf,"<title>Gatling Server Status</title>\n<h2>Open Connections</h2>\nHTTP: ");
+  i+=fmt_ulong(buf+i,http_connections);
+  i+=fmt_str(buf+i,"<br>\nHTTPS: ");
+  i+=fmt_ulong(buf+i,https_connections);
+  i+=fmt_str(buf+i,"<br>\nFTP: ");
+  i+=fmt_ulong(buf+i,ftp_connections);
+  i+=fmt_str(buf+i,"<br>\nSMB: ");
+  i+=fmt_ulong(buf+i,smb_connections);
+  i+=fmt_str(buf+i,"<p>\n<h2>Per second:</h2>Connections: ");
+  i+=fmt_ulong(buf+i,cps);
+  i+=fmt_str(buf+i,"<br>\nRequests: ");
+  i+=fmt_ulong(buf+i,rps);
+  i+=fmt_str(buf+i,"<br>\nEvents: ");
+  i+=fmt_ulong(buf+i,eps);
+  i+=fmt_str(buf+i,"<br>\nInbound Traffic: ");
+  i+=fmt_ulong(buf+i,tin/1024);
+  i+=fmt_str(buf+i," KiB<br>\nOutbound Traffic: ");
+  i+=fmt_ulong(buf+i,tout/1024);
+  i+=fmt_str(buf+i," KiB");
+  buf[i]=0;
+  l=i;
+
+  i=fmt_str(nh,"HTTP/1.0 200 OK\r\nServer: " RELEASE "\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: ");
+  i+=fmt_ulong(nh+i,l);
+  i+=fmt_str(nh+i,"\r\n\r\n");
+  i+=fmt_str(nh+i,buf);
+  iob_addbuf_free(&h->iob,nh,strlen(nh));
+  h->keepalive=0;
+  io_wantwrite(s);
+
+  if (logging) {
+    char buf[IP6_FMT+10];
+    int x;
+    char* tmp;
+    x=fmt_ip6c(buf,h->myip);
+    x+=fmt_str(buf+x,"/");
+    x+=fmt_ulong(buf+x,h->myport);
+    buf[x]=0;
+#ifdef SUPPORT_HTTPS
+    if (h->t == HTTPSREQUEST)
+      buffer_puts(buffer_1,"HTTPS/");
+#endif
+    buffer_puts(buffer_1,"GET ");
+    buffer_putulong(buffer_1,s);
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,"server-status");
+    buffer_puts(buffer_1," ");
+    buffer_putulonglong(buffer_1,l);
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
+    buffer_putsflush(buffer_1,"\n");
+  }
+}
+#endif
+
+#ifdef SUPPORT_SERVERSTATUS
+static int is_private_ip(const unsigned char* ip) {
+  if (ip6_isv4mapped(ip))
+    return byte_equal(ip+12,4,ip4loopback) ||	/* localhost */
+	   (ip[12]==10) ||			/* rfc1918 */
+	   (ip[12]==192 && ip[13]==168) ||
+	   (ip[12]==172 && (ip[13]>=16 && ip[13]<=31));
+  return byte_equal(ip,16,V6loopback) || (ip[0]==0xfe && (ip[1]==0x80 || ip[1]==0xc0));
+  /* localhost or link-local or site-local */
+}
+#endif
+
 void httpresponse(struct http_data* h,int64 s,long headerlen) {
   int head;
   int post;
@@ -1343,6 +1438,7 @@ void httpresponse(struct http_data* h,int64 s,long headerlen) {
   uint64 range_first,range_last;
   h->filefd=-1;
 
+  ++rps1;
   array_cat0(&h->r);
   c=array_start(&h->r);
   if (byte_diff(c,4,"GET ") && byte_diff(c,5,"POST ") && byte_diff(c,5,"HEAD ")) {
@@ -1380,6 +1476,12 @@ e400:
     }
 
     if (c[0]!='/') goto e404;
+#ifdef SUPPORT_SERVERSTATUS
+    if (!strcmp(c,"/server-status") && is_private_ip((const unsigned char*)h->myip)) {
+      do_server_status(h,s);
+      return;
+    }
+#endif
     fd=http_openfile(h,c,&ss,s);
     if (fd==-1) {
 e404:
@@ -2141,6 +2243,7 @@ void ftpresponse(struct http_data* h,int64 s) {
   char* c;
   h->filefd=-1;
 
+  ++rps1;
   c=array_start(&h->r);
   {
     char* d,* e=c+array_bytes(&h->r);
@@ -2577,6 +2680,8 @@ int smb_handle_SessionSetupAndX(char* pkt,unsigned long len,struct http_data* h)
 int smbresponse(struct http_data* h,int64 s) {
   char* c=array_start(&h->r);
   int len;
+
+  ++rps1;
   /* is it SMB? */
   if (byte_diff(c+4,4,"\xffSMB")) {
     /* uh, what does an error look like? */
@@ -2732,8 +2837,6 @@ static int switch_uid() {
   return 0;
 }
 
-static long connections;
-
 static void cleanup(int64 fd) {
   struct http_data* h=io_getcookie(fd);
   int buddyfd=-1;
@@ -2751,6 +2854,16 @@ static void cleanup(int64 fd) {
 	|| h->t==HTTPSREQUEST || h->t==HTTPSACCEPT
 #endif
 	  ) --connections;
+    if (h->t==HTTPREQUEST) --http_connections;
+#ifdef SUPPORT_FTP
+    if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) --ftp_connections;
+#endif
+#ifdef SUPPORT_SMB
+    if (h->t==SMBREQUEST) --smb_connections;
+#endif
+#ifdef SUPPORT_HTTPS
+    if (h->t==HTTPSREQUEST) --https_connections;
+#endif
 
 #if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
     if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE ||
@@ -3543,6 +3656,19 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #endif
       n=socket_accept6(i,ip,&port,&scope_id);
     if (n==-1) break;
+#ifdef SUPPORT_SERVERSTATUS
+    if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) ++http_connections;
+#ifdef SUPPORT_HTTPS
+    if (H->t==HTTPSSERVER4 || H->t==HTTPSSERVER6) ++https_connections;
+#endif
+#ifdef SUPPORT_FTP
+    if (H->t==FTPSERVER4 || H->t==FTPSERVER6) ++ftp_connections;
+#endif
+#ifdef SUPPORT_SMB
+    if (H->t==SMBSERVER4 || H->t==SMBSERVER6) ++smb_connections;
+#endif
+#endif
+    ++cps1;
     ++connections;
     {
       char buf[IP6_FMT];
@@ -3777,6 +3903,7 @@ ioerror:
     cleanup(i);
   } else if (l>0) {
     /* successfully read some data (l bytes) */
+    tin1+=l;
 #ifdef SUPPORT_FTP
     if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
       if (ftptimeout_secs)
@@ -3970,6 +4097,7 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
       }
     }
   } else {
+    tout1+=r;
     /* write OK, now would be a good time to do some prefetching */
     h->sent_until+=r;
     if (prefetchquantum) {
@@ -4527,7 +4655,9 @@ usage:
   connections=1;
 
   for (;;) {
+    int events;		/* accept new connections asap */
     int64 i;
+    events=0;
 
     if (fini==2) {
       --connections;
@@ -4563,6 +4693,11 @@ usage:
     if (timeout_secs) {
       taia_now(&now);
       if (now.sec.x != last.sec.x) {
+	cps=cps1; cps1=0;
+	rps=rps1; rps1=0;
+	eps=eps1; eps1=0;
+	tin=tin1; tin1=0;
+	tout=tout1; tout1=0;
 	byte_copy(&last,sizeof(now),&now);
 	byte_copy(&next,sizeof(now),&now);
 	next.sec.x += timeout_secs;
@@ -4584,6 +4719,7 @@ usage:
     /* HANDLE READ EVENTS */
     while ((i=io_canread())!=-1) {
       struct http_data* H=io_getcookie(i);
+      ++eps1;
       if (!H) {
 	char a[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
@@ -4592,6 +4728,27 @@ usage:
 	io_close(i);
 	continue;
       }
+
+      if (++events==10) {
+	events=0;
+	accept_server_connection(s,(struct http_data*)&ct,ftptimeout_secs,nextftp);
+#ifdef SUPPORT_FTP
+	if (f!=-1) accept_server_connection(f,(struct http_data*)&fct,ftptimeout_secs,nextftp);
+#endif
+#ifdef SUPPORT_HTTPS
+	if (httpss!=-1) accept_server_connection(httpss,(struct http_data*)&httpsct,ftptimeout_secs,nextftp);
+#endif
+#ifdef __broken_itojun_v6__
+	if (s4!=-1) accept_server_connection(s4,(struct http_data*)&ct4,ftptimeout_secs,nextftp);
+#ifdef SUPPORT_FTP
+	if (f4!=-1) accept_server_connection(f4,(struct http_data*)&fct4,ftptimeout_secs,nextftp);
+#endif
+#ifdef SUPPORT_HTTPS
+	if (httpss4!=-1) accept_server_connection(httpss4,(struct http_data*)&httpsct4,ftptimeout_secs,nextftp);
+#endif
+#endif
+      }
+
       if (H->t == HTTPREQUEST
 #ifdef SUPPORT_FTP
 	  || H->t == FTPSLAVE
@@ -4637,6 +4794,7 @@ usage:
     /* HANDLE WRITABLE EVENTS */
     while ((i=io_canwrite())!=-1) {
       struct http_data* h=io_getcookie(i);
+      ++eps1;
       if (!h) {
 	char a[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
@@ -4644,6 +4802,26 @@ usage:
 	io_dontwantwrite(i);
 	io_close(i);
 	continue;
+      }
+
+      if (++events==10) {
+	events=0;
+	accept_server_connection(s,(struct http_data*)&ct,ftptimeout_secs,nextftp);
+#ifdef SUPPORT_FTP
+	if (f!=-1) accept_server_connection(f,(struct http_data*)&fct,ftptimeout_secs,nextftp);
+#endif
+#ifdef SUPPORT_HTTPS
+	if (httpss!=-1) accept_server_connection(httpss,(struct http_data*)&httpsct,ftptimeout_secs,nextftp);
+#endif
+#ifdef __broken_itojun_v6__
+	if (s4!=-1) accept_server_connection(s4,(struct http_data*)&ct4,ftptimeout_secs,nextftp);
+#ifdef SUPPORT_FTP
+	if (f4!=-1) accept_server_connection(f4,(struct http_data*)&fct4,ftptimeout_secs,nextftp);
+#endif
+#ifdef SUPPORT_HTTPS
+	if (httpss4!=-1) accept_server_connection(httpss4,(struct http_data*)&httpsct4,ftptimeout_secs,nextftp);
+#endif
+#endif
       }
 
 #ifdef SUPPORT_FTP
@@ -4692,3 +4870,6 @@ usage:
   return 0;
 }
 
+#if 0
+int epoll_create(int i) { return -1; }
+#endif
