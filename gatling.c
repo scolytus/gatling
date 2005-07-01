@@ -4288,8 +4288,6 @@ int main(int argc,char* argv[],char* envp[]) {
 
     forksock[0]=forksock[1]=-1;
     if (found) {
-      if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
-      if (new_uid) prepare_switch_uid(new_uid);
       if (socketpair(AF_UNIX,SOCK_STREAM,0,forksock)==-1)
 	panic("socketpair");
       switch (fork()) {
@@ -4300,6 +4298,8 @@ int main(int argc,char* argv[],char* envp[]) {
 	{
 	  int64 savedir;
 	  buffer fsb;
+	  if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
+	  if (new_uid) prepare_switch_uid(new_uid);
 	  if (!io_readfile(&savedir,".")) panic("open()");
 	  buffer_init(&fsb,read,forksock[1],fsbuf,sizeof fsbuf);
 	  while (1) {
