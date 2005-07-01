@@ -1317,7 +1317,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     if (!noproxy && (ss->st_mode&S_IXOTH)) {
       char temp[5];
       if (pread(fd,temp,4,0)==4) {
-	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\377ELF")) {
+	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
 	  switch ((i=proxy_connection(sockfd,Filename,dir,h,1))) {
 	  case -2: break;
 	  case -1: return -1;
