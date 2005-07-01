@@ -212,6 +212,7 @@ struct http_data {
   int filefd;		/* -1 or the descriptor of the file we are sending out */
   int buddy;		/* descriptor for the other connection, only used for FTP */
   char peerip[16];	/* needed for active FTP */
+  unsigned long long received,sent;
   enum encoding encoding;
 #ifdef SUPPORT_FTP
   char* ftppath;
@@ -246,6 +247,7 @@ static unsigned long long tout,tout1;	/* traffic outbound */
  * run another httpd there that can handle CGI, PHP, JSP and whatnot. */
 struct cgi_proxy {
   regex_t r;
+  int file_executable;
   char ip[16];
   uint16 port;
   uint32 scope_id;
@@ -261,7 +263,9 @@ static int add_cgi(const char* c) {
   struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
   if (!x) return -1;
   byte_zero(x,sizeof(struct cgi_proxy));
-  if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) {
+  if (!strcmp(c,"+x"))
+    x->file_executable=1;
+  else if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) {
     free(x);
     return -1;
   }
@@ -299,12 +303,18 @@ void httperror_realm(struct http_data* r,const char* title,const char* message,c
 void httperror(struct http_data* r,const char* title,const char* message);
 static int header_complete(struct http_data* r);
 
-static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d) {
+static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d,int isexec) {
   struct cgi_proxy* x=cgis;
   struct stat ss;
-  if (stat(".proxy",&ss)==-1) return -3;
+
+  /* if isexec is set, we already found that .proxy is there */
+  if (!isexec && stat(".proxy",&ss)==-1) return -3;
   while (x) {
-    if (regexec(&x->r,c,0,0,0)==0) {
+    if (x->file_executable && (!isexec || x->port)) {
+      x=x->next;
+      continue;
+    }
+    if (x->file_executable || regexec(&x->r,c,0,0,0)==0) {
       /* if the port is zero, then use local execution proxy mode instead */
       int s;
       struct http_data* h;
@@ -407,6 +417,7 @@ punt:
 	if (len) {
 	  char* c=alloca(len+1);
 	  read(forksock[0],c,len);
+	  c[len]=0;
 	  httperror(d,"502 Gateway Broken",c);
 	  free(h);
 	  return -1;
@@ -492,7 +503,7 @@ punt:
     }
     x=x->next;
   }
-  return -3;
+  return -2;
 }
 
 int proxy_write_header(int sockfd,struct http_data* h) {
@@ -523,6 +534,7 @@ int proxy_write_header(int sockfd,struct http_data* h) {
   j+=fmt_str(newheader+j,"\r\n\r\n");
   if (write(sockfd,newheader,j)!=j)
     return -1;
+  H->sent+=j;
   return 0;
 }
 
@@ -536,11 +548,16 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
   struct http_data* peer=io_getcookie(H->buddy);
   i=read(sockfd,buf,sizeof(buf));
   if (i==-1) return -1;
+  H->sent+=i;
   if (i==0) {
     if (logging) {
       char numbuf[FMT_ULONG];
+      char r[FMT_ULONG];
+      char s[FMT_ULONG];
       numbuf[fmt_ulong(numbuf,sockfd)]=0;
-      buffer_putmflush(buffer_1,"cgiproxy_read0 ",numbuf,"\n");
+      r[fmt_ulonglong(r,peer->received)]=0;
+      s[fmt_ulonglong(s,peer->sent)]=0;
+      buffer_putmflush(buffer_1,"cgiproxy_read0 ",numbuf," ",r," ",s,"\n");
     }
     if (peer) {
       peer->buddy=-1;
@@ -596,6 +613,7 @@ int read_http_post(int sockfd,struct http_data* H) {
   i=read(sockfd,buf,sizeof(buf));
 //  printf("read_http_post: want to read %ld bytes from %d; got %d\n",l,sockfd,i);
   if (i<1) return -1;
+  H->received+=i;
   H->still_to_copy-=i;
 //  printf("still_to_copy read_http_post: %p %llu -> %llu\n",H,H->still_to_copy+i,H->still_to_copy);
   array_catb(&H->r,buf,i);
@@ -1110,6 +1128,9 @@ int http_redirect(struct http_data* h,const char* Filename) {
 }
 
 int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd) {
+#ifdef SUPPORT_PROXY
+  int noproxy=0;
+#endif
   char* dir=0;
   char* s;
   char* args;
@@ -1189,8 +1210,10 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 #endif
 
 #ifdef SUPPORT_PROXY
-  switch ((i=proxy_connection(sockfd,Filename,dir,h))) {
-  case -3: break;
+  noproxy=0;
+  switch ((i=proxy_connection(sockfd,Filename,dir,h,0))) {
+  case -3: noproxy=1; /* fall through */
+  case -2: break;
   case -1: return -1;
   default:
     if (i>=0) {
@@ -1243,6 +1266,30 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 #endif
       return -2;
     }
+#ifdef SUPPORT_PROXY
+    /* if index.html is executable, see if we have a file_executable
+     * CGI rule */
+    if (!noproxy && (ss->st_mode&S_IXOTH)) {
+      char* temp=alloca(strlen(Filename)+10);
+      if (pread(fd,temp,4,0)==4) {
+	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
+	  i=fmt_str(temp,Filename);
+	  i+=fmt_str(temp+i,"index.html");
+	  temp[i]=0;
+	  switch ((i=proxy_connection(sockfd,temp,dir,h,1))) {
+	  case -2: break;
+	  case -1: return -1;
+	  default:
+	    if (i>=0) {
+	      close(fd);
+	      h->buddy=i;
+	      return -3;
+	    }
+	  }
+	}
+      }
+    }
+#endif
     if (doesbzip2) {
       int64 gfd;
       if (open_for_reading(&gfd,"index.html.bz2",ss)) {
@@ -1266,6 +1313,25 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	if (http_redirect(h,Filename+1)) return -4;
       return -1;
     }
+#ifdef SUPPORT_PROXY
+    if (!noproxy && (ss->st_mode&S_IXOTH)) {
+      char temp[5];
+      if (pread(fd,temp,4,0)==4) {
+	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\377ELF")) {
+	  switch ((i=proxy_connection(sockfd,Filename,dir,h,1))) {
+	  case -2: break;
+	  case -1: return -1;
+	  default:
+	    if (i>=0) {
+	      close(fd);
+	      h->buddy=i;
+	      return -3;
+	    }
+	  }
+	}
+      }
+    }
+#endif
 #ifdef DEBUG
     if (logging) {
       buffer_puts(buffer_1,"open_file ");
@@ -2982,9 +3048,9 @@ void forkslave(int fd,buffer* in) {
 
 	if (dirlen==0 || chdir(path)==0) {
 	  /* now find cgi */
-	  char* cginame;
+	  char* cginame,* origcginame;
 
-	  cginame=httpreq+5+(httpreq[0]=='P');
+	  origcginame=cginame=httpreq+5+(httpreq[0]=='P');
 	  while (*cginame=='/') ++cginame;
 	  for (i=0; cginame+i<httpreq+reqlen; ++i)
 	    if (cginame[i]==' ' || cginame[i]=='\r' || cginame[i]=='\n') break;
@@ -3110,12 +3176,21 @@ void forkslave(int fd,buffer* in) {
 		  msg="vfork failed!";
 		else if (r==0) {
 		  /* child */
+		  int plusx=0;
 		  pid_t pid;
 		  code=0;
 		  write(fd,&code,4);
 		  write(fd,&code,4);
 		  pid=getpid();
 		  write(fd,&pid,sizeof(pid));
+		  if (cginame[(j=strlen(cginame))-1]=='/') {	/* can happen in the -C+x case */
+		    char* temp=alloca(j+10);
+		    j=fmt_str(temp,cginame);
+		    j+=fmt_str(temp+j,"index.html");
+		    temp[j]=0;
+		    cginame=temp;
+		    plusx=1;
+		  }
 		  if (io_passfd(fd,sock[0])==0) {
 		    char* argv[]={cginame,0};
 		    char** envp;
@@ -3168,9 +3243,9 @@ void forkslave(int fd,buffer* in) {
 		    if (pathinfo) envp[envc++]=pathinfo;
 		    if (path_translated) envp[envc++]=path_translated;
 
-		    envp[envc]=alloca(30+str_len(cginame));
+		    envp[envc]=alloca(30+str_len(origcginame));
 		    i=fmt_str(envp[envc],"SCRIPT_NAME=");
-		    i+=fmt_str(envp[envc]+i,cginame-1);
+		    i+=fmt_str(envp[envc]+i,origcginame-1);
 		    envp[envc][i]=0;
 		    ++envc;
 
@@ -3267,6 +3342,10 @@ void forkslave(int fd,buffer* in) {
 		      }
 		      execve(cginame,argv,envp);
 		    }
+		  }
+		  {
+		    static char e[]="HTTP/1.0 503 Gateway Broken\r\nServer: " RELEASE "\r\nContent-Length: 15\r\nContent-Type: text/html\r\n\r\nGateway Broken.";
+		    write(1,e,sizeof(e)-1);
 		  }
 		  exit(127);
 		} else {
@@ -3424,6 +3503,7 @@ static void handle_write_httppost(int64 i,struct http_data* h) {
       }
       cleanup(i);
     } else {
+      h->sent+=l;
       byte_copy(c,alen-l,c+l);
       array_truncate(&H->r,1,alen-l);
 //	    printf("still_to_copy HTTPPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-l);
@@ -3690,6 +3770,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
     if (io_fd(n)) {
       struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
       if (h) {
+	H->sent=H->received=0;
 	if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
 #ifdef SUPPORT_SMB
 	  || H->t==SMBSERVER6 || H->t==SMBSERVER4
@@ -3903,6 +3984,7 @@ ioerror:
     cleanup(i);
   } else if (l>0) {
     /* successfully read some data (l bytes) */
+    H->received+=l;
     tin1+=l;
 #ifdef SUPPORT_FTP
     if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
@@ -4026,8 +4108,12 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
     if (r==-3) {
       if (logging) {
 	char a[FMT_ULONG];
+	char r[FMT_ULONG];
+	char s[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
-	buffer_putmflush(buffer_1,"socket_error ",a," ",strerror(errno),"\nclose/writefail ",a,"\n");
+	r[fmt_ulonglong(r,h->received)]=0;
+	s[fmt_ulonglong(s,h->sent)]=0;
+	buffer_putmflush(buffer_1,"socket_error ",a," ",strerror(errno),"\nclose/writefail ",a," ",r," ",s,"\n");
       }
 #ifdef SUPPORT_FTP
       if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
@@ -4065,7 +4151,12 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 	  )) {
 	buffer_puts(buffer_1,"request_done ");
 	buffer_putulong(buffer_1,i);
+	buffer_puts(buffer_1," ");
+	buffer_putulonglong(buffer_1,h->received);
+	buffer_puts(buffer_1," ");
+	buffer_putulonglong(buffer_1,h->sent);
 	buffer_putnlflush(buffer_1);
+	h->received=h->sent=0;
       }
       if (array_bytes(&h->r)>0) --h->r.initialized;
       iob_reset(&h->iob);
@@ -4097,6 +4188,7 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
       }
     }
   } else {
+    h->sent+=r;
     tout1+=r;
     /* write OK, now would be a good time to do some prefetching */
     h->sent_until+=r;

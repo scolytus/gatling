@@ -1,5 +1,14 @@
 0.9:
   add /server-status
+  request_done, socket_error and cgiproxy_read0 now print the number of
+    received and sent bytes in this request, to make traffic accounting
+    for CGIs and broken downloads possible
+  you can now say -C+x and then all executable files will be run as CGI.
+    Also works for index.html.  Please note that this is dangerous in
+    case you copy or serve files off a FAT or similar filesystem, where
+    Linux per default marks every file executable.  That's why gatling
+    has a simple sanity check that only allows scripts starting with #!
+    or ELF binaries.
 
 0.8:
   fix pipelining bug
