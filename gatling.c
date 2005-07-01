@@ -4263,6 +4263,7 @@ int main(int argc,char* argv[],char* envp[]) {
     int found;
     found=0;
     int _argc=argc;
+    char* new_uid=0;
     char** _argv=argv;
 
     for (;;) {
@@ -4275,7 +4276,9 @@ int main(int argc,char* argv[],char* envp[]) {
       case 'C':
 	found=1;
 	break;
-	return 0;
+      case 'u':
+	new_uid=optarg;
+	break;
       case '?':
 	break;
       }
@@ -4285,7 +4288,8 @@ int main(int argc,char* argv[],char* envp[]) {
 
     forksock[0]=forksock[1]=-1;
     if (found) {
-      if (chroot_to) chdir(chroot_to);
+      if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
+      if (new_uid) prepare_switch_uid(new_uid);
       if (socketpair(AF_UNIX,SOCK_STREAM,0,forksock)==-1)
 	panic("socketpair");
       switch (fork()) {
