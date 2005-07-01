@@ -4260,15 +4260,32 @@ int main(int argc,char* argv[],char* envp[]) {
 #ifdef SUPPORT_CGI
   _envp=envp;
   {
-    int i,found;
+    int found;
     found=0;
-    for (i=1; i<argc; ++i)
-      if (strchr(argv[i],'C')) {
+    int _argc=argc;
+    char** _argv=argv;
+
+    for (;;) {
+      int c=getopt(_argc,_argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:");
+      if (c==-1) break;
+      switch (c) {
+      case 'c':
+	chroot_to=optarg;
+	break;
+      case 'C':
 	found=1;
 	break;
+	return 0;
+      case '?':
+	break;
       }
+    }
+
+    optind=0;
+
     forksock[0]=forksock[1]=-1;
     if (found) {
+      if (chroot_to) chdir(chroot_to);
       if (socketpair(AF_UNIX,SOCK_STREAM,0,forksock)==-1)
 	panic("socketpair");
       switch (fork()) {
