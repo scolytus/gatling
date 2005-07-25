@@ -56,8 +56,8 @@ version.h: CHANGES
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
 
-tlsgatling: gatling.c ssl.o
-	-$(CC) -o $@ $(CFLAGS) $^ $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+tlsgatling: gatling.c ssl.o libsocket libiconv libcrypt
+	-$(CC) -o $@ $(CFLAGS) $^ $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
 
 libsocket: trysocket.c
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \

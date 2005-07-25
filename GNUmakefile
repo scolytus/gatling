@@ -107,7 +107,7 @@ libsocketkludge.a: libsocket libiconv dummy.o
 
 LDLIBS+=`cat libsocket libiconv libcrypt`
 
-$(TARGETS): libsocketkludge.a
+$(TARGETS): libsocketkludge.a libsocket libiconv libcrypt
 
 install: gatling
 	install -d $(DESTDIR)$(BINDIR) $(man1dir)
