@@ -27,7 +27,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
     if (socket_connect6(s,ip,port,scope_id)==-1) {
       if (errno==EAGAIN || errno==EINPROGRESS)
 	return s;
-      carp("socket_connect6");
+      carpsys("socket_connect6");
       close(s);
       return -1;
     }
@@ -40,7 +40,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
     if (socket_connect4(s,ip+12,port)==-1) {
       if (errno==EAGAIN || errno==EINPROGRESS)
 	return s;
-      carp("socket_connect4");
+      carpsys("socket_connect4");
       close(s);
       return -1;
     }
@@ -50,6 +50,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
 
 
 int main(int argc,char* argv[]) {
+  char server[1024];
   int* fds;
   int* avail;
   long long* expected;
@@ -67,6 +68,8 @@ int main(int argc,char* argv[]) {
   char* request;
   unsigned long rlen;
   tai6464 first,now,next,last;
+
+  server[0]=0;
 
   errmsg_iam("bench");
   signal(SIGPIPE,SIG_IGN);
@@ -274,6 +277,19 @@ int main(int argc,char* argv[]) {
 	   * buffering.  At all.  We expect the Content-Length header to
 	   * come in one piece. */
 	  expected[j]=-2;
+	  if (!done) {
+	    for (k=0; k<l; ++k)
+	      if (str_start(buf+k,"\nServer: ")) {
+		char* tmp=buf+(k+=9);
+		for (; k<l; ++k)
+		  if (buf[k]=='\r') break;
+		k=buf+k-tmp;
+		if (k>sizeof(server)-1) k=sizeof(server)-1;
+		byte_copy(server,k,tmp);
+		server[k]=0;
+		break;
+	      }
+	  }
 	  for (k=0; k<l; ++k) {
 	    if (str_start(buf+k,"\nContent-Length: ")) {
 	      k+=17;
@@ -315,6 +331,7 @@ int main(int argc,char* argv[]) {
     b[fmt_ulong0(b,(now.nano%1000000000)/1000,6)]=0;
     c[fmt_ulong(c,done)]=0;
     d[fmt_ulonglong(d,errors)]=0;
+    if (server[0]) carp("Server: ",server);
     carp(c," requests, ",d," errors.");
     c[fmt_ulonglong(c,bytes)]=0;
     carp(c," bytes in ",a,".",b," seconds.");
