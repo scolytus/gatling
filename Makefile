@@ -10,10 +10,10 @@ all: $(TARGET)
 
 CC=gcc
 CFLAGS=-pipe -Wall -O -I../libowfat/
-LDFLAGS=-s -L../libowfat/ -lowfat -lcrypt
+LDFLAGS=-s -L../libowfat/ -lowfat
 
-gatling: gatling.o libsocket libiconv
-	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket libiconv`
+gatling: gatling.o libsocket libiconv libcrypt
+	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket libiconv libcrypt`
 
 httpbench: httpbench.o libsocket
 	$(CC) -o $@ httpbench.o $(LDFLAGS) `cat libsocket`
@@ -72,6 +72,13 @@ libiconv: tryiconv.c
 	fi; fi > libiconv
 	rm -f tryiconv
 
+libcrypt: trycrypt.c
+	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c >/dev/null 2>&1; then echo ""; else \
+	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c -lcrypt >/dev/null 2>&1; then echo "-lcrypt"; \
+	fi; fi > libcrypt
+	rm -f trycrypt
+
+
 install: gatling
 	install -d $(BINDIR) $(man1dir)
 	install $< $(BINDIR)
@@ -82,7 +89,7 @@ uninstall:
 	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1
 
 clean:
-	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c
+	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libcrypt libiconv
 
 cert: server.pem
 

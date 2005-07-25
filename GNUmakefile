@@ -48,8 +48,6 @@ CFLAGS+=-DUSE_ZLIB
 LDLIBS+=-lz
 endif
 
-LDLIBS+=-lcrypt
-
 libowfat_path = $(strip $(foreach dir,../libowfat*,$(wildcard $(dir)/textcode.h)))
 ifneq ($(libowfat_path),)
 CFLAGS+=$(foreach fnord,$(libowfat_path),-I$(dir $(fnord)))
@@ -94,6 +92,12 @@ libiconv: tryiconv.c
 	fi; fi > libiconv
 	rm -f tryiconv
 
+libcrypt: trycrypt.c
+	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c >/dev/null 2>&1; then echo ""; else \
+	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c -lcrypt >/dev/null 2>&1; then echo "-lcrypt"; \
+	fi; fi > libcrypt
+	rm -f trycrypt
+
 dummy.c:
 	touch $@
 
@@ -101,7 +105,7 @@ libsocketkludge.a: libsocket libiconv dummy.o
 	ar q $@ dummy.o
 	-ranlib $@
 
-LDLIBS+=`cat libsocket libiconv`
+LDLIBS+=`cat libsocket libiconv libcrypt`
 
 $(TARGETS): libsocketkludge.a
 
@@ -115,7 +119,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1
 
 clean:
-	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv
+	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv libcrypt
 
 VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
 CURNAME=$(notdir $(shell pwd))
