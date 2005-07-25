@@ -6,10 +6,10 @@
 #include <socket.h>
 #include <errmsg.h>
 #include <dns.h>
-#include <getopt.h>
 #include <ip6.h>
 #include <textcode.h>
 #include <signal.h>
+#include <unistd.h>
 #include <errno.h>
 
 void usage() {
