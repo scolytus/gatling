@@ -343,9 +343,15 @@ int main(int argc,char* argv[]) {
     if (l) {
       l = bytes / l;
       b[fmt_humank(b,l*1024)]=0;
-      die(0,"Throughput: ",b,"iB/sec");
+      carp("Throughput: ",b,"iB/sec");
     } else
-      die(0,"Need longer test to calculate throughput.");
+      carp("Need longer test to calculate throughput.");
+
+
+    l = (now.sec.x * 1000) + now.nano/1000000;
+    l = (done*10000) / l;
+    a[fmt_ulong(a,l/10)]=0;
+    carp("Requests per second: ",a);
   }
 
   return 0;
