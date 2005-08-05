@@ -529,7 +529,7 @@ usage:
 	int srv=socket_tcp6();
 	if (srv==-1) panic("socket");
 	socket_listen(srv,1);
-	if (socket_local6(s,ip2,&port,0)) panic("getsockname");
+	if (socket_local6(srv,ip2,&port,0)) panic("getsockname");
 	i=fmt_str(buf,"EPRT |");
 	if (byte_equal(ip2,12,V4mappedprefix))
 	  i+=fmt_str(buf+i,"1|");
