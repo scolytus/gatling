@@ -71,6 +71,8 @@ gatling.o: version.h
 tlsgatling: gatling.c ssl.o
 	-$(CC) -o $@ gatling.c ssl.o $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
+httpbench: httpbench.o
+
 cgi: cgi.o
 
 version.h: CHANGES
@@ -80,7 +82,7 @@ version.h: CHANGES
 	$(CC) -c $< -o $@ -I. $(CFLAGS)
 
 %: %.o
-	$(CC) -o $@ $< $(LDFLAGS) $(LDLIBS)
+	$(CC) $(LDFLAGS) $@.o -o $@ $(LDLIBS)
 
 libsocket: trysocket.c
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
