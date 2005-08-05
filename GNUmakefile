@@ -118,9 +118,9 @@ LDLIBS+=`cat libsocket libiconv libcrypt`
 
 $(TARGETS): libsocketkludge.a libsocket libiconv libcrypt
 
-install: gatling
+install: gatling dl
 	install -d $(DESTDIR)$(BINDIR) $(man1dir)
-	install $< $(DESTDIR)$(BINDIR)
+	install $^ $(DESTDIR)$(BINDIR)
 	if test -f tlsgatling; then install tlsgatling $(DESTDIR)$(BINDIR); fi
 	install -m 644 gatling.1 $(DESTDIR)$(man1dir)
 
