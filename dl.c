@@ -507,10 +507,11 @@ usage:
 	int srv=socket_tcp4();
 	if (srv==-1) panic("socket");
 	socket_listen(srv,1);
-	if (socket_local4(s,ip2,&port)) panic("getsockname");
+	if (socket_local4(s,ip2,0)) panic("getsockname");
+	if (socket_local4(srv,0,&port)) panic("getsockname");
 	i=fmt_str(buf,"PORT ");
-	for (j=0; i<4; ++i) {
-	  i+=fmt_uint(buf+i,ip2[j]);
+	for (j=0; j<4; ++j) {
+	  i+=fmt_uint(buf+i,ip2[j]&0xff);
 	  i+=fmt_str(buf+i,",");
 	}
 	i+=fmt_uint(buf+i,port>>8);
@@ -523,7 +524,7 @@ usage:
 	if (verbose) buffer_putsflush(buffer_1,"Waiting for connection...");
 	dataconn=socket_accept4(srv,ip3,0);
 	if (verbose) buffer_putsflush(buffer_1," there it is.\n");
-	if (byte_diff(ip2,4,ip)) panic("PORT stealing attack!\n");
+	if (byte_diff(ip3,4,ip+12)) panic("PORT stealing attack!\n");
       } else {
 	int i;
 	int srv=socket_tcp6();
@@ -546,7 +547,7 @@ usage:
 	if (verbose) buffer_putsflush(buffer_1,"Waiting for connection...");
 	dataconn=socket_accept6(srv,ip3,0,0);
 	if (verbose) buffer_putsflush(buffer_1," there it is.\n");
-	if (byte_diff(ip2,16,ip)) panic("EPRT stealing attack!\n");
+	if (byte_diff(ip3,16,ip)) panic("EPRT stealing attack!\n");
       }
     } else {
       int srv;
