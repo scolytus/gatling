@@ -565,7 +565,7 @@ usage:
 	}
 	if ((srv=socket_tcp4())==-1) panic("socket");
 	if (verbose) buffer_putsflush(buffer_1,"connecting... ");
-	if (socket_connect4(srv,ip,port)==-1) panic("connect");
+	if (socket_connect4(srv,ip+12,port)==-1) panic("connect");
 	if (verbose) buffer_putsflush(buffer_1,"done.\n");
 	dataconn=srv;
       } else {
