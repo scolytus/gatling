@@ -437,10 +437,10 @@ usage:
 
     if (verbose) {
       buffer_puts(buffer_1,"\nMDTM ");
-      buffer_puts(buffer_1,filename);
+      buffer_puts(buffer_1,pathname);
       buffer_putsflush(buffer_1,"... ");
     }
-    if (ftpcmd2(s,&ftpbuf,"MDTM ",filename)==213) {
+    if (ftpcmd2(s,&ftpbuf,"MDTM ",pathname)==213) {
       char* c=ftpresponse.s+1;
       struct tm t;
       int ok=1;
@@ -599,7 +599,7 @@ usage:
       int i;
       if (verbose) {
 	buffer_puts(buffer_1,"RETR ");
-	buffer_puts(buffer_1,filename);
+	buffer_puts(buffer_1,pathname);
 	buffer_putsflush(buffer_1,"... ");
       }
       if (((i=ftpcmd2(s,&ftpbuf,"RETR ",pathname))!=150) && i!=125) panic("No 125/150 response to RETR\n");

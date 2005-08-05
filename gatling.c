@@ -2393,7 +2393,7 @@ closeandgo:
       {
 	int i;
 	for (i=0; i<4; ++i) {
-	  c+=fmt_ulong(c,h->myip[12+i]);
+	  c+=fmt_ulong(c,h->myip[12+i]&0xff);
 	  c+=fmt_str(c,",");
 	}
       }
