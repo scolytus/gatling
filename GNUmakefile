@@ -5,11 +5,11 @@ BINDIR=${prefix}/bin
 MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
-TARGETS=gatling httpbench bindbench mmapbench forkbench dl \
-mktestdata manymapbench ioerr forksbench bench tlsgatling \
+TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling \
 pthreadbench cgi
+TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
 
-all: $(TARGETS)
+all: $(TARGETS) $(TARGETS2)
 
 CC=gcc
 CFLAGS=-pipe -Wall
@@ -72,6 +72,10 @@ tlsgatling: gatling.c ssl.o
 	-$(CC) -o $@ gatling.c ssl.o $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 httpbench: httpbench.o
+bindbench: bindbench.o
+dl: dl.o
+ioerr: ioerr.o
+bench: bench.o
 
 cgi: cgi.o
 
