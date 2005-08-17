@@ -24,7 +24,8 @@
 
 char* todel;
 
-int alarm_handler() {
+void alarm_handler(int dummy) {
+  (void)dummy;
   if (todel) unlink(todel);
   exit(0);
 }
@@ -269,7 +270,7 @@ int main(int argc,char* argv[]) {
     case 'a':
       {
 	unsigned long n;
-	signal(SIGALRM,(sighandler_t)alarm_handler);
+	signal(SIGALRM,alarm_handler);
 	if (optarg[scan_ulong(optarg,&n)]==0)
 	  alarm(n);
 	break;
