@@ -48,8 +48,8 @@ bench: bench.o
 ioerr: ioerr.o libsocket
 	$(CC) -o $@ ioerr.o $(LDFLAGS) `cat libsocket`
 
-cgi: cgi.c
-	$(CC) -o $@ cgi.c $(LDFLAGS)
+cgi: cgi.o
+	$(CC) -o $@ cgi.o $(LDFLAGS)
 
 gatling.o: version.h
 
