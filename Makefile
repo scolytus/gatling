@@ -42,6 +42,9 @@ mktestdata: mktestdata.o
 manymapbench: manymapbench.o
 	$(CC) -o $@ manymapbench.o $(LDFLAGS)
 
+bench: bench.o
+	$(CC) -o $@ bench.o $(LDFLAGS)
+
 ioerr: ioerr.o libsocket
 	$(CC) -o $@ ioerr.o $(LDFLAGS) `cat libsocket`
 
@@ -55,9 +58,6 @@ version.h: CHANGES
 
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
-
-gatling: gatling.c libsocket libiconv libcrypt
-	-$(CC) -o $@ $(CFLAGS) gatling.c $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
 
 tlsgatling: gatling.c ssl.o libsocket libiconv libcrypt
 	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
