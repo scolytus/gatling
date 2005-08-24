@@ -4521,6 +4521,8 @@ int main(int argc,char* argv[],char* envp[]) {
 	buffer_putmflush(buffer_2,"gatling: -r needs something like http://fallback.example.com as argument!\n");
       break;
 #endif
+    default:
+    case '?':
     case 'h':
 usage:
       buffer_putsflush(buffer_2,
@@ -4564,8 +4566,6 @@ usage:
 #endif
 		  );
       return 0;
-    case '?':
-      break;
     }
   }
 #ifdef SUPPORT_SMB
