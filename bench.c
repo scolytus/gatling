@@ -309,11 +309,12 @@ int main(int argc,char* argv[]) {
 	  } else
 	    expected[j]-=l;
 	}
-	if (expected[j]==0) {
+	if (expected[j]<=0) {
 	  ++done;	/* one down! */
 	  avail[j]=1;
 	  io_dontwantread(i);
 	  io_wantwrite(i);
+	  expected[j]=0;
 	}
       }
     }
