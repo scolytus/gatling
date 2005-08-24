@@ -25,7 +25,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
       io_nonblock(s);
     }
     if (socket_connect6(s,ip,port,scope_id)==-1) {
-      if (errno==EAGAIN || errno==EINPROGRESS)
+      if (errno==EAGAIN || errno==EINPROGRESS || errno==EISCONN)
 	return s;
       carpsys("socket_connect6");
       close(s);
@@ -38,7 +38,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
       io_nonblock(s);
     }
     if (socket_connect4(s,ip+12,port)==-1) {
-      if (errno==EAGAIN || errno==EINPROGRESS)
+      if (errno==EAGAIN || errno==EINPROGRESS || errno==EISCONN)
 	return s;
       carpsys("socket_connect4");
       close(s);
