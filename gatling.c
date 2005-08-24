@@ -750,7 +750,7 @@ void httperror_realm(struct http_data* r,const char* title,const char* message,c
       c+=fmt_str(c,"\r\nContent-Type: text/html\r\nConnection: ");
       c+=fmt_str(c,r->keepalive?"keep-alive":"close");
       c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
-      c+=fmt_ulong(c,str_len(message)+str_len(title)+16-4);
+      c+=fmt_ulong(c,str_len(message)+str_len(title)-4+17);
       if (realm) {
 	c+=fmt_str(c,"\r\nWWW-Authenticate: Basic realm=\"");
 	c+=fmt_str(c,realm);
