@@ -4262,11 +4262,11 @@ int main(int argc,char* argv[],char* envp[]) {
   _envp=envp;
   {
     int found;
-    found=0;
     int _argc=argc;
     char* new_uid=0;
     char** _argv=argv;
 
+    found=0;
     for (;;) {
       int c=getopt(_argc,_argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:");
       if (c==-1) break;
