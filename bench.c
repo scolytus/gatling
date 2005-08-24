@@ -298,8 +298,12 @@ int main(int argc,char* argv[]) {
 	    } else if (str_start(buf+k,"\r\n\r\n"))
 	      break;
 	  }
-	  if (expected[j]>0)
-	    expected[j]-=l-(k+4);
+	  if (expected[j]>0) {
+	    if (l-(k+4)>expected[j])
+	      expected[j]=0;
+	    else
+	      expected[j]-=l-(k+4);
+	  }
 	} else if (expected[j]==-2) {
 	  /* no content-length header, eat everything until EOF */
 	} else {
@@ -309,12 +313,17 @@ int main(int argc,char* argv[]) {
 	  } else
 	    expected[j]-=l;
 	}
-	if (expected[j]<=0) {
+	if (expected[j]==0) {
 	  ++done;	/* one down! */
 	  avail[j]=1;
-	  io_dontwantread(i);
-	  io_wantwrite(i);
-	  expected[j]=0;
+	  if (k) {
+	    io_dontwantread(i);
+	    io_wantwrite(i);
+	    expected[j]=0;
+	  } else {
+	    io_close(i);
+	    fds[i]=-1;
+	  }
 	}
       }
     }
