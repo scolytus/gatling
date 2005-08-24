@@ -4402,6 +4402,13 @@ int main(int argc,char* argv[],char* envp[]) {
 
   logging=1;
 
+#if !defined(__linux__)
+  optind=1;
+#if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+  optreset=1;
+#endif
+#endif
+
   for (;;) {
     int i;
     int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:");
