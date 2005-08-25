@@ -278,6 +278,70 @@ static int add_cgi(const char* c) {
 }
 #endif
 
+static void cleanup(int64 fd) {
+  struct http_data* h=io_getcookie(fd);
+  int buddyfd=-1;
+  if (h) {
+    buddyfd=h->buddy;
+
+    if (h->t==HTTPREQUEST
+#ifdef SUPPORT_FTP
+	|| h->t==FTPCONTROL6 || h->t==FTPCONTROL4
+#endif
+#ifdef SUPPORT_SMB
+	|| h->t==SMBREQUEST
+#endif
+#ifdef SUPPORT_HTTPS
+	|| h->t==HTTPSREQUEST || h->t==HTTPSACCEPT
+#endif
+	  ) --connections;
+    if (h->t==HTTPREQUEST) --http_connections;
+#ifdef SUPPORT_FTP
+    if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) --ftp_connections;
+#endif
+#ifdef SUPPORT_SMB
+    if (h->t==SMBREQUEST) --smb_connections;
+#endif
+#ifdef SUPPORT_HTTPS
+    if (h->t==HTTPSREQUEST) --https_connections;
+#endif
+
+#if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
+    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE ||
+#ifdef SUPPORT_PROXY
+	h->t==PROXYSLAVE ||
+#endif
+	h->t==HTTPREQUEST
+#ifdef SUPPORT_HTTPS
+			  || h->t==HTTPSREQUEST || h->t==HTTPSRESPONSE
+#endif
+	) {
+      if (buddyfd!=-1) {
+	struct http_data* b=io_getcookie(buddyfd);
+	if (b)
+	  b->buddy=-1;
+      }
+      buddyfd=-1;
+    }
+#endif
+    array_reset(&h->r);
+    iob_reset(&h->iob);
+#ifdef SUPPORT_FTP
+    free(h->ftppath);
+#endif
+#ifdef SUPPORT_HTTPS
+    if (h->ssl) SSL_free(h->ssl);
+#endif
+    free(h);
+  }
+  io_close(fd);
+  if (buddyfd>=0) {
+    h=io_getcookie(buddyfd);
+    if (h) h->buddy=-1;
+    cleanup(buddyfd);
+  }
+}
+
 #ifdef SUPPORT_PROXY
 static int add_proxy(const char* c) {
   struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
@@ -537,70 +601,6 @@ int proxy_write_header(int sockfd,struct http_data* h) {
     return -1;
   H->sent+=j;
   return 0;
-}
-
-static void cleanup(int64 fd) {
-  struct http_data* h=io_getcookie(fd);
-  int buddyfd=-1;
-  if (h) {
-    buddyfd=h->buddy;
-
-    if (h->t==HTTPREQUEST
-#ifdef SUPPORT_FTP
-	|| h->t==FTPCONTROL6 || h->t==FTPCONTROL4
-#endif
-#ifdef SUPPORT_SMB
-	|| h->t==SMBREQUEST
-#endif
-#ifdef SUPPORT_HTTPS
-	|| h->t==HTTPSREQUEST || h->t==HTTPSACCEPT
-#endif
-	  ) --connections;
-    if (h->t==HTTPREQUEST) --http_connections;
-#ifdef SUPPORT_FTP
-    if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) --ftp_connections;
-#endif
-#ifdef SUPPORT_SMB
-    if (h->t==SMBREQUEST) --smb_connections;
-#endif
-#ifdef SUPPORT_HTTPS
-    if (h->t==HTTPSREQUEST) --https_connections;
-#endif
-
-#if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
-    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE ||
-#ifdef SUPPORT_PROXY
-	h->t==PROXYSLAVE ||
-#endif
-	h->t==HTTPREQUEST
-#ifdef SUPPORT_HTTPS
-			  || h->t==HTTPSREQUEST || h->t==HTTPSRESPONSE
-#endif
-	) {
-      if (buddyfd!=-1) {
-	struct http_data* b=io_getcookie(buddyfd);
-	if (b)
-	  b->buddy=-1;
-      }
-      buddyfd=-1;
-    }
-#endif
-    array_reset(&h->r);
-    iob_reset(&h->iob);
-#ifdef SUPPORT_FTP
-    free(h->ftppath);
-#endif
-#ifdef SUPPORT_HTTPS
-    if (h->ssl) SSL_free(h->ssl);
-#endif
-    free(h);
-  }
-  io_close(fd);
-  if (buddyfd>=0) {
-    h=io_getcookie(buddyfd);
-    if (h) h->buddy=-1;
-    cleanup(buddyfd);
-  }
 }
 
 
