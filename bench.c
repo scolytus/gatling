@@ -11,9 +11,11 @@
 #include <signal.h>
 #include <unistd.h>
 #include <errno.h>
+#include <buffer.h>
 
 void usage() {
-  die(0,"usage: bench [-n requests] [-c concurrency] [-t timeout] [-k] [http://]host[:port]/uri");
+  die(0,"usage: bench [-n requests] [-c concurrency] [-t timeout] [-k] [-K count]\n"
+        "       [http://]host[:port]/uri");
 }
 
 static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
@@ -53,11 +55,13 @@ int main(int argc,char* argv[]) {
   char server[1024];
   int* fds;
   int* avail;
+  int* keepleft;
   long long* expected;
   unsigned long n=10000;	/* requests */
   unsigned long c=10;		/* concurrency */
   unsigned long t=0;		/* time limit in seconds */
   unsigned long k=0;		/* keep-alive */
+  unsigned long K=1;		/* keep-alive counter */
   unsigned long long errors=0;
   unsigned long long bytes=0;
   int v=0;
@@ -65,9 +69,11 @@ int main(int argc,char* argv[]) {
   uint16 port=80;
   uint32 scope_id=0;
   stralloc ips={0};
-  char* request;
-  unsigned long rlen;
+  char* request,* krequest;
+  unsigned long rlen, krlen;
   tai6464 first,now,next,last;
+  enum { SAME, REPLAY } mode;
+  char* hostname;
 
   server[0]=0;
 
@@ -76,7 +82,7 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int ch=getopt(argc,argv,"n:c:t:kv");
+    int ch=getopt(argc,argv,"n:c:t:kvK:");
     if (ch==-1) break;
     switch (ch) {
     case 'n':
@@ -94,6 +100,9 @@ int main(int argc,char* argv[]) {
     case 'k':
       k=1;
       break;
+    case 'K':
+      i=scan_ulong(optarg,&K);
+      break;
     case 'v':
       v=1;
       break;
@@ -105,11 +114,36 @@ int main(int argc,char* argv[]) {
   }
   if (n<1 || c<1 || !argv[optind]) usage();
 
-  {
+  if (argv[optind][0]=='@') {
+    mode=REPLAY;
+    char* host;
+    n=(unsigned long)-1;
+    host=argv[optind]+1;
+    {
+      int tmp=str_chr(host,'%');
+      if (host[tmp]) {
+	host[tmp]=0;
+	scope_id=socket_getifidx(host+tmp+1);
+	if (scope_id==0)
+	  carp("warning: network interface \"",host+tmp+1,"\" not found.");
+      }
+    }
+
+    {
+      stralloc a={0};
+      stralloc_copys(&a,host);
+      if (dns_ip6(&ips,&a)==-1)
+	die(1,"could not find IP for \"",host,"\"!");
+    }
+    hostname=host;
+    request=krequest=0;
+    rlen=krlen=0;
+  } else {
     char* host=argv[optind];
     int colon;
     int slash;
     char* c;
+    mode=SAME;
     if (byte_equal(host,7,"http://")) host+=7;
     colon=str_chr(host,':');
     slash=str_chr(host,'/');
@@ -155,8 +189,9 @@ int main(int argc,char* argv[]) {
     }
 
     request=alloca(300+str_len(host)+3*str_len(c));
+    krequest=alloca(300+str_len(host)+3*str_len(c));
     {
-      int i;
+      int i,j;
       i=fmt_str(request,"GET ");
       i+=fmt_urlencoded(request+i,c,str_len(c));
       i+=fmt_str(request+i," HTTP/1.0\r\nHost: ");
@@ -164,17 +199,25 @@ int main(int argc,char* argv[]) {
       i+=fmt_str(request+i,":");
       i+=fmt_ulong(request+i,port);
       i+=fmt_str(request+i,"\r\nUser-Agent: bench/1.0\r\nConnection: ");
-      i+=fmt_str(request+i,k?"keep-alive":"close");
-      i+=fmt_str(request+i,"\r\n\r\n");
+      j=i;
+      i+=fmt_str(request+i,"close\r\n\r\n");
       rlen=i; request[rlen]=0;
+      byte_copy(krequest,rlen,request);
+      i=j+fmt_str(krequest+j,"keep-alive\r\n\r\n");
+      krlen=i; krequest[krlen]=0;
     }
 
+    hostname=host;
+
   }
+
   fds=alloca(c*sizeof(*fds));
   avail=alloca(c*sizeof(*avail));
   expected=alloca(c*sizeof(*expected));
+  keepleft=alloca(c*sizeof(*keepleft));
   last.sec.x=23;
-  for (i=0; i<c; ++i) { fds[i]=-1; avail[i]=1; }
+  if (!k) K=1;
+  for (i=0; i<c; ++i) { fds[i]=-1; avail[i]=1; keepleft[i]=K; }
 
   taia_now(&first);
 
@@ -231,13 +274,67 @@ int main(int argc,char* argv[]) {
 	  continue;
 	}
       }
-      if (io_trywrite(i,request,rlen)!=rlen) {
-	++errors;
-	if (v) write(1,"-",1);
-	io_close(i);
-	avail[j]=1;
-	fds[j]=-1;
-	continue;
+      {
+	char* towrite;
+	int writelen;
+	if (mode==REPLAY) {
+	  static long lines;
+	  char line[1024];
+	  char req[2048];
+	  int len;
+	  int i;
+	  char* c;
+	  char* host;
+	  int hlen;
+	  if ((len=buffer_getline(buffer_0,line,sizeof(line)))) {
+	    ++lines;
+	    if (line[len]!='\n')
+	      die(0,"line too long: ",line);
+	    line[len]=0;
+	    c=line;
+	    if (str_start(line,"http://")) c+=7;
+	    if (c[0]=='/') {
+	      host=hostname;
+	      hlen=strlen(hostname);
+	    } else {
+	      host=c;
+	      c+=(hlen=str_chr(c,'/'));
+	    }
+	    if (!*c)
+	      c="/";
+
+	    i=fmt_str(req,"GET ");
+	    i+=fmt_urlencoded(req+i,c,str_len(c));
+	    i+=fmt_str(req+i," HTTP/1.0\r\nHost: ");
+	    byte_copy(req+i,hlen,host); i+=hlen;
+	    i+=fmt_str(req+i,":");
+	    i+=fmt_ulong(req+i,port);
+	    i+=fmt_str(req+i,"\r\nUser-Agent: bench/1.0\r\nConnection: ");
+	    i+=fmt_str(req+i,keepleft[j]>1?"keep-alive\r\n\r\n":"close\r\n\r\n");
+	    req[i]=0;
+	    towrite=req;
+	    writelen=i;
+	  } else {
+	    n=done;
+	    break;
+	  }
+	} else {
+	  if (keepleft[j]>1) {
+	    towrite=krequest;
+	    writelen=krlen;
+	  } else {
+	    towrite=request;
+	    writelen=rlen;
+	  }
+	}
+	if (io_trywrite(i,towrite,writelen)!=writelen) {
+	  ++errors;
+	  if (v) write(1,"-",1);
+	  io_close(i);
+	  avail[j]=1;
+	  fds[j]=-1;
+	  continue;
+	}
       }
       io_dontwantwrite(i);
       io_wantread(i);
@@ -316,13 +413,16 @@ int main(int argc,char* argv[]) {
 	if (expected[j]==0) {
 	  ++done;	/* one down! */
 	  avail[j]=1;
-	  if (k) {
+//	  printf("fd %d: keepleft[%d]=%d\n",i,j,keepleft[j]);
+	  if (keepleft[j]>1) {
+	    --keepleft[j];
 	    io_dontwantread(i);
 	    io_wantwrite(i);
 	    expected[j]=0;
 	  } else {
+	    keepleft[j]=K;
 	    io_close(i);
-	    fds[i]=-1;
+	    fds[j]=-1;
 	  }
 	}
       }
