@@ -10,6 +10,7 @@
     has a simple sanity check that only allows scripts starting with #!
     or ELF binaries.
   add "bench", a small benchmark util in the spirit of apachebench
+  make bzip2 support optional (and disable it per default)
 
 0.8:
   fix pipelining bug

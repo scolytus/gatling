@@ -9,11 +9,24 @@
 #define SUPPORT_CGI
 #define SUPPORT_HTACCESS
 
+/* SUPPORT_BZIP2 means gatling will also look for foo.html.bz2 and not
+ * just foo.html.gz; however, almost no browsers support this, and if
+ * you don't have .bz2 files lying around, it wastes performance, so
+ * only enable it if you really have a use for it. */
+/* #define SUPPORT_BZIP2 */
+
 /* if you want a redirect instead of a 404, #define this */
 #define SUPPORT_FALLBACK_REDIR
 
+/* open files in threads to open kernel I/O scheduling opportunities */
+#define SUPPORT_THREADED_OPEN
+
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
+
+#ifdef SUPPORT_THREADED_OPEN
+#include <pthread.h>
+#endif
 
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
@@ -140,7 +153,9 @@ static void panic(const char* routine) {
 enum encoding {
   NORMAL,
   GZIP,
+#ifdef SUPPORT_BZIP2
   BZIP2,
+#endif
 };
 
 enum conntype {
@@ -1201,11 +1216,17 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   char* args;
   unsigned long i;
   int64 fd;
-  int doesgzip,doesbzip2;
+  int doesgzip;
+#ifdef SUPPORT_BZIP2
+  int doesbzip2;
+#endif
 
   char* Filename;
 
-  doesgzip=0; doesbzip2=0; h->encoding=NORMAL;
+  doesgzip=0; h->encoding=NORMAL;
+#ifdef SUPPORT_BZIP2
+  doesbzip2=0;
+#endif
   {
     char* tmp=http_header(h,"Accept-Encoding");
     if (tmp) {	/* yeah this is crude, but it gets the job done */
@@ -1213,8 +1234,10 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       for (i=0; i+4<end; ++i)
 	if (byte_equal(tmp+i,4,"gzip"))
 	  doesgzip=1;
+#ifdef SUPPORT_BZIP2
 	else if (byte_equal(tmp+i,4,"bzip2"))
 	  doesbzip2=1;
+#endif
     }
   }
 
@@ -1355,6 +1378,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       }
     }
 #endif
+#ifdef SUPPORT_BZIP2
     if (doesbzip2) {
       int64 gfd;
       if (open_for_reading(&gfd,"index.html.bz2",ss)) {
@@ -1363,6 +1387,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	h->encoding=BZIP2;
       }
     }
+#endif
     if (doesgzip) {
       int64 gfd;
       if (open_for_reading(&gfd,"index.html.gz",ss)) {
@@ -1408,9 +1433,14 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       buffer_putnlflush(buffer_1);
     }
 #endif
-    if (doesgzip || doesbzip2) {
+    if (doesgzip
+#ifdef SUPPORT_BZIP2
+                 || doesbzip2
+#endif
+                             ) {
       int64 gfd;
       i=str_len(Filename);
+#ifdef SUPPORT_BZIP2
       if (doesbzip2) {
 	Filename[i+fmt_str(Filename+i,".bz2")]=0;
 	if (open_for_reading(&gfd,Filename,ss)) {
@@ -1419,6 +1449,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	  h->encoding=BZIP2;
 	}
       }
+#endif
       if (doesgzip && h->encoding==NORMAL) {
 	Filename[i+fmt_str(Filename+i,".gz")]=0;
 	if (open_for_reading(&gfd,Filename,ss)) {
@@ -1695,7 +1726,11 @@ e404:
 	  c+=fmt_ulong(c,h->blen);
 	  if (h->encoding!=NORMAL) {
 	    c+=fmt_str(c,"\r\nContent-Encoding: ");
+#ifdef SUPPORT_BZIP2
 	    c+=fmt_str(c,h->encoding==GZIP?"gzip":"bzip2");
+#else
+	    c+=fmt_str(c,"gzip");
+#endif
 	  }
 	  c+=fmt_str(c,"\r\n\r\n");
 	  h->hlen=c-h->hdrbuf;
@@ -1786,7 +1821,11 @@ rangeerror:
 	c+=fmt_httpdate(c,ss.st_mtime);
 	if (h->encoding!=NORMAL) {
 	  c+=fmt_str(c,"\r\nContent-Encoding: ");
+#ifdef SUPPORT_BZIP2
 	  c+=fmt_str(c,h->encoding==GZIP?"gzip":"bzip2");
+#else
+	  c+=fmt_str(c,"gzip");
+#endif
 	}
 	if (!head && (range_first || range_last!=ss.st_size)) {
 	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
@@ -1830,7 +1869,9 @@ rangeerror:
 	  buffer_putlogstr(buffer_1,filename);
 	  switch (h->encoding) {
 	  case GZIP: buffer_puts(buffer_1,".gz"); break;
+#ifdef SUPPORT_BZIP2
 	  case BZIP2: buffer_puts(buffer_1,".bz2");
+#endif
 	  case NORMAL: break;
 	  }
 	  buffer_puts(buffer_1," ");
