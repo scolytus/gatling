@@ -78,7 +78,9 @@ int main(int argc,char* argv[]) {
   server[0]=0;
 
   errmsg_iam("bench");
+#ifndef __MINGW32__
   signal(SIGPIPE,SIG_IGN);
+#endif
 
   for (;;) {
     int i;

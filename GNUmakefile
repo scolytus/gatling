@@ -11,7 +11,9 @@ TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
 
 all: $(TARGETS) $(TARGETS2)
 
-CC=gcc
+CROSS=
+#CROSS=i686-mingw32-
+CC=$(CROSS)gcc
 CFLAGS=-pipe -Wall
 LDFLAGS=
 
@@ -157,3 +159,6 @@ cakey.pem: cakey.key cakey.csr
 
 server.pem: cakey.key cakey.pem
 	cat cakey.key cakey.pem > server.pem
+
+windoze:
+	$(MAKE) DIET= CROSS=i686-mingw32-

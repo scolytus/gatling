@@ -71,11 +71,12 @@
 #include <regex.h>
 #endif
 #include <limits.h>
+#include <fcntl.h>
 #include <string.h>
 #include "havealloca.h"
 
 unsigned long timeout_secs=23;
-tai6464 next;
+tai6464 now,next;
 
 #ifdef TIMEOUT_DEBUG
 void new_io_timeout(int64 d,tai6464 t) {
@@ -151,10 +152,10 @@ static void panic(const char* routine) {
 }
 
 enum encoding {
-  NORMAL,
-  GZIP,
+  NORMAL=0,
+  GZIP=1,
 #ifdef SUPPORT_BZIP2
-  BZIP2,
+  BZIP2=2,
 #endif
 };
 
@@ -247,6 +248,12 @@ struct http_data {
 #ifdef SUPPORT_SMB
   enum { PCNET10, LANMAN21, NTLM012 } smbdialect;
 #endif
+#ifdef SUPPORT_THREADED_OPEN
+  int try_encoding;
+  int cwd;
+  char* name_of_file_to_open;
+  struct stat ss;
+#endif
 };
 
 static unsigned long connections;
@@ -256,6 +263,45 @@ static unsigned long rps,rps1;	/* requests per second */
 static unsigned long eps,eps1;	/* events per second */
 static unsigned long long tin,tin1;	/* traffic inbound */
 static unsigned long long tout,tout1;	/* traffic outbound */
+
+
+#ifdef SUPPORT_THREADED_OPEN
+unsigned int threads;
+int threadpipe_query[2];
+int threadpipe_response[2];
+
+void* worker_thread(void* unused) {
+  int src=threadpipe_query[0];
+  int dest=threadpipe_response[1];
+  (void)unused;
+  for (;;) {
+    int fd;
+    struct http_data* x;
+    if (read(src,&fd,sizeof(fd))!=fd) return 0;
+    x=io_getcookie(fd);
+    if (!x) continue;
+    if (fchdir(x->cwd)==-1) continue;
+    x->filefd=open(x->name_of_file_to_open,O_RDONLY);
+    write(dest,&fd,sizeof(fd));
+  }
+}
+
+void init_threads(int n) {
+  threads=0;
+  if (n<=0) return;
+  if (threads>0) {
+    int i;
+    if (pipe(threadpipe_query)==-1 || pipe(threadpipe_response)==-1) return;
+    for (i=0; i<n; ++i) {
+      pthread_t tmp;
+      pthread_create(&tmp,0,worker_thread,0);
+      pthread_detach(tmp);
+    }
+    threads=n;
+  }
+}
+#endif
+
 
 #if defined(SUPPORT_PROXY) || defined(SUPPORT_CGI)
 /* You configure a list of regular expressions, and if a request matches
@@ -1817,6 +1863,10 @@ rangeerror:
 	c+=fmt_str(c,h->mimetype);
 	c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
 	c+=fmt_ulonglong(c,range_last-range_first);
+
+	c+=fmt_str(c,"\r\nDate: ");
+	c+=fmt_httpdate(c,now.sec.x);
+
 	c+=fmt_str(c,"\r\nLast-Modified: ");
 	c+=fmt_httpdate(c,ss.st_mtime);
 	if (h->encoding!=NORMAL) {
@@ -4289,7 +4339,7 @@ int main(int argc,char* argv[],char* envp[]) {
 #ifdef SUPPORT_HTTPS
   uint16 httpsport;
 #endif
-  tai6464 now,last,tick,nextftp;
+  tai6464 last,tick,nextftp;
   unsigned long ftptimeout_secs=600;
   char* new_uid=0;
   char* chroot_to=0;
@@ -4452,7 +4502,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:");
+    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -4568,6 +4618,9 @@ int main(int argc,char* argv[],char* envp[]) {
       else
 	buffer_putmflush(buffer_2,"gatling: -r needs something like http://fallback.example.com as argument!\n");
       break;
+#endif
+#ifdef SUPPORT_THREADED_OPEN
+    case 'o':
 #endif
     default:
     case '?':
@@ -4852,8 +4905,8 @@ usage:
     else
       io_wait();
 
+    taia_now(&now);
     if (timeout_secs) {
-      taia_now(&now);
       if (now.sec.x != last.sec.x) {
 	cps=cps1; cps1=0;
 	rps=rps1; rps1=0;

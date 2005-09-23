@@ -11,6 +11,7 @@
     or ELF binaries.
   add "bench", a small benchmark util in the spirit of apachebench
   make bzip2 support optional (and disable it per default)
+  add Date header
 
 0.8:
   fix pipelining bug
