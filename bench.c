@@ -12,10 +12,11 @@
 #include <unistd.h>
 #include <errno.h>
 #include <buffer.h>
+#include <fcntl.h>
 
 void usage() {
   die(0,"usage: bench [-n requests] [-c concurrency] [-t timeout] [-k] [-K count]\n"
-        "       [http://]host[:port]/uri");
+        "       [-C cookie-file] [http://]host[:port]/uri");
 }
 
 static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
@@ -50,6 +51,42 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
   return s;
 }
 
+buffer* cookies;
+
+void cookiefile(const char* s) {
+  static buffer cookiebuffer;
+  static char cookiebuf[8192];
+  int fd;
+  if (!s) {
+    lseek(cookiebuffer.fd,0,SEEK_SET);
+    buffer_init(&cookiebuffer,read,cookiebuffer.fd,cookiebuf,sizeof cookiebuf);
+  } else {
+    fd=open(s,O_RDONLY);
+    if (fd==-1) die(1,"could not open cookie file \"",s,"\"!");
+    if (cookiebuffer.fd!=0) close(cookiebuffer.fd);
+    buffer_init(&cookiebuffer,read,fd,cookiebuf,sizeof cookiebuf);
+    cookies=&cookiebuffer;
+  }
+}
+
+int nextcookie(char* dest,unsigned long destlen) {
+  int len;
+  if (!cookies) return -1;
+  if ((len=buffer_getline(cookies,dest,destlen))) {
+    if (dest[len]!='\n')
+      die(0,"line too long: ",dest);
+    dest[len]=0;
+  } else {
+    cookiefile(0);
+    if ((len=buffer_getline(cookies,dest,destlen))) {
+      if (dest[len]!='\n')
+	die(0,"line too long: ",dest);
+      dest[len]=0;
+    } else
+      return -1;
+  }
+  return len;
+}
 
 int main(int argc,char* argv[]) {
   char server[1024];
@@ -84,7 +121,7 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int ch=getopt(argc,argv,"n:c:t:kvK:");
+    int ch=getopt(argc,argv,"n:c:t:kvK:C:");
     if (ch==-1) break;
     switch (ch) {
     case 'n':
@@ -107,6 +144,9 @@ int main(int argc,char* argv[]) {
       break;
     case 'v':
       v=1;
+      break;
+    case 'C':
+      cookiefile(optarg);
       break;
     case '?':
       break;
@@ -190,8 +230,8 @@ int main(int argc,char* argv[]) {
 	die(1,"could not find IP for \"",host,"\"!");
     }
 
-    request=alloca(300+str_len(host)+3*str_len(c));
-    krequest=alloca(300+str_len(host)+3*str_len(c));
+    request=alloca(1300+str_len(host)+3*str_len(c));
+    krequest=alloca(1300+str_len(host)+3*str_len(c));
     {
       int i,j;
       i=fmt_str(request,"GET ");
@@ -311,6 +351,12 @@ int main(int argc,char* argv[]) {
 	    byte_copy(req+i,hlen,host); i+=hlen;
 	    i+=fmt_str(req+i,":");
 	    i+=fmt_ulong(req+i,port);
+	    if (cookies) {
+	      int j;
+	      i+=fmt_str(req+i,"\r\n");
+	      j=nextcookie(req+i,sizeof(req)-i-100);
+	      if (j!=-1) i+=j; else i-=2;
+	    }
 	    i+=fmt_str(req+i,"\r\nUser-Agent: bench/1.0\r\nConnection: ");
 	    i+=fmt_str(req+i,keepleft[j]>1?"keep-alive\r\n\r\n":"close\r\n\r\n");
 	    req[i]=0;
@@ -327,6 +373,13 @@ int main(int argc,char* argv[]) {
 	  } else {
 	    towrite=request;
 	    writelen=rlen;
+	  }
+	  if (cookies) {
+	    int i=writelen-2;
+	    int j=nextcookie(towrite+i,900);
+	    if (j!=-1) i+=j;
+	    i+=fmt_str(towrite+i,"\r\n\r\n");
+	    writelen=i;
 	  }
 	}
 	if (io_trywrite(i,towrite,writelen)!=writelen) {
