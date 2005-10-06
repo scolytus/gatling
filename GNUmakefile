@@ -6,7 +6,7 @@ MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
 TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling \
-pthreadbench cgi
+pthreadbench cgi getlinks
 TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
 
 all: $(TARGETS) $(TARGETS2)
@@ -78,6 +78,7 @@ bindbench: bindbench.o
 dl: dl.o
 ioerr: ioerr.o
 bench: bench.o
+getlinks: getlinks.o
 
 cgi: cgi.o
 
