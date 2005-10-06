@@ -104,15 +104,16 @@ static int readanswer(int s,const char* filename) {
   if (httpcode!= (resumeofs?206:200)) return 0;
   if (r==-1) return -1;
   rest=-1; nocl=1;
+  buf[r]=0;
   for (j=0; j<r; j+=str_chr(buf+j,'\n')) {
-    if (byte_equal(buf+j,17,"\nContent-Length: ")) {
+    if (j+17<r && byte_equal(buf+j,17,"\nContent-Length: ")) {
       char* c=buf+j+17;
       if (c[scan_ulonglong(c,&rest)]!='\r') {
 	buffer_putsflush(buffer_2,"invalid Content-Length header!\n");
 	return -1;
       }
       nocl=0;
-    } else if (byte_equal(buf+j,16,"\nLast-Modified: ")) {
+    } else if (j+16<r && byte_equal(buf+j,16,"\nLast-Modified: ")) {
       char* c=buf+j+16;
       if (c[scan_httpdate(c,&u.actime)]!='\r') {
 	buffer_putsflush(buffer_2,"invalid Last-Modified header!\n");
@@ -236,6 +237,8 @@ int main(int argc,char* argv[]) {
   char* filename=0;
   char* pathname=0;
   char* output=0;
+  char* useragent="dl/1.0";
+  char* referer=0;
   enum {HTTP, FTP} mode;
   int skip;
   buffer ftpbuf;
@@ -243,7 +246,7 @@ int main(int argc,char* argv[]) {
   signal(SIGPIPE,SIG_IGN);
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nvra:O:");
+    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -274,6 +277,12 @@ int main(int argc,char* argv[]) {
     case 'O':
       output=optarg;
       break;
+    case 'U':
+      useragent=optarg;
+      break;
+    case 'R':
+      referer=optarg;
+      break;
     case 'a':
       {
 	unsigned long n;
@@ -292,6 +301,8 @@ usage:
 		       "	-o	use PORT and EPRT instead of PASV and EPSV\n"
 		       "	-a n	abort after n seconds\n"
 		       "	-O fn	write output to fn\n"
+		       "	-U s	set User-Agent HTTP header\n"
+		       "	-R s	set Referer HTTP header\n"
 		       "	-v	be verbose\n");
       return 0;
     }
@@ -383,7 +394,7 @@ usage:
     }
 
     if (mode==HTTP) {
-      request=malloc(300+str_len(host)+3*str_len(c));
+      request=malloc(300+str_len(host)+3*str_len(c)+str_len(useragent)+(referer?str_len(referer)+20:0));
       if (!request) panic("malloc");
       {
 	int i;
@@ -402,7 +413,13 @@ usage:
 	  i+=fmt_ulonglong(request+i,resumeofs);
 	  i+=fmt_str(request+i,"-");
 	}
-	i+=fmt_str(request+i,"\r\nUser-Agent: dl/1.0\r\nConnection: ");
+	i+=fmt_str(request+i,"\r\nUser-Agent: ");
+	i+=fmt_str(request+i,useragent);
+	if (referer) {
+	  i+=fmt_str(request+i,"\r\nReferer: ");
+	  i+=fmt_str(request+i,referer);
+	}
+	i+=fmt_str(request+i,"\r\nConnection: ");
 	i+=fmt_str(request+i,keepalive?"keep-alive":"close");
 	i+=fmt_str(request+i,"\r\n\r\n");
 	rlen=i; request[rlen]=0;

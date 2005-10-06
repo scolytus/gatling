@@ -19,7 +19,7 @@
 #define SUPPORT_FALLBACK_REDIR
 
 /* open files in threads to open kernel I/O scheduling opportunities */
-#define SUPPORT_THREADED_OPEN
+#undef SUPPORT_THREADED_OPEN
 
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
@@ -1865,7 +1865,7 @@ rangeerror:
 	c+=fmt_ulonglong(c,range_last-range_first);
 
 	c+=fmt_str(c,"\r\nDate: ");
-	c+=fmt_httpdate(c,now.sec.x);
+	c+=fmt_httpdate(c,now.sec.x&0xfffffffffff);
 
 	c+=fmt_str(c,"\r\nLast-Modified: ");
 	c+=fmt_httpdate(c,ss.st_mtime);
