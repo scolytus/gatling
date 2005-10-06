@@ -85,9 +85,9 @@ libcrypt: trycrypt.c
 	rm -f trycrypt
 
 
-install: gatling
+install: gatling dl getlinks
 	install -d $(BINDIR) $(man1dir)
-	install $< $(BINDIR)
+	install $^ $(BINDIR)
 	test -f tlsgatling && install tlsgatling $(BINDIR)
 	install -m 644 gatling.1 bench.1 $(man1dir)
 
