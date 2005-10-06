@@ -76,6 +76,7 @@ static int readanswer(int s,const char* filename) {
   int64 d;
   unsigned long httpcode;
   unsigned long long rest;
+  int nocl;
   i=0; d=-1; httpcode=0; todel=(char*)filename;
   while ((r=read(s,buf+i,sizeof(buf)-i)) > 0) {
     i+=r;
@@ -102,7 +103,7 @@ static int readanswer(int s,const char* filename) {
   }
   if (httpcode!= (resumeofs?206:200)) return 0;
   if (r==-1) return -1;
-  rest=-1;
+  rest=-1; nocl=1;
   for (j=0; j<r; j+=str_chr(buf+j,'\n')) {
     if (byte_equal(buf+j,17,"\nContent-Length: ")) {
       char* c=buf+j+17;
@@ -110,6 +111,7 @@ static int readanswer(int s,const char* filename) {
 	buffer_putsflush(buffer_2,"invalid Content-Length header!\n");
 	return -1;
       }
+      nocl=0;
     } else if (byte_equal(buf+j,16,"\nLast-Modified: ")) {
       char* c=buf+j+16;
       if (c[scan_httpdate(c,&u.actime)]!='\r') {
@@ -120,12 +122,13 @@ static int readanswer(int s,const char* filename) {
     ++j;
   }
   rest-=(r-body);
-  while (rest) {
-    r=read(s,buf,rest>sizeof(buf)?sizeof(buf):rest);
+  while (nocl || rest) {
+    r=read(s,buf,nocl?sizeof(buf):(rest>sizeof(buf)?sizeof(buf):rest));
     if (r<1) {
       if (r==-1)
 	carp("read from HTTP socket");
       else {
+	if (nocl) break;
 	buffer_puts(buffer_2,"early HTTP EOF; expected ");
 	buffer_putulong(buffer_2,rest);
 	buffer_putsflush(buffer_2,"more bytes!\n");
@@ -232,6 +235,7 @@ int main(int argc,char* argv[]) {
   int rlen=0;
   char* filename=0;
   char* pathname=0;
+  char* output=0;
   enum {HTTP, FTP} mode;
   int skip;
   buffer ftpbuf;
@@ -239,7 +243,7 @@ int main(int argc,char* argv[]) {
   signal(SIGPIPE,SIG_IGN);
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nvra:");
+    int c=getopt(argc,argv,"i:ko4nvra:O:");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -267,6 +271,9 @@ int main(int argc,char* argv[]) {
     case 'v':
       verbose=1;
       break;
+    case 'O':
+      output=optarg;
+      break;
     case 'a':
       {
 	unsigned long n;
@@ -284,6 +291,7 @@ usage:
 		       "	-4	use PORT and PASV instead of EPRT and EPSV, only connect using IPv4\n"
 		       "	-o	use PORT and EPRT instead of PASV and EPSV\n"
 		       "	-a n	abort after n seconds\n"
+		       "	-O fn	write output to fn\n"
 		       "	-v	be verbose\n");
       return 0;
     }
@@ -352,7 +360,10 @@ usage:
       if (verbose) buffer_putsflush(buffer_1,"done\n");
     }
 
-    filename=c+str_rchr(c,'/')+1;
+    if (output)
+      filename=output;
+    else
+      filename=c+str_rchr(c,'/')+1;
     if (resume || newer) {
       struct stat ss;
       if (stat(filename,&ss)==0) {

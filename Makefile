@@ -86,10 +86,10 @@ install: gatling
 	install -d $(BINDIR) $(man1dir)
 	install $< $(BINDIR)
 	test -f tlsgatling && install tlsgatling $(BINDIR)
-	install -m 644 gatling.1 $(man1dir)
+	install -m 644 gatling.1 bench.1 $(man1dir)
 
 uninstall:
-	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1
+	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1 $(man1dir)/bench.1
 
 clean:
 	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libcrypt libiconv
