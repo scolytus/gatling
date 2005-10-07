@@ -276,7 +276,6 @@ static void canonicalize(stralloc* url,const char* baseurl) {
   buffer_putnlflush(buffer_1);
 }
 
-/* usage: getlinks "http://www.nytimes.com/2005/10/06/international/middleeast/06cnd-prexy.html?ex=1129262400&en=30e300dafe83d0fc&ei=5065&partner=MYWAY" < downloaded-data.html */
 int main(int argc,char* argv[]) {
   const char* flags;
   char* baseurl;
