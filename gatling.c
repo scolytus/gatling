@@ -677,10 +677,10 @@ int proxy_write_header(int sockfd,struct http_data* h) {
    * add a X-Forwarded-For header so the handling web server can write
    * the real IP to the log file. */
   struct http_data* H=io_getcookie(h->buddy);
-  int i,j;
+  int i,j=0;
   long hlen=array_bytes(&h->r);
   char* hdr=array_start(&h->r);
-  char* newheader;
+  char* newheader=0;
   if (h->proxyproto==HTTP) {
     newheader=alloca(hlen+200);
     for (i=j=0; i<hlen; ) {
@@ -1075,7 +1075,12 @@ const char* mimetype(const char* filename,int fd) {
 	return "video/x-msvideo";
       else
 	return "audio/x-wav";
-    }
+    } else if (r==100 && byte_equal(buf+4,4,"moov"))
+      return "video/quicktime";
+    else if (r==100 && byte_equal(buf+4,8,"ftypqt  ") && byte_equal(buf+0x24,4,"moov"))
+      return "video/quicktime";
+    else if (r==100 && byte_equal(buf+4,7,"ftypmp4"))
+      return "video/mp4";
   }
 #else
   else
@@ -1978,7 +1983,7 @@ rangeerror:
 	c+=fmt_ulonglong(c,range_last-range_first);
 
 	c+=fmt_str(c,"\r\nDate: ");
-	c+=fmt_httpdate(c,now.sec.x&0xfffffffffff);
+	c+=fmt_httpdate(c,now.sec.x&0xfffffffffffull);
 
 	c+=fmt_str(c,"\r\nLast-Modified: ");
 	c+=fmt_httpdate(c,ss.st_mtime);
@@ -4514,7 +4519,7 @@ int main(int argc,char* argv[],char* envp[]) {
 	  if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
 	  if (new_uid) prepare_switch_uid(new_uid);
 	  if (!io_readfile(&savedir,".")) panic("open()");
-	  buffer_init(&fsb,read,forksock[1],fsbuf,sizeof fsbuf);
+	  buffer_init(&fsb,(void*)read,forksock[1],fsbuf,sizeof fsbuf);
 	  while (1) {
 	    pid_t r;
 	    do {
