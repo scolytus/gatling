@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <utime.h>
 
 static int canonicalize(stralloc* url,const char* baseurl) {
   /* for the comments, assume baseurl is "http://www.fefe.de/x/y.html" */
@@ -149,7 +150,7 @@ static int mangleurl(stralloc* tag,const char* baseurl) {
       canonicalize(&arg,baseurl);
     } else
       return 0;	/* url was already relative */
-    if (stralloc_0(&arg)==0) return 0;
+    if (stralloc_0(&arg)==0) return -1;
     stralloc_chop(&arg);
     x=arg.s+7; if (*x=='/') ++x;
     y=baseurl+7; if (*y=='/') ++y;
@@ -188,15 +189,15 @@ static int mangleurl(stralloc* tag,const char* baseurl) {
 	if (!isalnum(x[i]) && x[i]!='/' && x[i]!='_' && x[i]!='.') needquote=1;
       if (needquote) {
 	if (stralloc_cats(&before,"\"")==0 ||
+	    stralloc_cat(&before,&tmp)==0 ||
 	    stralloc_cats(&before,x)==0 ||
-	    stralloc_cats(&before,"\"")==0) return 0;
+	    stralloc_cats(&before,"\"")==0) return -1;
       } else
-	if (stralloc_cats(&before,x)==0) return -1;
+	if (stralloc_cat(&before,&tmp)==0 ||
+	    stralloc_cats(&before,x)==0) return -1;
     }
     if (stralloc_cat(&before,&after)==0) return -1;
-
-    write(1,before.s,before.len);
-    write(1,"\n",1);
+    if (stralloc_copy(tag,&before)==0) return -1;
   }
   return 0;
 }
@@ -233,14 +234,26 @@ nomem:
       indq=insq=ok=0;
       for (; x<max; ++x) {
 	if (*x == '\'') insq^=1; else
-	if (*x == '"') indq^=1; else
+	if (*x == '"') indq^=1;
 	if (stralloc_append(&tag,x)==0) goto nomem;
-	if (*x == '>' && !insq && !indq) { ok=1; break; }
+	if (*x == '>' && !insq && !indq) { ok=1; ++x; break; }
       }
       if (ok)
 	if (mangleurl(&tag,baseurl)==-1) goto nomem;
     }
     if (stralloc_cat(&sa,&tag)==0) goto nomem;
+  }
+  if (sa.len == ss.st_size && byte_equal(sa.s,ss.st_size,map)) return 0;
+  munmap(map,ss.st_size);
+  {
+    struct utimbuf utb;
+    int fd=open(argv[2],O_WRONLY|O_TRUNC,0600);
+    if (fd==-1) die(111,"open(\"",argv[2],"\")");
+    write(fd,sa.s,sa.len);
+    close(fd);
+    utb.actime=ss.st_atime;
+    utb.modtime=ss.st_mtime;
+    utime(argv[2],&utb);
   }
   return 0;
 }
