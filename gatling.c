@@ -1062,7 +1062,7 @@ const char* mimetype(const char* filename,int fd) {
       return "image/gif";
     else if (r>=4 && byte_equal(buf,4,"\x89PNG"))
       return "image/png";
-    else if (r>=10 && byte_equal(buf,10,"\xff\xd8\xff\xe0\x00\x10JFIF"))
+    else if (r>=10 && byte_equal(buf,2,"\xff\xd8"))
       return "image/jpeg";
     else if (r>=5 && byte_equal(buf,5,"%PDF-"))
       return "application/pdf";
@@ -1081,6 +1081,8 @@ const char* mimetype(const char* filename,int fd) {
       return "video/quicktime";
     else if (r==100 && byte_equal(buf+4,7,"ftypmp4"))
       return "video/mp4";
+    else if (r>=4 && byte_equal(buf,4,"\x30\x26\xb2\x75"))
+      return "video/x-ms-asf";
   }
 #else
   else
