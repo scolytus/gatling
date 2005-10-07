@@ -12,6 +12,8 @@
   add "bench", a small benchmark util in the spirit of apachebench
   make bzip2 support optional (and disable it per default)
   add Date header
+  add MIME magic (will try to identify file type by looking at first bytes)
+    this is only used if the extension is not conclusive
 
 0.8:
   fix pipelining bug
