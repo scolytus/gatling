@@ -99,6 +99,7 @@ int main(int argc,char* argv[]) {
   unsigned long t=0;		/* time limit in seconds */
   unsigned long k=0;		/* keep-alive */
   unsigned long K=1;		/* keep-alive counter */
+  int report=0;
   unsigned long long errors=0;
   unsigned long long bytes=0;
   int v=0;
@@ -121,9 +122,12 @@ int main(int argc,char* argv[]) {
 
   for (;;) {
     int i;
-    int ch=getopt(argc,argv,"n:c:t:kvK:C:");
+    int ch=getopt(argc,argv,"n:c:t:kvK:C:r");
     if (ch==-1) break;
     switch (ch) {
+    case 'r':
+      report=1;
+      break;
     case 'n':
       i=scan_ulong(optarg,&n);
       if (i==0) die(1,"could not parse -n argument \"",optarg,"\".\n");
@@ -491,32 +495,43 @@ int main(int argc,char* argv[]) {
     char b[FMT_ULONG];
     char c[FMT_ULONG];
     char d[FMT_ULONG];
+    char e[FMT_ULONG];
+    char f[FMT_ULONG];
+    char g[FMT_ULONG];
     unsigned long long l;
     a[fmt_ulong(a,now.sec.x)]=0;
-    b[fmt_ulong0(b,(now.nano%1000000000)/1000,6)]=0;
+    b[fmt_ulong0(b,(now.nano%1000000000)/100000,4)]=0;
     c[fmt_ulong(c,done)]=0;
     d[fmt_ulonglong(d,errors)]=0;
-    if (server[0]) carp("Server: ",server);
-    carp(c," requests, ",d," errors.");
-    c[fmt_ulonglong(c,bytes)]=0;
-    carp(c," bytes in ",a,".",b," seconds.");
+    e[fmt_ulonglong(e,bytes)]=0;
 
     /* let's say bytes = 10 MB, time = 1.2 sec.
-     * then we want 10*1024*1024/1.2 == 8 MB/sec */
-
+    * then we want 10*1024*1024/1.2 == 8 MB/sec */
     l = (now.sec.x * 1024) + now.nano/976562;
     if (l) {
-      l = bytes / l;
-      b[fmt_humank(b,l*1024)]=0;
-      carp("Throughput: ",b,"iB/sec");
+      int i;
+      l=bytes/l;
+      i=fmt_humank(f,l*1024);
+      i+=fmt_str(f+i,"iB/sec");
+      f[i]=0;
     } else
-      carp("Need longer test to calculate throughput.");
-
+      strcpy(f,"n/a");
 
     l = (now.sec.x * 1000) + now.nano/1000000;
     l = (done*10000) / l;
-    a[fmt_ulong(a,l/10)]=0;
-    carp("Requests per second: ",a);
+    g[fmt_ulong(g,l/10)]=0;
+
+    if (server[0]) msg("Server: ",server);
+    if (report) {
+      errmsg_iam(0);
+      msg("req\terr\tbytes\tsec\ttput\tr/s");
+      msg(c,"\t",d,"\t",e,"\t",a,".",b,"\t",f,"\t",g);
+    } else {
+      msg(c," requests, ",d," errors.");
+      msg(e," bytes in ",a,".",b," seconds.");
+      msg("Throughput: ",f);
+      msg("Requests per second: ",g);
+    }
   }
 
   return 0;
