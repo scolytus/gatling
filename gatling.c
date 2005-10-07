@@ -76,6 +76,7 @@
 #include <limits.h>
 #include <fcntl.h>
 #include <string.h>
+#include <ctype.h>
 #include "havealloca.h"
 
 unsigned long timeout_secs=23;
@@ -1041,11 +1042,12 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
 
 const char* mimetype(const char* filename,int fd) {
   int i,e=str_rchr(filename,'.');
-  if (filename[e]==0) return "text/plain";
-  ++e;
-  for (i=0; mimetab[i].name; ++i)
-    if (str_equal(mimetab[i].name,filename+e))
-      return mimetab[i].type;
+  if (filename[e]) {
+    ++e;
+    for (i=0; mimetab[i].name; ++i)
+      if (str_equal(mimetab[i].name,filename+e))
+	return mimetab[i].type;
+  }
 #ifdef SUPPORT_MIMEMAGIC
   {
     char buf[100];
@@ -1075,6 +1077,9 @@ const char* mimetype(const char* filename,int fd) {
 	return "audio/x-wav";
     }
   }
+#else
+  else
+    return "text/plain";
 #endif
   return "application/octet-stream";
 }
