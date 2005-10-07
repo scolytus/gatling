@@ -21,6 +21,9 @@
 /* open files in threads to open kernel I/O scheduling opportunities */
 #undef SUPPORT_THREADED_OPEN
 
+/* try to divine MIME type by looking at content */
+#define SUPPORT_MIMEMAGIC
+
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
 
@@ -210,6 +213,13 @@ enum ftpstate {
 int askforpassword;
 #endif
 
+#ifdef SUPPORT_PROXY
+enum proxyprotocol {
+  HTTP,
+  FASTCGI,
+};
+#endif
+
 struct http_data {
   enum conntype t;
 #ifdef SUPPORT_FTP
@@ -237,6 +247,7 @@ struct http_data {
 #endif
   uint64 sent_until,prefetched_until;
 #ifdef SUPPORT_PROXY
+  enum proxyprotocol proxyproto;
   uint64 still_to_copy;	/* for POST requests */
   int havefirst;	/* first read contains cgi header */
   char* oldheader;	/* old, unmodified request */
@@ -314,8 +325,11 @@ struct cgi_proxy {
   uint16 port;
   uint32 scope_id;
   struct cgi_proxy* next;
+  enum proxyprotocol proxyproto;
 }* cgis;
 struct cgi_proxy* last;
+
+char** _envp;
 
 /* if port==0 then execute the CGI locally */
 #endif
@@ -409,6 +423,13 @@ static int add_proxy(const char* c) {
   int i;
   if (!x) return -1;
   byte_zero(x,sizeof(struct cgi_proxy));
+  if (c[1]=='/') {
+    if (c[0]=='F')
+      x->proxyproto=FASTCGI;
+    else
+      goto nixgut;
+    c+=2;
+  }
   i=scan_ip6if(c,x->ip,&x->scope_id);
   if (c[i]!='/') { nixgut: free(x); return -1; }
   c+=i+1;
@@ -444,6 +465,8 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
       /* if the port is zero, then use local execution proxy mode instead */
       int s;
       struct http_data* h;
+
+      d->proxyproto=x->proxyproto;
 
       if (!(h=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
       byte_zero(h,sizeof(struct http_data));
@@ -632,6 +655,21 @@ punt:
   return -2;
 }
 
+unsigned int fmt_fastcgi_keyvalue(char* dest,const char* key,const char* value,unsigned int vlen) {
+  int l,o;
+  dest[0]=l=strlen(key);
+  if (vlen<127) {
+    dest[1]=vlen;
+    o=2;
+  } else {
+    uint32_pack_big(dest+1,vlen);
+    o=5;
+  }
+  byte_copy(dest+o,l,key);
+  byte_copy(dest+o+l,vlen,value);
+  return vlen+o+l;
+}
+
 int proxy_write_header(int sockfd,struct http_data* h) {
   /* assume we can write the header in full. */
   /* slight complication: we need to turn keep-alive off and we need to
@@ -641,23 +679,63 @@ int proxy_write_header(int sockfd,struct http_data* h) {
   int i,j;
   long hlen=array_bytes(&h->r);
   char* hdr=array_start(&h->r);
-  char* newheader=alloca(hlen+200);
-  for (i=j=0; i<hlen; ) {
-    int k=str_chr(hdr+i,'\n');
-    if (k==0) break;
-    if (case_starts(hdr+i,"Connection: ") || case_starts(hdr+i,"X-Forwarded-For: "))
-      i+=k+1;
-    else {
-      byte_copy(newheader+j,k+1,hdr+i);
-      i+=k+1;
-      j+=k+1;
+  char* newheader;
+  if (h->proxyproto==HTTP) {
+    newheader=alloca(hlen+200);
+    for (i=j=0; i<hlen; ) {
+      int k=str_chr(hdr+i,'\n');
+      if (k==0) break;
+      if (case_starts(hdr+i,"Connection: ") || case_starts(hdr+i,"X-Forwarded-For: "))
+	i+=k+1;
+      else {
+	byte_copy(newheader+j,k+1,hdr+i);
+	i+=k+1;
+	j+=k+1;
+      }
     }
+    if (j) j-=2;
+    H->keepalive=0;
+    j+=fmt_str(newheader+j,"Connection: close\r\nX-Forwarded-For: ");
+    j+=fmt_ip6c(newheader+j,H->peerip);
+    j+=fmt_str(newheader+j,"\r\n\r\n");
+  } else if (h->proxyproto==FASTCGI) {
+    newheader=alloca(hlen*4+400);
+#if 0
+         typedef struct {
+             unsigned char version;
+             unsigned char type;
+             unsigned char requestIdB1;
+             unsigned char requestIdB0;
+             unsigned char contentLengthB1;
+             unsigned char contentLengthB0;
+             unsigned char paddingLength;
+             unsigned char reserved;
+             unsigned char contentData[contentLength];
+             unsigned char paddingData[paddingLength];
+         } FCGI_Record;
+#endif
+    /* {FCGI_BEGIN_REQUEST,   1, {FCGI_RESPONDER, 0}} */
+#if 0
+         typedef struct {
+             unsigned char roleB1;
+             unsigned char roleB0;
+             unsigned char flags;
+             unsigned char reserved[5];
+         } FCGI_BeginRequestBody;
+#endif
+    byte_copy(newheader,24,"\x01\x01\x00\x01\x00\x08\x00\x00" /* FCGI_Record: FCGI_BEGIN_REQUEST */
+	                   "\x00\x01\x00\x00\x00\x00\x00\x00" /* FCGI_BeginRequestBody */
+			   "\x01\x04\x00\x01\x00\x00\x00\x00" /* fcgirecord: FCGI_PARAMS */
+			   );
+    i=24;
+
+#if 0
+     {FCGI_PARAMS,          1, "\013\002SERVER_PORT80\013\016SERVER_ADDR199.170.183.42 ... "}
+     {FCGI_PARAMS,          1, ""}
+     {FCGI_STDIN,           1, ""}
+#endif
+    /* TODO */
   }
-  if (j) j-=2;
-  H->keepalive=0;
-  j+=fmt_str(newheader+j,"Connection: close\r\nX-Forwarded-For: ");
-  j+=fmt_ip6c(newheader+j,H->peerip);
-  j+=fmt_str(newheader+j,"\r\n\r\n");
   if (write(sockfd,newheader,j)!=j)
     return -1;
   H->sent+=j;
@@ -961,13 +1039,43 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "swf",	"application/x-shockwave-flash" },
   { 0 } };
 
-const char* mimetype(const char* filename) {
+const char* mimetype(const char* filename,int fd) {
   int i,e=str_rchr(filename,'.');
   if (filename[e]==0) return "text/plain";
   ++e;
   for (i=0; mimetab[i].name; ++i)
     if (str_equal(mimetab[i].name,filename+e))
       return mimetab[i].type;
+#ifdef SUPPORT_MIMEMAGIC
+  {
+    char buf[100];
+    int r;
+    r=pread(fd,buf,sizeof(buf),0);
+    if (r>=1 && buf[0]=='<') {
+      if (r>1 && buf[1]=='?')
+	return "text/xml";
+      else if (buf[1]=='!' || isalnum(buf[1]))
+	return "text/html";
+    } else if (r>=5 && byte_equal(buf,4,"GIF9"))
+      return "image/gif";
+    else if (r>=4 && byte_equal(buf,4,"\x89PNG"))
+      return "image/png";
+    else if (r>=10 && byte_equal(buf,10,"\xff\xd8\xff\xe0\x00\x10JFIF"))
+      return "image/jpeg";
+    else if (r>=5 && byte_equal(buf,5,"%PDF-"))
+      return "application/pdf";
+    else if (r>=4 && (byte_equal(buf,3,"ID3") || byte_equal(buf,2,"\xff\xfb")))
+      return "audio/mpeg";
+    else if (r>=4 && byte_equal(buf,4,"OggS"))
+      return "audio/x-oggvorbis";
+    else if (r>=4 && byte_equal(buf,4,"RIFF")) {
+      if (r>=16 && byte_equal(buf+8,3,"AVI"))
+	return "video/x-msvideo";
+      else
+	return "audio/x-wav";
+    }
+  }
+#endif
   return "application/octet-stream";
 }
 
@@ -1443,12 +1551,12 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       }
     }
   } else {
-    h->mimetype=mimetype(Filename);
     if (!open_for_reading(&fd,Filename+1,ss)) {
       if (errno==ENOENT)
 	if (http_redirect(h,Filename+1)) return -4;
       return -1;
     }
+    h->mimetype=mimetype(Filename,fd);
 #ifdef SUPPORT_PROXY
     if (!noproxy && (ss->st_mode&S_IXOTH)) {
       char temp[5];
@@ -3070,8 +3178,6 @@ static int switch_uid() {
  * socket to the grandchild back to gatling over the Unix domain socket. */
 static char fsbuf[8192];
 
-char** _envp;
-
 static const char *cgivars[] = {
   "GATEWAY_INTERFACE=",
   "SERVER_PROTOCOL=",
@@ -3093,6 +3199,32 @@ static const char *cgivars[] = {
   "REMOTE_USER=",
   0
 };
+
+int cgienvneeded(const char* httpreq,size_t reqlen) {
+  int i,j,envc;
+  for (i=envc=0; _envp[i]; ++i) {
+    int found=0;
+    if (str_start(_envp[i],"HTTP_"))
+      found=1;
+    else
+      for (j=0; cgivars[j]; ++j)
+	if (str_start(_envp[i],cgivars[j])) { found=1; break; }
+    if (!found) ++envc;
+  }
+
+  /* now collect all normal HTTP headers */
+
+  {
+    const char* x=httpreq;
+    const char* max=x+reqlen;
+    for (;x<max && *x!='\n';++x) ;	/* Skip GET */
+    for (;x<max;++x)
+      if (*x=='\n')
+	++envc;
+  }
+  return envc;
+}
+
 
 void forkslave(int fd,buffer* in) {
   /* receive query, create socketpair, fork, set up environment,
@@ -3287,26 +3419,8 @@ void forkslave(int fd,buffer* in) {
 		    char* argv[]={cginame,0};
 		    char** envp;
 		    int envc;
-		    for (i=envc=0; _envp[i]; ++i) {
-		      int found=0;
-		      if (str_start(_envp[i],"HTTP_"))
-			found=1;
-		      else
-			for (j=0; cgivars[j]; ++j)
-			  if (str_start(_envp[i],cgivars[j])) { found=1; break; }
-		      if (!found) ++envc;
-		    }
 
-		    /* now collect all normal HTTP headers */
-
-		    {
-		      char* x=httpreq;
-		      char* max=x+reqlen;
-		      for (;x<max && *x!='\n';++x) ;	/* Skip GET */
-		      for (;x<max;++x)
-			if (*x=='\n')
-			  ++envc;
-		    }
+		    envc=cgienvneeded(httpreq,reqlen);
 
 		    envp=(char**)alloca(sizeof(char*)*(envc+20));
 		    envc=0;
@@ -4349,8 +4463,10 @@ int main(int argc,char* argv[],char* envp[]) {
   SSL_load_error_strings();
 #endif
 
-#ifdef SUPPORT_CGI
+#if defined(SUPPORT_CGI) || defined(SUPPORT_PROXY)
   _envp=envp;
+#endif
+#ifdef SUPPORT_CGI
   {
     int found;
     int _argc=argc;
@@ -4653,7 +4769,8 @@ usage:
 		  "\t-C regex\tregex for local CGI execution (\"\\.cgi\")\n"
 #endif
 #ifdef SUPPORT_PROXY
-		  "\t-O ip/port/regex\tregex for proxy mode (\"127.0.0.1/8001/\\.jsp$\")\n"
+		  "\t-O [flag]/ip/port/regex\tregex for proxy mode (\"F/127.0.0.1/8001/\\.jsp$\")\n"
+		  "\t\tflags: F - FastCGI mode, J - JSP mode\n"
 #endif
 #ifdef SUPPORT_SMB
 		  "\t-w name\tset SMB workgroup\n"

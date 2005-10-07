@@ -166,7 +166,13 @@ int main(int argc,char* argv[]) {
     n=(unsigned long)-1;
     host=argv[optind]+1;
     {
-      int tmp=str_chr(host,'%');
+      int tmp;
+      tmp=str_chr(host,'/');
+      if (host[tmp]) {
+	host[tmp]=0;
+	if (!scan_ushort(host+tmp+1,&port)) usage();
+      }
+      tmp=str_chr(host,'%');
       if (host[tmp]) {
 	host[tmp]=0;
 	scope_id=socket_getifidx(host+tmp+1);
@@ -493,15 +499,17 @@ int main(int argc,char* argv[]) {
   {
     char a[FMT_ULONG];
     char b[FMT_ULONG];
-    char c[FMT_ULONG];
+    char C[FMT_ULONG];
     char d[FMT_ULONG];
     char e[FMT_ULONG];
     char f[FMT_ULONG];
     char g[FMT_ULONG];
+    char h[FMT_ULONG];
+    char i[FMT_ULONG];
     unsigned long long l;
     a[fmt_ulong(a,now.sec.x)]=0;
     b[fmt_ulong0(b,(now.nano%1000000000)/100000,4)]=0;
-    c[fmt_ulong(c,done)]=0;
+    C[fmt_ulong(C,done)]=0;
     d[fmt_ulonglong(d,errors)]=0;
     e[fmt_ulonglong(e,bytes)]=0;
 
@@ -511,8 +519,12 @@ int main(int argc,char* argv[]) {
     if (l) {
       int i;
       l=bytes/l;
-      i=fmt_humank(f,l*1024);
-      i+=fmt_str(f+i,"iB/sec");
+      if (report)
+	i=fmt_ulong(f,l);
+      else {
+	i=fmt_humank(f,l*1024);
+	i+=fmt_str(f+i,"iB/sec");
+      }
       f[i]=0;
     } else
       strcpy(f,"n/a");
@@ -520,14 +532,16 @@ int main(int argc,char* argv[]) {
     l = (now.sec.x * 1000) + now.nano/1000000;
     l = (done*10000) / l;
     g[fmt_ulong(g,l/10)]=0;
+    h[fmt_ulong(h,c)]=0;
+    i[fmt_ulong(i,K)]=0;
 
     if (server[0]) msg("Server: ",server);
     if (report) {
       errmsg_iam(0);
-      msg("req\terr\tbytes\tsec\ttput\tr/s");
-      msg(c,"\t",d,"\t",e,"\t",a,".",b,"\t",f,"\t",g);
+      msg("req\terr\tconcur\tkeep\tkbytes\tsec\ttput\tr/s");
+      msg(C,"\t",d,"\t",h,"\t",i,"\t",e,"\t",a,".",b,"\t",f,"\t",g);
     } else {
-      msg(c," requests, ",d," errors.");
+      msg(C," requests, ",d," errors.");
       msg(e," bytes in ",a,".",b," seconds.");
       msg("Throughput: ",f);
       msg("Requests per second: ",g);
