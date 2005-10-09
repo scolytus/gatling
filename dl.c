@@ -86,8 +86,13 @@ static int readanswer(int s,const char* filename) {
 	body=j+4;
 	if (scan_ulong(buf+9,&code)) httpcode=code;
 	if ((resumeofs && code==206 && io_appendfile(&d,filename)==0) ||
-	    (!resumeofs && code==200 && io_createfile(&d,filename)==0))
+	    (!resumeofs && code==200 && ((strcmp(filename,"-"))?io_createfile(&d,filename)==0:((d=1)-1))))
 	  panic("creat");
+	if (d==-1) {
+	  for (j=0; buf[j]!='\n'; ++j) ;
+	  write(2,buf,j+1);
+	  return 0;
+	}
 	if (r-j-4)
 	  if (write(d,buf+body,r-j-4)!=r-j-4) panic("write");
 	break;
@@ -661,7 +666,7 @@ skipdownload:
   close(s);
   if (filename[0] && u.actime) {
     u.modtime=u.actime;
-    if (utime(filename,&u)==-1) panic("utime");
+    if (strcmp(filename,"-") && utime(filename,&u)==-1) panic("utime");
   }
   return 0;
 }
