@@ -130,6 +130,8 @@ again:
       if ((r=get())==-1) return -1;
       if (r=='>' && dashes==2) {
 	if (eatwhitespace()==-1) return -1;
+	while ((r=get())!='<' && r!=-1) ;
+	unget(r);
 	goto again;
       }
       if (r=='-') ++dashes; else dashes=0;
