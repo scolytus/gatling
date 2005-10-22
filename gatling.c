@@ -451,7 +451,7 @@ void httperror_realm(struct http_data* r,const char* title,const char* message,c
 void httperror(struct http_data* r,const char* title,const char* message);
 static int header_complete(struct http_data* r);
 
-static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d,int isexec) {
+static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d,int isexec,const char* args) {
   struct cgi_proxy* x=cgis;
   struct stat ss;
 
@@ -501,6 +501,10 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	buffer_putulong(buffer_1,sockfd);
 	buffer_puts(buffer_1," ");
 	buffer_putlogstr(buffer_1,c);
+	if (args) {
+	  buffer_puts(buffer_1,"?");
+	  buffer_putlogstr(buffer_1,args);
+	}
 	buffer_puts(buffer_1," 0 ");
 	buffer_putlogstr(buffer_1,(tmp=http_header(d,"User-Agent"))?tmp:"[no_user_agent]");
 	buffer_puts(buffer_1," ");
@@ -1465,7 +1469,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 
 #ifdef SUPPORT_PROXY
   noproxy=0;
-  switch ((i=proxy_connection(sockfd,Filename,dir,h,0))) {
+  switch ((i=proxy_connection(sockfd,Filename,dir,h,0,args))) {
   case -3: noproxy=1; /* fall through */
   case -2: break;
   case -1: return -1;
@@ -1530,7 +1534,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	  i=fmt_str(temp,Filename);
 	  i+=fmt_str(temp+i,"index.html");
 	  temp[i]=0;
-	  switch ((i=proxy_connection(sockfd,temp,dir,h,1))) {
+	  switch ((i=proxy_connection(sockfd,temp,dir,h,1,args))) {
 	  case -2: break;
 	  case -1: return -1;
 	  default:
@@ -1574,7 +1578,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       char temp[5];
       if (pread(fd,temp,4,0)==4) {
 	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
-	  switch ((i=proxy_connection(sockfd,Filename,dir,h,1))) {
+	  switch ((i=proxy_connection(sockfd,Filename,dir,h,1,args))) {
 	  case -2: break;
 	  case -1: return -1;
 	  default:
