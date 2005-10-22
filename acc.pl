@@ -7,6 +7,13 @@ while (<>) {
     shift @x;
     $x[0]=$tmp;
   }
+  if ($x[1] =~ /^(GET|POST|HEAD)/) {
+    if ($x[1] =~ /SSL/) {
+      $x[3] = "https://" . $x[7] . $x[3];
+    } else {
+      $x[3] = "http://" . $x[7] . $x[3];
+    }
+  }
   if ($x[1] eq "accept") {
     $ip{$x[2]} = $x[3];
   } elsif ($#x == 7) {
