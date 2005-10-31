@@ -4456,6 +4456,7 @@ int main(int argc,char* argv[],char* envp[]) {
   enum conntype sct=SMBSERVER6;
 #endif
   int doftp=0;		/* -1 = don't, 0 = try, but don't fail if not working, 1 = do */
+  int dohttp=0;		/* -1 = don't, 0 = try, but don't fail if not working, 1 = do */
   int dosmb=0;
   enum { HTTP, FTP, SMB, HTTPS } lastopt=HTTP;
   enum conntype ct=HTTPSERVER6;	/* used as cookie to recognize server connections */
@@ -4504,7 +4505,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
     found=0;
     for (;;) {
-      int c=getopt(_argc,_argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:");
+      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:");
       if (c==-1) break;
       switch (c) {
       case 'c':
@@ -4647,7 +4648,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"P:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:");
+    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -4716,6 +4717,7 @@ int main(int argc,char* argv[],char* envp[]) {
     case 'e': dohttps=1; lastopt=HTTPS; break;
     case 'E': dohttps=-1; break;
 #endif
+    case 'H': dohttp=-1; break;
     case 's': dosmb=1; lastopt=SMB; break;
     case 'S': dosmb=-1; break;
     case 'T':
@@ -4866,8 +4868,11 @@ usage:
 #ifdef __broken_itojun_v6__
   if (byte_equal(ip,12,V4mappedprefix) || byte_equal(ip,16,V6any)) {
     if (byte_equal(ip,16,V6any)) {
-      if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
-	panic("socket_bind6_reuse for http");
+      if (dohttp==-1) {
+	close(s); s=-1;
+      } else
+	if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
+	  panic("socket_bind6_reuse for http");
 #ifdef SUPPORT_FTP
       f=socket_tcp6();
       if (doftp>=0)
@@ -4893,8 +4898,12 @@ usage:
       }
 #endif
   } else {
-    if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
-      panic("socket_bind6_reuse");
+    if (dohttp==-1) {
+      close(s);
+      s=-1;
+    } else
+      if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
+	panic("socket_bind6_reuse");
     s4=-1;
 #ifdef SUPPORT_FTP
     if (doftp>=0)
@@ -4910,8 +4919,12 @@ usage:
   buffer_putsflush(buffer_2,"WARNING: We are taking heavy losses working around itojun KAME madness here.\n"
 		            "         Please consider using an operating system with real IPv6 support instead!\n");
 #else
-  if (socket_bind6_reuse(s,ip,port,0)==-1)
-    panic("socket_bind6_reuse");
+  if (dohttp==-1) {
+    close(s);
+    s=-1;
+  } else
+    if (socket_bind6_reuse(s,ip,port,0)==-1)
+      panic("socket_bind6_reuse");
 #ifdef SUPPORT_FTP
   if (doftp>=0) {
     f=socket_tcp6();
@@ -4963,11 +4976,13 @@ usage:
 
   {
     char buf[IP6_FMT];
-    buffer_puts(buffer_1,"starting_up 0 ");
-    buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
-    buffer_puts(buffer_1," ");
-    buffer_putulong(buffer_1,port);
-    buffer_putnlflush(buffer_1);
+    if (s!=-1) {
+      buffer_puts(buffer_1,"starting_up 0 ");
+      buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
+      buffer_puts(buffer_1," ");
+      buffer_putulong(buffer_1,port);
+      buffer_putnlflush(buffer_1);
+    }
     if (f!=-1) {
       buffer_puts(buffer_1,"start_ftp 0 ");
       buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
