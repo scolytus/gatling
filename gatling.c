@@ -1288,14 +1288,14 @@ username2:password2
  * covered, use hard or symbolic links.  The function returns 0 if the
  * authentication was OK or -1 if authentication is needed (the HTTP
  * response was then already written to the iob). */
-int http_dohtaccess(struct http_data* h) {
+int http_dohtaccess(struct http_data* h,const char* filename) {
   unsigned long filesize;
   char* map;
   char* s;
   char* auth;
   char* realm;
   int r=0;
-  map=mmap_read(".htaccess",&filesize);
+  map=mmap_read(filename,&filesize);
   if (!map) return 1;
   for (s=map; (s<map+filesize) && (*s!='\n'); ++s);		/* XXX */
   if (s>=map+filesize) goto done;
@@ -1464,7 +1464,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   while (Filename[1]=='/') ++Filename;
 
 #ifdef SUPPORT_HTACCESS
-  if (http_dohtaccess(h)==0) return -5;
+  if (http_dohtaccess(h,".htaccess_global")==0) return -5;
 #endif
 
 #ifdef SUPPORT_PROXY
@@ -1485,6 +1485,9 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   if (Filename[(i=str_len(Filename))-1] == '/') {
     /* Damn.  Directory. */
     if (Filename[1] && chdir(Filename+1)==-1) return -1;
+#ifdef SUPPORT_HTACCESS
+    if (http_dohtaccess(h,".htaccess")==0) return -5;
+#endif
     h->mimetype="text/html";
     if (!open_for_reading(&fd,"index.html",ss)) {
       DIR* d;
@@ -1567,6 +1570,16 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       }
     }
   } else {
+#ifdef SUPPORT_HTACCESS
+    char* x=alloca(strlen(Filename)+30);
+    int lso=str_rchr(x,'/');
+    if (x[lso]=='/') {
+      byte_copy(x,lso+1,Filename);
+      str_copy(x+lso+1,".htaccess");
+      if (http_dohtaccess(h,x)==0) return -5;
+    } else
+      if (http_dohtaccess(h,".htaccess")==0) return -5;
+#endif
     if (!open_for_reading(&fd,Filename+1,ss)) {
       if (errno==ENOENT)
 	if (http_redirect(h,Filename+1)) return -4;

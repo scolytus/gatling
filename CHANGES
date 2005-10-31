@@ -15,6 +15,7 @@
   add MIME magic (will try to identify file type by looking at first bytes)
     this is only used if the extension is not conclusive
   also log the GET arguments in the log for CGI requests
+  allow .htaccess_global
 
 0.8:
   fix pipelining bug

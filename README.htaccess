@@ -13,3 +13,6 @@ prompting for the password.  username is the user name in plain text,
 and password is the password in crypt(3) format (like in /etc/passwd).
 
 gatling only supports basic authentication.
+
+You can also password protect a whole server.  Just put a
+.htaccess_global file in the directory of the server, same syntax.
