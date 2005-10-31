@@ -5107,7 +5107,7 @@ usage:
 
       if (++events==10) {
 	events=0;
-	accept_server_connection(s,(struct http_data*)&ct,ftptimeout_secs,nextftp);
+	if (s!=-1) accept_server_connection(s,(struct http_data*)&ct,ftptimeout_secs,nextftp);
 #ifdef SUPPORT_FTP
 	if (f!=-1) accept_server_connection(f,(struct http_data*)&fct,ftptimeout_secs,nextftp);
 #endif
