@@ -4165,7 +4165,6 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
   assert(H->t != HTTPSRESPONSE);
   if (H->t == HTTPSREQUEST) {
     l=SSL_read(H->ssl,buf,sizeof(buf));
-    printf("SSL_read(%d bytes) returned %d\n",sizeof(buf),l);
 //    printf("SSL_read(sock %d,buf %p,n %d) -> %d\n",i,buf,sizeof(buf),l);
     if (l==-1) {
       l=SSL_get_error(H->ssl,l);
@@ -4321,7 +4320,6 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
 #endif
   if (n>65536) n=65536;
   l=SSL_write(H->ssl,buf,n);
-  printf("SSL_write(%d bytes) returned %d\n",n,l);
   if (l<0) {
     l=SSL_get_error(H->ssl,l);
     if (handle_ssl_error_code(sock,l,0)==-1) {
