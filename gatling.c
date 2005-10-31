@@ -255,7 +255,9 @@ struct http_data {
 #endif
 #ifdef SUPPORT_HTTPS
   SSL* ssl;
+#if 0
   int writefail;
+#endif
 #endif
 #ifdef SUPPORT_SMB
   enum { PCNET10, LANMAN21, NTLM012 } smbdialect;
@@ -4135,7 +4137,9 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
   int r=SSL_get_error(h->ssl,SSL_accept(h->ssl));
 //  printf("do_sslaccept -> %d\n",r);
   if (r==SSL_ERROR_NONE) {
+#if 0
     h->writefail=1;
+#endif
     h->t=HTTPSREQUEST;
     if (logging) {
       buffer_puts(buffer_1,"ssl_handshake_ok ");
@@ -4161,11 +4165,13 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
   assert(H->t != HTTPSRESPONSE);
   if (H->t == HTTPSREQUEST) {
     l=SSL_read(H->ssl,buf,sizeof(buf));
+    printf("SSL_read(%d bytes) returned %d\n",sizeof(buf),l);
 //    printf("SSL_read(sock %d,buf %p,n %d) -> %d\n",i,buf,sizeof(buf),l);
     if (l==-1) {
       l=SSL_get_error(H->ssl,l);
 //      printf("  error %d %s\n",l,ERR_error_string(l,0));
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+	io_eagain(i);
 	if (handle_ssl_error_code(i,l,1)==-1) {
 	  cleanup(i);
 	  return;
@@ -4309,10 +4315,13 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
   int l;
   struct http_data* H=io_getcookie(sock);
   if (!H) return -3;
+#if 0
   H->writefail=!H->writefail;
   if (H->writefail) { errno=EAGAIN; return -1; }
+#endif
   if (n>65536) n=65536;
   l=SSL_write(H->ssl,buf,n);
+  printf("SSL_write(%d bytes) returned %d\n",n,l);
   if (l<0) {
     l=SSL_get_error(H->ssl,l);
     if (handle_ssl_error_code(sock,l,0)==-1) {
