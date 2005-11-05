@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <byte.h>
 #include <scan.h>
+#include <string.h>
 
 buffer* in;
 int ungotten=-1;
@@ -228,7 +229,7 @@ struct param src[] = {
 
 static void canonicalize(stralloc* url,const char* baseurl) {
   /* for the comments, assume baseurl is "http://www.fefe.de/x/y.html" */
-  int l=strlen(baseurl);
+  int l=str_len(baseurl);
   char* dest=alloca(url->len+l+2);
   char* x=dest;
   if (stralloc_0(url)==0) return;
