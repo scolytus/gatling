@@ -70,6 +70,8 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
 struct utimbuf u;
 unsigned long long resumeofs;
 
+char* location;
+
 static int readanswer(int s,const char* filename) {
   char buf[8192];
   int i,j,body=-1,r;
@@ -89,6 +91,19 @@ static int readanswer(int s,const char* filename) {
 	    (!resumeofs && code==200 && ((strcmp(filename,"-"))?io_createfile(&d,filename)==0:((d=1)-1))))
 	  panic("creat");
 	if (d==-1) {
+	  if (httpcode==301 || httpcode==302 || httpcode==303) {
+	    char* l;
+	    buf[r]=0;
+	    if ((l=strstr(buf,"\nLocation:"))) {
+	      l+=10;
+	      while (*l == ' ' || *l == '\t') ++l;
+	      location=l;
+	      while (*l && *l != '\r' && *l != '\n') ++l;
+	      *l=0;
+	      return -2;
+	    }
+	    return -1;
+	  }
 	  for (j=0; buf[j]!='\n'; ++j) ;
 	  write(2,buf,j+1);
 	  return 0;
@@ -106,8 +121,8 @@ static int readanswer(int s,const char* filename) {
       break;
     }
   }
-  if (httpcode!= (resumeofs?206:200)) return 0;
   if (r==-1) return -1;
+  if (httpcode!= (resumeofs?206:200)) return 0;
   rest=-1; nocl=1;
   buf[r]=0;
   for (j=0; j<r; j+=str_chr(buf+j,'\n')) {
@@ -314,6 +329,11 @@ usage:
   }
 
   if (!argv[optind]) goto usage;
+again:
+  {
+    static int redirects=0;
+    if (++redirects>5) panic("too many redirects!\n");
+  }
   mode=HTTP;
   if (byte_diff(argv[optind],skip=7,"http://")) {
     if (byte_diff(argv[optind],skip=6,"ftp://")) goto usage;
@@ -456,7 +476,16 @@ usage:
   }
   if (mode==HTTP) {
     if (write(s,request,rlen)!=rlen) panic("write");
-    if (readanswer(s,filename)==-1) exit(1);
+    switch (readanswer(s,filename)) {
+    case -1: exit(1);
+    case -2: argv[optind]=location; location=0;
+	     if (verbose) {
+	       buffer_puts(buffer_1,"redirected to ");
+	       buffer_puts(buffer_1,location);
+	       buffer_putsflush(buffer_1,"...\n");
+	     }
+	     goto again;
+    }
   } else if (mode==FTP) {
     char buf[2048];
     int i;
