@@ -1118,7 +1118,7 @@ static char* http_header_blob(char* b,long l,char* h) {
   for (i=0; i+sl+2<l; ++i)
     if (b[i]=='\n' && case_equalb(b+i+1,sl,h) && b[i+sl+1]==':') {
       b+=i+sl+2;
-      if (*b==' ' || *b=='\t') ++b;
+      while (*b==' ' || *b=='\t') ++b;
       return b;
     }
   return 0;
