@@ -1628,7 +1628,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 #ifdef SUPPORT_BZIP2
       if (doesbzip2) {
 	Filename[i+fmt_str(Filename+i,".bz2")]=0;
-	if (open_for_reading(&gfd,Filename,ss)) {
+	if (open_for_reading(&gfd,Filename+1,ss)) {
 	  io_close(fd);
 	  fd=gfd;
 	  h->encoding=BZIP2;
@@ -1637,7 +1637,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 #endif
       if (doesgzip && h->encoding==NORMAL) {
 	Filename[i+fmt_str(Filename+i,".gz")]=0;
-	if (open_for_reading(&gfd,Filename,ss)) {
+	if (open_for_reading(&gfd,Filename+1,ss)) {
 	  io_close(fd);
 	  fd=gfd;
 	  h->encoding=GZIP;
