@@ -1007,6 +1007,7 @@ static unsigned int fmt_2digits(char* dest,int i) {
 
 static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "html",	"text/html" },
+  { "ico",	"image/x-icon" },
   { "txt",	"text/plain" },
   { "css",	"text/css" },
   { "dvi",	"application/x-dvi" },
