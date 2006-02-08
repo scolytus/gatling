@@ -2001,7 +2001,7 @@ rangeerror:
 
 	c+=fmt_str(c,"\r\nContent-Type: ");
 	c+=fmt_str(c,h->mimetype);
-	c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
+	c+=fmt_str(c,"\r\nAccept-Ranges: bytes\r\nServer: " RELEASE "\r\nContent-Length: ");
 	c+=fmt_ulonglong(c,range_last-range_first);
 
 	c+=fmt_str(c,"\r\nDate: ");

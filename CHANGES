@@ -18,6 +18,7 @@
   allow .htaccess_global
   dl can now follow 301, 302 and 302
   fix .gz handling
+  tell download accelerators that we support ranges
 
 0.8:
   fix pipelining bug
