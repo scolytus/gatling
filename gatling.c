@@ -1,4 +1,6 @@
 
+#define SUPPORT_MULTIPROC
+
 #define SUPPORT_SERVERSTATUS
 // #define SUPPORT_SMB
 #define SUPPORT_FTP
@@ -27,6 +29,23 @@
 /* http header size limit: */
 #define MAX_HEADER_SIZE 8192
 
+#ifdef __MINGW32__
+#include "windows.h"
+
+#undef SUPPORT_MULTIPROC
+#undef SUPPORT_CGI
+#undef SUPPORT_PROXY
+#undef SUPPORT_FTP
+#undef SUPPORT_MIMEMAGIC
+#undef USE_ZLIB
+#undef SUPPORT_HTACCESS
+#include <malloc.h>
+#endif
+
+#ifdef SUPPORT_MULTIPROC
+#undef SUPPORT_CGI
+#endif
+
 #ifdef SUPPORT_THREADED_OPEN
 #include <pthread.h>
 #endif
@@ -47,26 +66,29 @@
 #include "uint32.h"
 #include "uint16.h"
 #include "mmap.h"
+#include "rangecheck.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <unistd.h>
+#include <errno.h>
+#ifndef __MINGW32__
 #include <sys/resource.h>
 #include <sys/socket.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <dirent.h>
-#include <time.h>
-#include <signal.h>
 #include <pwd.h>
 #include <grp.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include "version.h"
-#include <assert.h>
+#include <sys/mman.h>
 #include <fnmatch.h>
 #include <sys/wait.h>
-#include <sys/mman.h>
+#endif
+#include <stdlib.h>
+#include <dirent.h>
+#include <time.h>
+#include <signal.h>
+#include "version.h"
+#include <assert.h>
 #ifdef SUPPORT_SMB
 #include <iconv.h>
 #endif
@@ -116,6 +138,7 @@ static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 
 #ifdef SUPPORT_CGI
 static int forksock[2];
+MUTEX_VAR(cgi_lock)
 #endif
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
@@ -129,7 +152,11 @@ int directory_index;
 int logging;
 int nouploads;
 int chmoduploads;
+#ifdef __MINGW32__
+char origdir[PATH_MAX];
+#else
 int64 origdir;
+#endif
 
 #ifdef SUPPORT_SMB
 char workgroup[20]="FNORD";
@@ -557,6 +584,7 @@ punt:
 	char ra[IP6_FMT];
 	req[strlen(req)]=' ';
 	d->keepalive=0;
+	LOCK(cgi_lock);
 	ra[fmt_ip6c(ra,d->peerip)]=0;
 	a=strlen(req); write(forksock[0],&a,4);
 	a=strlen(dir); write(forksock[0],&a,4);
@@ -574,11 +602,13 @@ punt:
 	  char* c=alloca(len+1);
 	  read(forksock[0],c,len);
 	  c[len]=0;
+	  UNLOCK(cgi_lock);
 	  httperror(d,"502 Gateway Broken",c);
 	  free(h);
 	  return -1;
 	} else {
 	  s=io_receivefd(forksock[0]);
+	  UNLOCK(cgi_lock);
 	  if (s==-1) {
 	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
 	    free(h);
@@ -839,6 +869,9 @@ int read_http_post(int sockfd,struct http_data* H) {
 static int open_for_reading(int64* fd,const char* name,struct stat* SS) {
   /* only allow reading of world readable files */
   if (io_readfile(fd,name)) {
+#ifdef __MINGW32__
+    SS->st_size=GetFileSize((HANDLE)(uintptr_t)*fd,0);
+#else
     struct stat ss;
     if (!SS) SS=&ss;
     if (fstat(*fd,SS)==-1 || !(SS->st_mode&S_IROTH)) {
@@ -847,6 +880,7 @@ static int open_for_reading(int64* fd,const char* name,struct stat* SS) {
       return 0;
     }
     return 1;
+#endif
   }
   return 0;
 }
@@ -1029,6 +1063,7 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "pac",	"application/x-ns-proxy-autoconfig" },
   { "sig",	"application/pgp-signature" },
   { "torrent",	"application/x-bittorrent" },
+  { "rss",	"application/rss+xml" },
   { "class",	"application/octet-stream" },
   { "js",	"application/x-javascript" },
   { "tar",	"application/x-tar" },
@@ -1045,6 +1080,9 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "m3u",	"audio/x-mpegurl" },
   { "htm",	"text/html" },
   { "swf",	"application/x-shockwave-flash" },
+  { "md5",	"text/plain" },
+  { "wmv",	"video/x-ms-wmv" },
+  { "mp4",	"video/mp4" },
   { 0 } };
 
 const char* mimetype(const char* filename,int fd) {
@@ -1057,13 +1095,23 @@ const char* mimetype(const char* filename,int fd) {
   }
 #ifdef SUPPORT_MIMEMAGIC
   {
-    char buf[100];
+    char buf[300];
     int r;
     r=pread(fd,buf,sizeof(buf),0);
     if (r>=1 && buf[0]=='<') {
-      if (r>1 && buf[1]=='?')
+      if (r>1 && buf[1]=='?') {
+	char* c;
+	if (r>=100)
+	  for (c=buf+1; c<buf+r-5; ++c) {
+	    if (*c=='<') {
+	      if (c<buf+r-8 && byte_equal(c,8,"<rdf:RDF"))
+		return "application/rss+xml";
+	      else if (c<buf+r-8 && byte_equal(c,5,"<rss "))
+		return "application/rss+xml";
+	    }
+	  }
 	return "text/xml";
-      else if (buf[1]=='!' || isalnum(buf[1]))
+      } else if (buf[1]=='!' || isalnum(buf[1]))
 	return "text/html";
     } else if (r>=5 && byte_equal(buf,4,"GIF9"))
       return "image/gif";
@@ -1143,7 +1191,7 @@ int sort_size_a(de* x,de* y) { return x->ss.st_size-y->ss.st_size; }
 int sort_size_d(de* x,de* y) { return y->ss.st_size-x->ss.st_size; }
 
 static inline int issafe(unsigned char c) {
-  return (c!='"' && c!='%' && c>=' ' && c!='+');
+  return (c!='"' && c!='%' && c>=' ' && c!='+' && c!=':');
 }
 
 unsigned long fmt_urlencoded(char* dest,const char* src,unsigned long len) {
@@ -1190,7 +1238,11 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     de* x=array_allocate(&a,sizeof(de),n);
     if (!x) break;
     x->name=o;
+#ifdef __MINGW32__
+    if (stat(d->d_name,&x->ss)==-1) continue;
+#else
     if (lstat(d->d_name,&x->ss)==-1) continue;
+#endif
     array_cats0(&b,d->d_name);
     o+=str_len(d->d_name)+1;
     ++n;
@@ -1248,7 +1300,9 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     array_cats(&c,"\">");
     cathtml(&c,base+ab[i].name);
     if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/"); else
+#ifndef __MINGW32__
     if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@");
+#endif
     array_cats(&c,"</a><td>");
 
     j=fmt_2digits(buf,x->tm_mday);
@@ -1350,6 +1404,7 @@ done:
 #endif
 
 int http_redirect(struct http_data* h,const char* Filename) {
+#ifndef __MINGW32__
   char buf[2048];
   int i;
   if ((i=readlink(Filename,buf,sizeof(buf)))!=-1) {
@@ -1377,6 +1432,7 @@ int http_redirect(struct http_data* h,const char* Filename) {
       free(h->bodybuf); free(h->hdrbuf);
     }
   }
+#endif
   return 0;
 }
 
@@ -1457,7 +1513,11 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       }
     }
   }
+#ifdef __MINGW32__
+  chdir(origdir);
+#else
   fchdir(origdir);
+#endif
   if (virtual_hosts>=0) {
     if (chdir(dir=s)==-1)
       if (chdir(dir="default")==-1)
@@ -2104,7 +2164,11 @@ static int ftp_vhost(struct http_data* h) {
   i+=fmt_ulong(y+i,h->myport);
   y[i]=0;
 
+#ifdef __MINGW32__
+  chdir(origdir);
+#else
   fchdir(origdir);
+#endif
   if (virtual_hosts>=0) {
     if (chdir(y)==-1)
       if (chdir("default")==-1)
@@ -2947,7 +3011,7 @@ struct smbheader {
   unsigned short uid;	/* user id */
   unsigned short mid;	/* multiplex id */
   /* first:
-  unsigned char wordcount;	// count of parameter words 
+  unsigned char wordcount;	// count of parameter words
   unsigned short parameterwords[1];
   */
   /* then:
@@ -2955,6 +3019,31 @@ struct smbheader {
    unsigned char buf[bytecount];
    */
 };
+
+int validate_smb_packet(char* pkt,unsigned long len) {
+  /* we actually received len bytes from the wire, so pkt+len does not
+   * overflow; we got len bytes, because the netbios header said there
+   * were that many bytes in the packet. */
+  struct smbheader* s=(struct smbheader*)pkt;
+  char* x;
+  /* demand that we have at least a full smbheader and wordcount */
+  if (len>=sizeof(struct smbheader)+1 &&
+      byte_equal(s->protocol,4,"\xffSMB")) {	/* signature needs to be there */
+    x=pkt+sizeof(smbheader);
+    for (;;) {
+      int done;
+      if (!range_arrayinbuf(pkt,len,x,(unsigned char)*x,2))
+	return -1;
+      done=(x[1]==0xff);	/* 0xff is the end marker for AndX */
+      x+=1+(unsigned char)*x*2+2;
+      if (!range_bufinbuf(pkt,len,x,uint16_read(x-2)))
+	return -1;
+      if (done) break;
+    }
+  } else
+    return -1;
+  return 0;
+}
 
 int smb_handle_SessionSetupAndX(char* pkt,unsigned long len,struct http_data* h) {
   struct smbheader* p=(struct pktheader*)pkt;
@@ -3108,6 +3197,7 @@ int smbresponse(struct http_data* h,int64 s) {
 	uint16_pack(c+2,0x41+wglen16-4);
 	write(s,c,0x41+wglen16);
 	return;
+
       case 2:
 	h->smbdialect=NTLM012;
 	c[0x24]=17;
@@ -3139,11 +3229,15 @@ int smbresponse(struct http_data* h,int64 s) {
       }
     }
     break;
+
+
   case 0x73:
     /* Session Setup AndX Request */
     if (smb_handle_SessionSetupAndX(c+4,len,h)==-1)
       return -1;
     break;
+
+
   case 0x75:
     /* Tree Connect AndX Request */
   case 0x10:
@@ -3162,6 +3256,7 @@ int smbresponse(struct http_data* h,int64 s) {
 #endif /* SUPPORT_SMB */
 
 
+#ifndef __MINGW32__
 static uid_t __uid;
 static gid_t __gid;
 
@@ -3198,6 +3293,7 @@ static int switch_uid() {
   if (setuid(__uid)) return -1;
   return 0;
 }
+#endif
 
 #ifdef SUPPORT_CGI
 /* gatling is expected to have 10000 file descriptors open.
@@ -4039,7 +4135,11 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	    io_timeout(n,next);
 #ifdef SUPPORT_HTTPS
 	} else if (H->t==HTTPSSERVER4 || H->t==HTTPSSERVER6) {
+#ifdef __MINGW32__
+	  chdir(origdir);
+#else
 	  fchdir(origdir);
+#endif
 	  if (init_serverside_tls(&h->ssl,n)) {
 	    if (logging) {
 	      char a[FMT_ULONG];
@@ -4446,8 +4546,10 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 
 static void prepare_listen(int s,void* whatever) {
   if (s!=-1) {
+#if 0
     if (socket_listen(s,16)==-1)
       panic("socket_listen");
+#endif
     io_nonblock(s);
     if (!io_fd(s))
       panic("io_fd");
@@ -4496,6 +4598,8 @@ int main(int argc,char* argv[],char* envp[]) {
   char* new_uid=0;
   char* chroot_to=0;
   uint64 prefetchquantum=0;
+  unsigned long instances=1;
+  pid_t* Instances;
 
 #ifdef SUPPORT_HTTPS
   SSL_load_error_strings();
@@ -4513,7 +4617,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
     found=0;
     for (;;) {
-      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:");
+      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:");
       if (c==-1) break;
       switch (c) {
       case 'c':
@@ -4544,8 +4648,10 @@ int main(int argc,char* argv[],char* envp[]) {
 	{
 	  int64 savedir;
 	  buffer fsb;
+#ifndef __MINGW32__
 	  if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
 	  if (new_uid) prepare_switch_uid(new_uid);
+#endif
 	  if (!io_readfile(&savedir,".")) panic("open()");
 	  buffer_init(&fsb,(void*)read,forksock[1],fsbuf,sizeof fsbuf);
 	  while (1) {
@@ -4618,6 +4724,7 @@ int main(int argc,char* argv[],char* envp[]) {
   s4=socket_tcp4();
 #endif
 
+#ifndef __MINGW32__
   signal(SIGPIPE,SIG_IGN);
 
   {
@@ -4641,6 +4748,7 @@ int main(int argc,char* argv[],char* envp[]) {
       if (setrlimit(RLIMIT_NOFILE,&rl)==-1) break;
     }
   }
+#endif
 
   byte_zero(ip,16);
   port=0; fport=0; sport=0; scope_id=0;
@@ -4656,7 +4764,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:");
+    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -4774,6 +4882,16 @@ int main(int argc,char* argv[],char* envp[]) {
 	buffer_putmflush(buffer_2,"gatling: -r needs something like http://fallback.example.com as argument!\n");
       break;
 #endif
+#ifdef SUPPORT_MULTIPROC
+    case 'N':
+      i=scan_ulong(optarg,&instances);
+      if (i==0) {
+	buffer_puts(buffer_2,"gatling: warning: could not parse instances at ");
+	buffer_puts(buffer_2,optarg+i+1);
+	buffer_putsflush(buffer_2,".\n");
+      }
+      break;
+#endif
 #ifdef SUPPORT_THREADED_OPEN
     case 'o':
 #endif
@@ -4784,7 +4902,7 @@ usage:
       buffer_putsflush(buffer_2,
 		  "usage: gatling [-hnvVtdDfFUa] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
 		  "               [-u uid] [-c dir] [-w workgroup] [-P bytes] [-O ip/port/regex]\n"
-		  "               [-r redirurl]\n"
+		  "               [-r redirurl] [-N processes]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -4804,6 +4922,9 @@ usage:
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  "\t-P n\tenable experimental prefetching code (may actually be slower)\n"
 		  "\t-l\task for password (FTP server; work around buggy proxies)\n"
+#ifdef SUPPORT_MULTIPROC
+		  "\t-N n\tfork n instances of gatling\n"
+#endif
 #ifdef SUPPORT_CGI
 		  "\t-C regex\tregex for local CGI execution (\"\\.cgi\")\n"
 #endif
@@ -4859,7 +4980,11 @@ usage:
   }
 
   {
+#ifdef __MINGW32__
+    int euid=0;
+#else
     uid_t euid=geteuid();
+#endif
     if (port==0)
       port=euid?8000:80;
     if (fport==0)
@@ -4879,12 +5004,12 @@ usage:
       if (dohttp==-1) {
 	close(s); s=-1;
       } else
-	if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
+	if (socket_bind6_reuse(s,ip,port,scope_id)==-1 || socket_listen(s,16)==-1)
 	  panic("socket_bind6_reuse for http");
 #ifdef SUPPORT_FTP
       f=socket_tcp6();
       if (doftp>=0)
-	if (socket_bind6_reuse(f,ip,fport,scope_id)==-1) {
+	if (socket_bind6_reuse(f,ip,fport,scope_id)==-1 || socket_listen(f,16)==-1) {
 	  if (doftp==1)
 	    panic("socket_bind6_reuse for ftp");
 	  buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
@@ -4894,11 +5019,11 @@ usage:
     } else {
       io_close(s); s=-1;
     }
-    if (socket_bind4_reuse(s4,ip+12,port)==-1)
+    if (socket_bind4_reuse(s4,ip+12,port)==-1 || socket_listen(s4,16)==-1)
       panic("socket_bind4_reuse");
 #ifdef SUPPORT_FTP
     if (doftp>=0)
-      if (socket_bind4_reuse(f4,ip+12,port)==-1) {
+      if (socket_bind4_reuse(f4,ip+12,port)==-1 || socket_listen(f4,16)==-1) {
 	if (doftp==1)
 	  panic("socket_bind4_reuse");
 	buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
@@ -4910,12 +5035,12 @@ usage:
       close(s);
       s=-1;
     } else
-      if (socket_bind6_reuse(s,ip,port,scope_id)==-1)
+      if (socket_bind6_reuse(s,ip,port,scope_id)==-1 || socket_listen(s,16)==-1)
 	panic("socket_bind6_reuse");
     s4=-1;
 #ifdef SUPPORT_FTP
     if (doftp>=0)
-      if (socket_bind6_reuse(f,ip,port,scope_id)==-1) {
+      if (socket_bind6_reuse(f,ip,port,scope_id)==-1 || socket_listen(f,16)==-1) {
 	if (doftp==1)
 	  panic("socket_bind6_reuse");
 	buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
@@ -4931,12 +5056,12 @@ usage:
     close(s);
     s=-1;
   } else
-    if (socket_bind6_reuse(s,ip,port,0)==-1)
+    if (socket_bind6_reuse(s,ip,port,0)==-1 || socket_listen(s,16)==-1)
       panic("socket_bind6_reuse");
 #ifdef SUPPORT_FTP
   if (doftp>=0) {
     f=socket_tcp6();
-    if (socket_bind6_reuse(f,ip,fport,scope_id)==-1) {
+    if (socket_bind6_reuse(f,ip,fport,scope_id)==-1 || socket_listen(f,16)==-1) {
       if (doftp==1)
 	panic("socket_bind6_reuse");
       buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
@@ -4947,7 +5072,7 @@ usage:
 #ifdef SUPPORT_SMB
   if (dosmb>=0) {
     smbs=socket_tcp6();
-    if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1) {
+    if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1 || socket_listen(smbs,16)) {
       if (dosmb==1)
 	panic("socket_bind6_reuse");
       buffer_putsflush(buffer_2,"warning: could not bind to SMB port; SMB will be unavailable.\n");
@@ -4958,7 +5083,7 @@ usage:
 #ifdef SUPPORT_HTTPS
   if (dohttps>=0) {
     httpss=socket_tcp6();
-    if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1) {
+    if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1 || socket_listen(httpss,16)) {
       if (dohttps==1)
 	panic("socket_bind6_reuse");
       buffer_putsflush(buffer_2,"warning: could not bind to HTTPS port; HTTPS will be unavailable.\n");
@@ -4968,6 +5093,7 @@ usage:
 #endif
 #endif
 
+#ifndef __MINGW32__
   if (prepare_switch_uid(new_uid)==-1)
     goto usage;
   if (chroot_to) {
@@ -4978,9 +5104,36 @@ usage:
   }
   if (new_uid && switch_uid()==-1)
     panic("switch_uid");
+#endif
 
+#ifdef __MINGW32__
+  _getcwd(origdir,sizeof(origdir));
+#else
   if (!io_readfile(&origdir,".")) panic("open()");
   /* get fd for . so we can always fchdir back */
+#endif
+
+#ifdef SUPPORT_MULTIPROC
+  if (instances>1) {
+    unsigned long i;
+    --instances;
+    if (instances>100) instances=100;
+    Instances=alloca(instances*sizeof(pid_t));
+    for (i=0; i<instances; ++i) {
+      if ((Instances[i]=fork()) == -1)
+	panic("fork failed");
+      else if (Instances[i] == 0) {
+	instances=0;
+	break;
+      }
+    }
+  } else {
+#endif
+    Instances=0;
+    instances=0;
+#ifdef SUPPORT_MULTIPROC
+  }
+#endif
 
   {
     char buf[IP6_FMT];
@@ -5017,6 +5170,9 @@ usage:
     }
 #endif
   }
+
+#ifdef SUPPORT_MULTIPROC
+#endif
 
 #ifdef __broken_itojun_v6__
   prepare_listen(s,&ct);
@@ -5250,6 +5406,13 @@ usage:
 	handle_write_misc(i,h,prefetchquantum);
     }
   }
+#ifdef SUPPORT_MULTIPROC
+  if (instances) {
+    unsigned long i;
+    for (i=0; i<instances; ++i)
+      kill(Instances[i],15);
+  }
+#endif
   io_finishandshutdown();
   return 0;
 }
