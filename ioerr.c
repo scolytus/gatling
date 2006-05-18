@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include "havealloca.h"
+#include "ndelay.h"
 
 static void carp(const char* routine) {
   buffer_puts(buffer_2,"ioerr: ");
@@ -39,6 +40,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
     s=socket_tcp6();
     if (s==-1)
       panic("socket_tcp6()");
+    ndelay_off(s);
     if (bindport) {
       for (;;) {
 	int r=socket_bind6_reuse(s,V6any,bindport,0);
@@ -57,6 +59,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
     s=socket_tcp4();
     if (s==-1)
       panic("socket_tcp4()");
+    ndelay_off(s);
     if (bindport) {
       for (;;) {
 	int r=socket_bind4_reuse(s,V6any,bindport);

@@ -4546,13 +4546,11 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 
 static void prepare_listen(int s,void* whatever) {
   if (s!=-1) {
-#if 0
-    if (socket_listen(s,16)==-1)
-      panic("socket_listen");
-#endif
     io_nonblock(s);
     if (!io_fd(s))
       panic("io_fd");
+    if (socket_listen(s,16)==-1)
+      panic("socket_listen");
     io_setcookie(s,whatever);
     io_wantread(s);
   }
@@ -5114,9 +5112,29 @@ usage:
 #endif
 
 #ifdef SUPPORT_MULTIPROC
+
   if (instances>1) {
     unsigned long i;
     --instances;
+
+#ifdef __broken_itojun_v6__
+    prepare_listen(s,&ct);
+    prepare_listen(s4,&ct4);
+    prepare_listen(f,&fct);
+    prepare_listen(f4,&fct4);
+#else
+    prepare_listen(s,&ct);
+#ifdef SUPPORT_FTP
+    prepare_listen(f,&fct);
+#endif
+#ifdef SUPPORT_SMB
+    prepare_listen(smbs,&sct);
+#endif
+#ifdef SUPPORT_HTTPS
+    prepare_listen(httpss,&httpsct);
+#endif
+#endif
+
     if (instances>100) instances=100;
     Instances=alloca(instances*sizeof(pid_t));
     for (i=0; i<instances; ++i) {
@@ -5131,6 +5149,25 @@ usage:
 #endif
     Instances=0;
     instances=0;
+
+#ifdef __broken_itojun_v6__
+    prepare_listen(s,&ct);
+    prepare_listen(s4,&ct4);
+    prepare_listen(f,&fct);
+    prepare_listen(f4,&fct4);
+#else
+    prepare_listen(s,&ct);
+#ifdef SUPPORT_FTP
+    prepare_listen(f,&fct);
+#endif
+#ifdef SUPPORT_SMB
+    prepare_listen(smbs,&sct);
+#endif
+#ifdef SUPPORT_HTTPS
+    prepare_listen(httpss,&httpsct);
+#endif
+#endif
+
 #ifdef SUPPORT_MULTIPROC
   }
 #endif
@@ -5170,27 +5207,6 @@ usage:
     }
 #endif
   }
-
-#ifdef SUPPORT_MULTIPROC
-#endif
-
-#ifdef __broken_itojun_v6__
-  prepare_listen(s,&ct);
-  prepare_listen(s4,&ct4);
-  prepare_listen(f,&fct);
-  prepare_listen(f4,&fct4);
-#else
-  prepare_listen(s,&ct);
-#ifdef SUPPORT_FTP
-  prepare_listen(f,&fct);
-#endif
-#ifdef SUPPORT_SMB
-  prepare_listen(smbs,&sct);
-#endif
-#ifdef SUPPORT_HTTPS
-  prepare_listen(httpss,&httpsct);
-#endif
-#endif
 
   connections=1;
 

@@ -21,6 +21,7 @@
 #include <sys/uio.h>
 #include <sys/stat.h>
 #include "havealloca.h"
+#include "ndelay.h"
 
 char* todel;
 
@@ -51,6 +52,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   int s;
   if (v6) {
     s=socket_tcp6();
+    ndelay_off(s);
     if (socket_connect6(s,ip,port,scope_id)==-1) {
       carp("socket_connect6");
       close(s);
@@ -58,6 +60,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
     }
   } else {
     s=socket_tcp4();
+    ndelay_off(s);
     if (socket_connect4(s,ip+12,port)==-1) {
       carp("socket_connect4");
       close(s);
@@ -569,6 +572,7 @@ again:
 	int i,j;
 	int srv=socket_tcp4();
 	if (srv==-1) panic("socket");
+	ndelay_off(srv);
 	socket_listen(srv,1);
 	if (socket_local4(s,ip2,0)) panic("getsockname");
 	if (socket_local4(srv,0,&port)) panic("getsockname");
@@ -592,6 +596,7 @@ again:
 	int i;
 	int srv=socket_tcp6();
 	if (srv==-1) panic("socket");
+	ndelay_off(srv);
 	socket_listen(srv,1);
 	if (socket_local6(s,ip2,0,0)) panic("getsockname");
 	if (socket_local6(srv,0,&port,0)) panic("getsockname");
@@ -627,6 +632,7 @@ again:
 	  }
 	}
 	if ((srv=socket_tcp4())==-1) panic("socket");
+	ndelay_off(srv);
 	if (verbose) buffer_putsflush(buffer_1,"connecting... ");
 	if (socket_connect4(srv,ip+12,port)==-1) panic("connect");
 	if (verbose) buffer_putsflush(buffer_1,"done.\n");
@@ -645,6 +651,7 @@ again:
 	  }
 	}
 	if ((srv=socket_tcp6())==-1) panic("socket");
+	ndelay_off(srv);
 	if (verbose) buffer_putsflush(buffer_1,"connecting... ");
 	if (socket_connect6(srv,ip,port,scope_id)==-1) panic("connect");
 	if (verbose) buffer_putsflush(buffer_1,"done.\n");

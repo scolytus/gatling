@@ -25,7 +25,6 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
     if (s==-1) {
       s=socket_tcp6();
       if (s==-1) return -1;
-      io_nonblock(s);
     }
     if (socket_connect6(s,ip,port,scope_id)==-1) {
       if (errno==EAGAIN || errno==EINPROGRESS || errno==EISCONN)
@@ -38,7 +37,6 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
     if (s==-1) {
       s=socket_tcp4();
       if (s==-1) return -1;
-      io_nonblock(s);
     }
     if (socket_connect4(s,ip+12,port)==-1) {
       if (errno==EAGAIN || errno==EINPROGRESS || errno==EISCONN)
