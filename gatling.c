@@ -555,6 +555,7 @@ punt:
 	  io_close(s);
 	  return -1;
 	}
+	io_block(s);
 	io_eagain(s);
 	if (socket_connect6(s,x->ip,x->port,x->scope_id)==-1)
 	  if (errno!=EINPROGRESS)
@@ -2738,7 +2739,6 @@ void ftpresponse(struct http_data* h,int64 s) {
       h->hdrbuf="425 socket() failed.\r\n";
       goto ABEND;
     }
-    io_nonblock(h->buddy);
     if (socket_bind6_reuse(h->buddy,h->myip,0,h->myscope_id)==-1) {
 closeandgo:
       io_close(h->buddy);
@@ -2847,7 +2847,6 @@ syntaxerror:
       h->hdrbuf="425 socket() failed.\r\n";
       goto ABEND;
     }
-    io_nonblock(h->buddy);
     if (byte_diff(h->peerip,16,ip)) {
       h->hdrbuf="425 Sorry, but I will only connect back to your own IP.\r\n";
       io_close(h->buddy);
@@ -3948,7 +3947,6 @@ pasverror:
     }
     h->buddy=n;
     io_setcookie(n,H);
-    io_nonblock(n);
     io_close(i);
     H->t=FTPSLAVE;
 #ifdef TCP_NODELAY
@@ -4100,7 +4098,6 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
       }
     }
 
-    io_nonblock(n);
     if (io_fd(n)) {
       struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
       if (h) {
@@ -4546,7 +4543,6 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 
 static void prepare_listen(int s,void* whatever) {
   if (s!=-1) {
-    io_nonblock(s);
     if (!io_fd(s))
       panic("io_fd");
     if (socket_listen(s,16)==-1)
