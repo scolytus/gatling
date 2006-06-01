@@ -35,10 +35,13 @@ struct node** lookup(char* word) {
   return x;
 }
 
+char printfbuf[4096];
+
 int main() {
   char line[8192];
   char* dat;
   char* timestamp;
+  setvbuf(stdout,printfbuf,_IOFBF,sizeof printfbuf);
   while (fgets(line,sizeof(line),stdin)) {
     int tslen;
     /* chomp */
