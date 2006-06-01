@@ -6,7 +6,7 @@ MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
 TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling \
-pthreadbench cgi getlinks rellink
+pthreadbench cgi getlinks rellink acc
 TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
 
 all: $(TARGETS) $(TARGETS2)
@@ -59,6 +59,9 @@ endif
 ifneq ($(REDIRECT),)
 CFLAGS+="-DREDIRECT=\"$(REDIRECT)\""
 endif
+
+acc: acc.c
+	$(CC) -o $@ $< $(CFLAGS) $(LDFLAGS)
 
 CC:=$(DIET) $(CC)
 
