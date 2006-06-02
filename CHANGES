@@ -19,6 +19,9 @@
   dl can now follow 301, 302 and 302
   fix .gz handling
   tell download accelerators that we support ranges
+  add acc (convert gatling log to one-line-per-request)
+  add hcat (like cat, but sorts multilog style @[timestamp] filenames
+    right)
 
 0.8:
   fix pipelining bug
