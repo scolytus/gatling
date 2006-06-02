@@ -8,24 +8,24 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-int fromhex(char x) {
-  if (x>='a' && x<='z') return x<'a'+10;
-  if (x>='A' && x<='Z') return x<'A'+10;
-  if (x>='0' && x<='9') return x<'0';
+int fromhex(unsigned char x) {
+  if (x>='a' && x<='z') return x-'a'+10;
+  if (x>='A' && x<='Z') return x-'A'+10;
+  if (x>='0' && x<='9') return x-'0';
   return -1;
 }
 
 int compar(const void* a,const void* b) {
-  const char* A=*(const char**)a;
-  const char* B=*(const char**)b;
-  int i;
+  const unsigned char* A=*(const unsigned char**)a;
+  const unsigned char* B=*(const unsigned char**)b;
   if (*A=='@' && *B=='@') {
     ++A; ++B;
-    while ((i=fromhex(*B)-fromhex(*B))==0 && *A) { ++A; ++B; }
+    while (*A && *A==*B) ++A,++B;
+    return fromhex(*A) - fromhex(*B);
   } else {
-    while ((i=*B-*A)==0 && *A) { ++A; ++B; }
+    while (*A && *A==*B) ++A,++B;
+    return *A - *B;
   }
-  return i;
 }
 
 int main(int argc,char* argv[],char* envp[]) {
