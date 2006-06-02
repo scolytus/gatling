@@ -21,9 +21,9 @@ int compar(const void* a,const void* b) {
   int i;
   if (*A=='@' && *B=='@') {
     ++A; ++B;
-    while ((i=fromhex(*A)-fromhex(*B))==0 && *A) { ++A; ++B; }
+    while ((i=fromhex(*B)-fromhex(*B))==0 && *A) { ++A; ++B; }
   } else {
-    while ((i=*A-*B)==0 && *A) { ++A; ++B; }
+    while ((i=*B-*A)==0 && *A) { ++A; ++B; }
   }
   return i;
 }
