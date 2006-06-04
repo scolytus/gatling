@@ -22,6 +22,8 @@
   add acc (convert gatling log to one-line-per-request)
   add hcat (like cat, but sorts multilog style @[timestamp] filenames
     right)
+  add referrer (extract nice external referrer statistics from acc
+    output, before or after tai64nlocal)
 
 0.8:
   fix pipelining bug
