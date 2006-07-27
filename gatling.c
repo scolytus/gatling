@@ -100,7 +100,9 @@
 #include <string.h>
 #include <ctype.h>
 #include "havealloca.h"
+#include "havesetresuid.h"
 
+unsigned long instances=1;
 unsigned long timeout_secs=23;
 tai6464 now,next;
 
@@ -138,7 +140,6 @@ static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 
 #ifdef SUPPORT_CGI
 static int forksock[2];
-MUTEX_VAR(cgi_lock)
 #endif
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
@@ -585,7 +586,6 @@ punt:
 	char ra[IP6_FMT];
 	req[strlen(req)]=' ';
 	d->keepalive=0;
-	LOCK(cgi_lock);
 	ra[fmt_ip6c(ra,d->peerip)]=0;
 	a=strlen(req); write(forksock[0],&a,4);
 	a=strlen(dir); write(forksock[0],&a,4);
@@ -603,13 +603,11 @@ punt:
 	  char* c=alloca(len+1);
 	  read(forksock[0],c,len);
 	  c[len]=0;
-	  UNLOCK(cgi_lock);
 	  httperror(d,"502 Gateway Broken",c);
 	  free(h);
 	  return -1;
 	} else {
 	  s=io_receivefd(forksock[0]);
-	  UNLOCK(cgi_lock);
 	  if (s==-1) {
 	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
 	    free(h);
@@ -622,7 +620,7 @@ punt:
 	    return -1;
 	  }
 	}
-	h->t=PROXYPOST;
+	d->t=HTTPPOST;
 	if (logging) {
 	  char bufsfd[FMT_ULONG];
 	  char bufs[FMT_ULONG];
@@ -658,25 +656,33 @@ punt:
 	  } else {
 	    /* there is still data to copy */
 
-#if 0
-	    char* data=array_start(&d->r);
-	    long i,j,found;
-	    j=array_bytes(&d->r);
-	    found=-1;
-	    for (i=0; i<j; ++i)
-	      if (byte_equal(data+i,4,"\r\n\r\n")) {
-		found=i+4; break;
-	      }
-	    assert(found!=-1);	/* we shouldn't be here if the header was not complete */
-	    if (found!=-1) {
-	    }
-#endif
-	    /* TODO: check whether we already have data to read */
-
 	    io_wantread(sockfd);
 	    io_dontwantwrite(sockfd);
 	    io_wantread(s);
-	    if (header_complete(d) < array_bytes(&d->r))	/* FIXME */
+	    /* If the client sent "Expect: 100-continue", do so */
+	    {
+	      char* e=http_header(d,"Expect");
+	      if (e && byte_equal(e,4,"100-")) {
+		const char contmsg[]="HTTP/1.1 100 Continue\r\n\r\n";
+		/* if this fails, tough luck.  I'm not bloating my state
+		 * engine for this crap. */
+		io_trywrite(sockfd,contmsg,sizeof(contmsg)-1);
+	      }
+	    }
+
+	    /* remove HTTP header, want only POST data in array */
+	    {
+	      unsigned long l=header_complete(d);	/* we know the header is complete, or we wouldn't be here */
+	      unsigned long m=array_bytes(&d->r);
+	      if (m) --m; /* we added a \0 */
+	      d->t=PROXYPOST;
+	      if (m>l) {
+		byte_copyr(array_start(&d->r),m-l,array_get(&d->r,1,m-l));
+		array_truncate(&d->r,1,m-l);
+	      } else
+		array_trunc(&d->r);
+	    }
+	    if (array_bytes(&d->r))
 	      io_wantwrite(s);
 	    else
 	      io_dontwantwrite(s);
@@ -880,8 +886,8 @@ static int open_for_reading(int64* fd,const char* name,struct stat* SS) {
       *fd=-1;
       return 0;
     }
-    return 1;
 #endif
+    return 1;
   }
   return 0;
 }
@@ -939,11 +945,11 @@ static int header_complete(struct http_data* r) {
   long i;
   long l=array_bytes(&r->r);
   const char* c=array_start(&r->r);
+  if (r->t==HTTPREQUEST || r->t==HTTPPOST
 #ifdef SUPPORT_HTTPS
-  if (r->t==HTTPREQUEST || r->t==HTTPSREQUEST)
-#else
-  if (r->t==HTTPREQUEST)
+      || r->t==HTTPSREQUEST
 #endif
+     )
   {
     for (i=0; i+1<l; ++i) {
       if (c[i]=='\n' && c[i+1]=='\n')
@@ -1515,16 +1521,19 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     }
   }
 #ifdef __MINGW32__
+  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
   chdir(origdir);
 #else
   fchdir(origdir);
 #endif
-  if (virtual_hosts>=0) {
+
+  if (virtual_hosts>=0)
     if (chdir(dir=s)==-1)
       if (chdir(dir="default")==-1)
-	if (virtual_hosts==1)
+	if (virtual_hosts==1) {
+	  printf("chdir FAILED and virtual_hosts is 1\n");
 	  return -1;
-  }
+	}
   while (Filename[1]=='/') ++Filename;
 
 #ifdef SUPPORT_HTACCESS
@@ -1708,10 +1717,12 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       Filename[i]=0;
     }
   }
+#ifndef __MINGW32__
   if (S_ISDIR(ss->st_mode)) {
     io_close(fd);
     return -1;
   }
+#endif
   return fd;
 }
 
@@ -1989,6 +2000,8 @@ e404:
 	}
 #ifdef SUPPORT_PROXY
       } else if (fd==-3) {
+#if 0
+	/* bogus */
 	struct http_data* x=io_getcookie(h->buddy);
 	if (x) {
 	  char *c=array_start(&h->r);
@@ -1996,6 +2009,7 @@ e404:
 	  array_catb(&x->r,array_start(&h->r),headerlen);
 	}
 	io_dontwantread(s);
+#endif
 	return;
 #endif
       } else {
@@ -2166,6 +2180,7 @@ static int ftp_vhost(struct http_data* h) {
   y[i]=0;
 
 #ifdef __MINGW32__
+  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
   chdir(origdir);
 #else
   fchdir(origdir);
@@ -3287,9 +3302,15 @@ static int prepare_switch_uid(const char* new_uid) {
 }
 
 static int switch_uid() {
+#ifdef LIBC_HAS_SETRESUID
+  if (setresgid(__gid,__gid,__gid)) return -1;
+  if (setgroups(1,&__gid)) return -1;
+  if (setresuid(__uid,__uid,__uid)) return -1;
+#else
   if (setgid(__gid)) return -1;
   if (setgroups(1,&__gid)) return -1;
   if (setuid(__uid)) return -1;
+#endif
   return 0;
 }
 #endif
@@ -4133,7 +4154,8 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #ifdef SUPPORT_HTTPS
 	} else if (H->t==HTTPSSERVER4 || H->t==HTTPSSERVER6) {
 #ifdef __MINGW32__
-	  chdir(origdir);
+	  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
+//	  chdir(origdir);
 #else
 	  fchdir(origdir);
 #endif
@@ -4183,6 +4205,9 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	io_close(n);
     } else
       io_close(n);
+#ifdef SUPPORT_MULTIPROC
+    if (instances>1) break;
+#endif
   }
   if (errno==EAGAIN)
     io_eagain(i);
@@ -4545,8 +4570,6 @@ static void prepare_listen(int s,void* whatever) {
   if (s!=-1) {
     if (!io_fd(s))
       panic("io_fd");
-    if (socket_listen(s,16)==-1)
-      panic("socket_listen");
     io_setcookie(s,whatever);
     io_wantread(s);
   }
@@ -4592,7 +4615,6 @@ int main(int argc,char* argv[],char* envp[]) {
   char* new_uid=0;
   char* chroot_to=0;
   uint64 prefetchquantum=0;
-  unsigned long instances=1;
   pid_t* Instances;
 
 #ifdef SUPPORT_HTTPS
@@ -5102,6 +5124,7 @@ usage:
 
 #ifdef __MINGW32__
   _getcwd(origdir,sizeof(origdir));
+  printf("origdir is \"%s\"\n",origdir);
 #else
   if (!io_readfile(&origdir,".")) panic("open()");
   /* get fd for . so we can always fchdir back */
@@ -5112,6 +5135,17 @@ usage:
   if (instances>1) {
     unsigned long i;
     --instances;
+
+    if (instances>100) instances=100;
+    Instances=alloca(instances*sizeof(pid_t));
+    for (i=0; i<instances; ++i) {
+      if ((Instances[i]=fork()) == -1)
+	panic("fork failed");
+      else if (Instances[i] == 0) {
+	instances=0;
+	break;
+      }
+    }
 
 #ifdef __broken_itojun_v6__
     prepare_listen(s,&ct);
@@ -5131,16 +5165,6 @@ usage:
 #endif
 #endif
 
-    if (instances>100) instances=100;
-    Instances=alloca(instances*sizeof(pid_t));
-    for (i=0; i<instances; ++i) {
-      if ((Instances[i]=fork()) == -1)
-	panic("fork failed");
-      else if (Instances[i] == 0) {
-	instances=0;
-	break;
-      }
-    }
   } else {
 #endif
     Instances=0;

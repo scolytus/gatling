@@ -15,13 +15,17 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/time.h>
-#include <sys/resource.h>
 #include <stdlib.h>
 #include <utime.h>
+#ifdef __MINGW32__
+#include <windows.h>
+#include <fcntl.h>
+#else
+#include <sys/resource.h>
 #include <sys/uio.h>
+#endif
 #include <sys/stat.h>
 #include "havealloca.h"
-#include "ndelay.h"
 
 char* todel;
 
@@ -51,16 +55,14 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   int v6=byte_diff(ip,12,V4mappedprefix);
   int s;
   if (v6) {
-    s=socket_tcp6();
-    ndelay_off(s);
+    s=socket_tcp6b();
     if (socket_connect6(s,ip,port,scope_id)==-1) {
       carp("socket_connect6");
       close(s);
       return -1;
     }
   } else {
-    s=socket_tcp4();
-    ndelay_off(s);
+    s=socket_tcp4b();
     if (socket_connect4(s,ip+12,port)==-1) {
       carp("socket_connect4");
       close(s);
@@ -206,11 +208,19 @@ static int ftpcmd(int s,buffer* b,const char* cmd) {
 static int ftpcmd2(int s,buffer* b,const char* cmd,const char* param) {
   int l=str_len(cmd);
   int l2=str_len(param);
+#ifdef __MINGW32__
+  char* buf=alloca(l+l2+3);
+  memcpy(buf,cmd,l);
+  memcpy(buf+l,param,l2);
+  memcpy(buf+l+l2,"\r\n",2);
+  if (write(s,buf,l+l2+2)!=l+l2+2) panic("ftp command write error");
+#else
   struct iovec v[3];
   v[0].iov_base=(char*)cmd;	v[0].iov_len=l;
   v[1].iov_base=(char*)param;	v[1].iov_len=l2;
   v[2].iov_base="\r\n";		v[2].iov_len=2;
   if (writev(s,v,3)!=l+l2+2) panic("ftp command write error");
+#endif
   return readftpresponse(b);
 }
 
@@ -266,7 +276,9 @@ int main(int argc,char* argv[]) {
   int skip;
   buffer ftpbuf;
 
+#ifndef __MINGW32__
   signal(SIGPIPE,SIG_IGN);
+#endif
 
   for (;;) {
     int c=getopt(argc,argv,"i:ko4nvra:O:U:R:");
@@ -307,6 +319,7 @@ int main(int argc,char* argv[]) {
       referer=optarg;
       break;
     case 'a':
+#ifndef __MINGW32__
       {
 	unsigned long n;
 	signal(SIGALRM,alarm_handler);
@@ -314,6 +327,7 @@ int main(int argc,char* argv[]) {
 	  alarm(n);
 	break;
       }
+#endif
     case '?':
 usage:
       buffer_putsflush(buffer_2,"usage: dl [-i file] [-no4v] url\n"
@@ -330,6 +344,9 @@ usage:
       return 0;
     }
   }
+#ifdef __MINGW32__
+  _fmode=O_BINARY;
+#endif
 
   if (!argv[optind]) goto usage;
 again:
@@ -570,9 +587,8 @@ again:
       char buf[200];
       if (usev4) {
 	int i,j;
-	int srv=socket_tcp4();
+	int srv=socket_tcp4b();
 	if (srv==-1) panic("socket");
-	ndelay_off(srv);
 	socket_listen(srv,1);
 	if (socket_local4(s,ip2,0)) panic("getsockname");
 	if (socket_local4(srv,0,&port)) panic("getsockname");
@@ -594,9 +610,8 @@ again:
 	if (byte_diff(ip3,4,ip+12)) panic("PORT stealing attack!\n");
       } else {
 	int i;
-	int srv=socket_tcp6();
+	int srv=socket_tcp6b();
 	if (srv==-1) panic("socket");
-	ndelay_off(srv);
 	socket_listen(srv,1);
 	if (socket_local6(s,ip2,0,0)) panic("getsockname");
 	if (socket_local6(srv,0,&port,0)) panic("getsockname");
@@ -631,8 +646,7 @@ again:
 	      port=port*256+j;
 	  }
 	}
-	if ((srv=socket_tcp4())==-1) panic("socket");
-	ndelay_off(srv);
+	if ((srv=socket_tcp4b())==-1) panic("socket");
 	if (verbose) buffer_putsflush(buffer_1,"connecting... ");
 	if (socket_connect4(srv,ip+12,port)==-1) panic("connect");
 	if (verbose) buffer_putsflush(buffer_1,"done.\n");
@@ -650,8 +664,7 @@ again:
 	    }
 	  }
 	}
-	if ((srv=socket_tcp6())==-1) panic("socket");
-	ndelay_off(srv);
+	if ((srv=socket_tcp6b())==-1) panic("socket");
 	if (verbose) buffer_putsflush(buffer_1,"connecting... ");
 	if (socket_connect6(srv,ip,port,scope_id)==-1) panic("connect");
 	if (verbose) buffer_putsflush(buffer_1,"done.\n");

@@ -71,7 +71,7 @@ pthreadbench: pthreadbench.o
 forksbench: forkbench.o
 	$(CC) -static -o $@ forkbench.o $(LDFLAGS) $(LDLIBS)
 
-gatling.o: version.h
+gatling.o: version.h havesetresuid.h
 
 tlsgatling: gatling.c ssl.o
 	-$(CC) -o $@ gatling.c ssl.o $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
@@ -98,8 +98,9 @@ version.h: CHANGES
 libsocket: trysocket.c
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
 	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
-	fi; fi; fi > libsocket
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; else \
+	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lwsock32 >/dev/null 2>&1; then echo "-lwsock32"; \
+	fi; fi; fi; fi > libsocket
 	rm -f trysocket
 
 libiconv: tryiconv.c
@@ -113,6 +114,11 @@ libcrypt: trycrypt.c
 	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c -lcrypt >/dev/null 2>&1; then echo "-lcrypt"; \
 	fi; fi > libcrypt
 	rm -f trycrypt
+
+havesetresuid.h: trysetresuid.c
+	-rm -f $@
+	if $(DIET) $(CC) $(CFLAGS) -c $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
+	-rm -f tryresuid.o
 
 dummy.c:
 	touch $@
@@ -135,7 +141,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1 $(DESTDIR)$(man1dir)/bench.1
 
 clean:
-	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a libiconv libcrypt
+	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h
 
 VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
 CURNAME=$(notdir $(shell pwd))

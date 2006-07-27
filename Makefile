@@ -58,7 +58,7 @@ cgi: cgi.o
 getlinks: getlinks.o
 	$(CC) -o $@ getlinks.o $(LDFLAGS)
 
-gatling.o: version.h
+gatling.o: version.h havesetresuid.h
 
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
@@ -88,6 +88,10 @@ libcrypt: trycrypt.c
 	fi; fi > libcrypt
 	rm -f trycrypt
 
+havesetresuid.h: trysetresuid.c
+	-rm -f $@
+	if $(DIET) $(CC) $(CFLAGS) -c $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
+	-rm -f tryresuid.o
 
 install: gatling dl getlinks
 	install -d $(BINDIR) $(man1dir)
@@ -99,7 +103,7 @@ uninstall:
 	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1 $(man1dir)/bench.1
 
 clean:
-	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libcrypt libiconv
+	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h
 
 cert: server.pem
 

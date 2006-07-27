@@ -19,6 +19,9 @@ void usage() {
         "       [-C cookie-file] [http://]host[:port]/uri");
 }
 
+unsigned long r[10];
+unsigned long kaputt;
+
 static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
   int v6=byte_diff(ip,12,V4mappedprefix);
   if (v6) {
@@ -29,7 +32,9 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
     if (socket_connect6(s,ip,port,scope_id)==-1) {
       if (errno==EAGAIN || errno==EINPROGRESS || errno==EISCONN)
 	return s;
-      carpsys("socket_connect6");
+      ++kaputt;
+      if (errno!=ECONNREFUSED && errno!=ECONNRESET)
+	carpsys("socket_connect6");
       close(s);
       return -1;
     }
@@ -41,7 +46,9 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id,int s) {
     if (socket_connect4(s,ip+12,port)==-1) {
       if (errno==EAGAIN || errno==EINPROGRESS || errno==EISCONN)
 	return s;
-      carpsys("socket_connect4");
+      ++kaputt;
+      if (errno!=ECONNREFUSED && errno!=ECONNRESET)
+	carpsys("socket_connect6");
       close(s);
       return -1;
     }
@@ -425,7 +432,7 @@ int main(int argc,char* argv[]) {
 	} else if (l==-3) {
 	  ++errors;
 	  if (v) write(1,"!",1);
-	  carpsys("read");
+//	  carpsys("read");
 	}
       } else {
 	bytes+=l;
@@ -436,6 +443,13 @@ int main(int argc,char* argv[]) {
 	  /* OK, so this is a very simplistic header parser.  No
 	   * buffering.  At all.  We expect the Content-Length header to
 	   * come in one piece. */
+	  if (l>10 && !memcmp(buf,"HTTP/1.",7)) {
+	    if (buf[9]>='0' && buf[9]<='9')
+	      r[buf[9]-'0']++;
+	    else {
+	      write(1,buf,15); write(1,"\n",1);
+	    }
+	  }
 	  expected[j]=-2;
 	  if (!done) {
 	    for (k=0; k<l; ++k)
@@ -504,6 +518,7 @@ int main(int argc,char* argv[]) {
     char g[FMT_ULONG];
     char h[FMT_ULONG];
     char i[FMT_ULONG];
+    char j[FMT_ULONG];
     unsigned long long l;
     a[fmt_ulong(a,now.sec.x)]=0;
     b[fmt_ulong0(b,(now.nano%1000000000)/100000,4)]=0;
@@ -532,17 +547,28 @@ int main(int argc,char* argv[]) {
     g[fmt_ulong(g,l/10)]=0;
     h[fmt_ulong(h,c)]=0;
     i[fmt_ulong(i,K)]=0;
+    j[fmt_ulong(j,kaputt)]=0;
 
     if (server[0]) msg("Server: ",server);
     if (report) {
       errmsg_iam(0);
-      msg("req\terr\tconcur\tkeep\tkbytes\tsec\ttput\tr/s");
-      msg(C,"\t",d,"\t",h,"\t",i,"\t",e,"\t",a,".",b,"\t",f,"\t",g);
+      msg("req\terr\tconcur\tkeep\tkbytes\tsec\ttput\tr/s\treset");
+      msg(C,"\t",d,"\t",h,"\t",i,"\t",e,"\t",a,".",b,"\t",f,"\t",g,"\t",j);
     } else {
       msg(C," requests, ",d," errors.");
       msg(e," bytes in ",a,".",b," seconds.");
       msg("Throughput: ",f);
       msg("Requests per second: ",g);
+      msg("Connection refused/reset by peer: ",j);
+    }
+
+    {
+      int i;
+      for (i=0; i<9; ++i) {
+	a[fmt_ulong(a,r[i])]=0;
+	b[0]=i+'0'; b[1]=0;
+	msg(b,"xx: ",a);
+      }
     }
   }
 
