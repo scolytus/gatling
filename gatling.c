@@ -1090,6 +1090,7 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "md5",	"text/plain" },
   { "wmv",	"video/x-ms-wmv" },
   { "mp4",	"video/mp4" },
+  { "nzb",	"application/x-nzb" },
   { 0 } };
 
 const char* mimetype(const char* filename,int fd) {
