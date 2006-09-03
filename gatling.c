@@ -3958,6 +3958,7 @@ pasverror:
     io_close(i);
   } else {
     if (!io_fd(n)) goto pasverror;
+    io_nonblock(n);
     if (logging) {
       buffer_puts(buffer_1,"pasv_accept ");
       buffer_putulong(buffer_1,i);
@@ -4123,6 +4124,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
     if (io_fd(n)) {
       struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
       if (h) {
+	io_nonblock(n);
 	H->sent=H->received=0;
 	if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
 #ifdef SUPPORT_SMB
