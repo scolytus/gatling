@@ -543,7 +543,7 @@ int main(int argc,char* argv[]) {
       strcpy(f,"n/a");
 
     l = (now.sec.x * 1000) + now.nano/1000000;
-    l = (done*10000) / l;
+    l = l ? (done*10000) / l : 0;
     g[fmt_ulong(g,l/10)]=0;
     h[fmt_ulong(h,c)]=0;
     i[fmt_ulong(i,K)]=0;
