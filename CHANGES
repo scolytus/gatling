@@ -25,6 +25,7 @@
   add referrer (extract nice external referrer statistics from acc
     output, before or after tai64nlocal)
   use setresuid and setresgid if available
+  for HEAD, suppress body of error messages (Andreas Krennmair)
 
 0.8:
   fix pipelining bug

@@ -477,8 +477,8 @@ static int add_proxy(const char* c) {
 
 static char* http_header(struct http_data* r,char* h);
 int buffer_putlogstr(buffer* b,const char* s);
-void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm);
-void httperror(struct http_data* r,const char* title,const char* message);
+void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm,int nobody);
+void httperror(struct http_data* r,const char* title,const char* message,int nobody);
 static int header_complete(struct http_data* r);
 
 static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d,int isexec,const char* args) {
@@ -981,7 +981,7 @@ static int header_complete(struct http_data* r) {
 
 static char oom[]="HTTP/1.0 500 internal error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nout of memory\n";
 
-void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm) {
+void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm,int nobody) {
   char* c;
   if (r->t==HTTPSERVER4 || r->t==HTTPSERVER6 || r->t==HTTPREQUEST
 #ifdef SUPPORT_HTTPS
@@ -1007,11 +1007,14 @@ void httperror_realm(struct http_data* r,const char* title,const char* message,c
 	c+=fmt_str(c,realm);
 	c+=fmt_str(c,"\"");
       }
-      c+=fmt_str(c,"\r\n\r\n<title>");
-      c+=fmt_str(c,title+4);
-      c+=fmt_str(c,"</title>\n");
-      c+=fmt_str(c,message);
-      c+=fmt_str(c,"\n");
+      c+=fmt_str(c,"\r\n\r\n");
+      if (!nobody) {
+	c+=fmt_str(c,"<title>");
+	c+=fmt_str(c,title+4);
+	c+=fmt_str(c,"</title>\n");
+	c+=fmt_str(c,message);
+	c+=fmt_str(c,"\n");
+      }
       r->hlen=c - r->hdrbuf;
       iob_addbuf_free(&r->iob,r->hdrbuf,r->hlen);
     }
@@ -1025,8 +1028,8 @@ void httperror_realm(struct http_data* r,const char* title,const char* message,c
   }
 }
 
-void httperror(struct http_data* r,const char* title,const char* message) {
-  httperror_realm(r,title,message,0);
+void httperror(struct http_data* r,const char* title,const char* message,int nobody) {
+  httperror_realm(r,title,message,0,nobody);
 }
 
 static unsigned int fmt_2digits(char* dest,int i) {
@@ -1353,7 +1356,7 @@ username2:password2
  * covered, use hard or symbolic links.  The function returns 0 if the
  * authentication was OK or -1 if authentication is needed (the HTTP
  * response was then already written to the iob). */
-int http_dohtaccess(struct http_data* h,const char* filename) {
+int http_dohtaccess(struct http_data* h,const char* filename,int nobody) {
   unsigned long filesize;
   char* map;
   char* s;
@@ -1404,7 +1407,7 @@ int http_dohtaccess(struct http_data* h,const char* filename) {
     }
   }
 needauth:
-  httperror_realm(h,"401 Authorization Required","Authorization required to view this web page",realm);
+  httperror_realm(h,"401 Authorization Required","Authorization required to view this web page",realm,nobody);
 done:
   munmap(map,filesize);
   return r;
@@ -1444,7 +1447,7 @@ int http_redirect(struct http_data* h,const char* Filename) {
   return 0;
 }
 
-int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd) {
+int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd,int nobody) {
 #ifdef SUPPORT_PROXY
   int noproxy=0;
 #endif
@@ -1538,7 +1541,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   while (Filename[1]=='/') ++Filename;
 
 #ifdef SUPPORT_HTACCESS
-  if (http_dohtaccess(h,".htaccess_global")==0) return -5;
+  if (http_dohtaccess(h,".htaccess_global",nobody)==0) return -5;
 #endif
 
 #ifdef SUPPORT_PROXY
@@ -1560,7 +1563,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     /* Damn.  Directory. */
     if (Filename[1] && chdir(Filename+1)==-1) return -1;
 #ifdef SUPPORT_HTACCESS
-    if (http_dohtaccess(h,".htaccess")==0) return -5;
+    if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
 #endif
     h->mimetype="text/html";
     if (!open_for_reading(&fd,"index.html",ss)) {
@@ -1650,9 +1653,9 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     if (x[lso]=='/') {
       byte_copy(x,lso+1,Filename);
       str_copy(x+lso+1,".htaccess");
-      if (http_dohtaccess(h,x)==0) return -5;
+      if (http_dohtaccess(h,x,nobody)==0) return -5;
     } else
-      if (http_dohtaccess(h,".htaccess")==0) return -5;
+      if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
 #endif
     if (!open_for_reading(&fd,Filename+1,ss)) {
       if (errno==ENOENT)
@@ -1864,7 +1867,7 @@ void httpresponse(struct http_data* h,int64 s,long headerlen) {
   c=array_start(&h->r);
   if (byte_diff(c,4,"GET ") && byte_diff(c,5,"POST ") && byte_diff(c,5,"HEAD ")) {
 e400:
-    httperror(h,"400 Invalid Request","This server only understands GET and HEAD.");
+    httperror(h,"400 Invalid Request","This server only understands GET and HEAD.",0);
 
     if (logging) {
       char numbuf[FMT_ULONG];
@@ -1903,7 +1906,7 @@ e400:
       return;
     }
 #endif
-    fd=http_openfile(h,c,&ss,s);
+    fd=http_openfile(h,c,&ss,s,head);
     if (fd==-1) {
 e404:
 #ifdef SUPPORT_FALLBACK_REDIR
@@ -1937,7 +1940,7 @@ e404:
       if (redir)
 	goto fini;
 #endif
-      httperror(h,"404 Not Found","No such file or directory.");
+      httperror(h,"404 Not Found","No such file or directory.",head);
 
     } else {
       char* filename=c;
@@ -1950,7 +1953,7 @@ e404:
 	char* c;
 	c=h->hdrbuf=(char*)malloc(250);
 	if (!c)
-	  httperror(h,"500 Sorry","Out of Memory.");
+	  httperror(h,"500 Sorry","Out of Memory.",head);
 	else {
 
 	  if (logging) {
@@ -2053,7 +2056,7 @@ rangeerror:
 	      }
 #endif
 	      io_close(h->filefd); h->filefd=-1;
-	      httperror(h,"416 Bad Range","The requested range can not be satisfied.");
+	      httperror(h,"416 Bad Range","The requested range can not be satisfied.",head);
 	      goto fini;
 	    }
 	  }
@@ -2103,7 +2106,7 @@ rangeerror:
 	}
 	if (range_first>ss.st_size) {
 	  free(c);
-	  httperror(h,"416 Bad Range","The requested range can not be satisfied.");
+	  httperror(h,"416 Bad Range","The requested range can not be satisfied.",head);
 	  buffer_puts(buffer_1,"error_416 ");
 	} else {
 	  c+=fmt_str(c,"\r\nConnection: ");
@@ -3909,7 +3912,7 @@ static void handle_write_proxyslave(int64 i,struct http_data* h) {
       buffer_putnlflush(buffer_1);
     }
     H->buddy=-1;
-    httperror(H,"502 Gateway Broken","Request relaying error.");
+    httperror(H,"502 Gateway Broken","Request relaying error.",0); /* FIXME, what about HEAD? */
     h->buddy=-1;
     free(h);
     io_close(i);
@@ -4373,12 +4376,12 @@ ioerror:
       /* received a request */
       array_catb(&H->r,buf,l);
       if (array_failed(&H->r)) {
-	httperror(H,"500 Server Error","request too long.");
+	httperror(H,"500 Server Error","request too long.",0);
 emerge:
 	io_dontwantread(i);
 	io_wantwrite(i);
       } else if (array_bytes(&H->r)>MAX_HEADER_SIZE) {
-	httperror(H,"500 request too long","You sent too much headers");
+	httperror(H,"500 request too long","You sent too much header data",0);
 	array_reset(&H->r);
 	goto emerge;
       } else if ((l=header_complete(H))) {
