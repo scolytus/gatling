@@ -324,6 +324,13 @@ int main(int argc,char* argv[]) {
 	canonicalize(&src[0].sa,baseurl);
       if (t.s[0]=='i' && src[1].sa.len)
 	canonicalize(&src[1].sa,baseurl);
+    } else if (stralloc_equals(&t,"base")) {
+      if (params(href)==-1) break;
+      if (href[0].sa.len) {
+	baseurl=malloc(href[0].sa.len+1);
+	memcpy(baseurl,href[0].sa.s,href[0].sa.len);
+	baseurl[href[0].sa.len]=0;
+      }
     } else
       if (params(href+1)==-1) break;
     while ((r=get())!='<' && r!=-1) ;
