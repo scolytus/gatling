@@ -1,5 +1,7 @@
 
-#define SUPPORT_MULTIPROC
+// #define SUPPORT_MULTIPROC
+
+// #define SUPPORT_BITTORRENT
 
 #define SUPPORT_SERVERSTATUS
 // #define SUPPORT_SMB
@@ -132,6 +134,49 @@ int64 new_io_timeouted() {
 #define io_timeouted new_io_timeouted
 #endif
 
+#ifdef DEBUG_EVENTS
+void new_io_wantwrite(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_wantwrite(",a,")\n");
+  io_wantwrite(s);
+}
+
+void new_io_dontwantwrite(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_dontwantwrite(",a,")\n");
+  io_dontwantwrite(s);
+}
+
+void new_io_wantread(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_wantread(",a,")\n");
+  io_wantread(s);
+}
+
+void new_io_dontwantread(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_dontwantread(",a,")\n");
+  io_dontwantread(s);
+}
+
+#define io_wantwrite(s) new_io_wantwrite(s,__FILE__,__LINE__)
+#define io_wantread(s) new_io_wantread(s,__FILE__,__LINE__)
+#define io_dontwantwrite(s) new_io_dontwantwrite(s,__FILE__,__LINE__)
+#define io_dontwantread(s) new_io_dontwantread(s,__FILE__,__LINE__)
+#endif
+
 static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 
 #ifdef USE_ZLIB
@@ -227,7 +272,49 @@ enum conntype {
   HTTPSREQUEST,	/* read and handle https request */
   HTTPSRESPONSE,	/* write response to https request */
 #endif
+
+  LAST_UNUNSED
 };
+
+#ifdef SMDEBUG
+const char* conntypestring[LAST_UNUNSED];
+
+void setup_smdebug_strings() {
+  conntypestring[HTTPSERVER6]="HTTPSERVER6";
+  conntypestring[HTTPSERVER4]="HTTPSERVER4";
+  conntypestring[HTTPREQUEST]="HTTPREQUEST";
+
+#ifdef SUPPORT_FTP
+  conntypestring[FTPSERVER6]="FTPSERVER6";
+  conntypestring[FTPSERVER4]="FTPSERVER4";
+  conntypestring[FTPCONTROL6]="FTPCONTROL6";
+  conntypestring[FTPCONTROL4]="FTPCONTROL4";
+  conntypestring[FTPPASSIVE]="FTPPASSIVE";
+  conntypestring[FTPACTIVE]="FTPACTIVE";
+  conntypestring[FTPACTIVE]="FTPSLAVE";
+#endif
+
+#ifdef SUPPORT_SMB
+  conntypestring[SMBSERVER6]="SMBSERVER6";
+  conntypestring[SMBSERVER4]="SMBSERVER4";
+  conntypestring[SMBREQUEST]="SMBREQUEST";
+#endif
+
+#ifdef SUPPORT_PROXY
+  conntypestring[PROXYSLAVE]="PROXYSLAVE";
+  conntypestring[PROXYPOST]="PROXYPOST";
+  conntypestring[HTTPPOST]="HTTPPOST";
+#endif
+
+#ifdef SUPPORT_HTTPS
+  conntypestring[HTTPSSERVER6]="HTTPSSERVER6";
+  conntypestring[HTTPSSERVER4]="HTTPSSERVER4";
+  conntypestring[HTTPSACCEPT]="HTTPSACCEPT";
+  conntypestring[HTTPSREQUEST]="HTTPSREQUEST";
+  conntypestring[HTTPSRESPONSE]="HTTPSRESPONSE";
+#endif
+}
+#endif
 
 #ifdef SUPPORT_FTP
 enum ftpstate {
@@ -584,6 +671,7 @@ punt:
 	pid_t pid;
 	char* req=array_start(&d->r); /* "GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n"; */
 	char ra[IP6_FMT];
+	h->t=PROXYPOST;
 	req[strlen(req)]=' ';
 	d->keepalive=0;
 	ra[fmt_ip6c(ra,d->peerip)]=0;
@@ -603,7 +691,7 @@ punt:
 	  char* c=alloca(len+1);
 	  read(forksock[0],c,len);
 	  c[len]=0;
-	  httperror(d,"502 Gateway Broken",c);
+	  httperror(d,"502 Gateway Broken",c,*d->r.p=='H'?1:0);
 	  free(h);
 	  return -1;
 	} else {
@@ -614,7 +702,7 @@ punt:
 	    return -1;
 	  }
 	  if (!io_fd(s)) {
-	    httperror(d,"502 Gateway Broken",c);
+	    httperror(d,"502 Gateway Broken",c,*d->r.p=='H'?1:0);
 	    io_close(s);
 	    free(h);
 	    return -1;
@@ -809,10 +897,7 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
     }
     if (peer) {
       peer->buddy=-1;
-      if (peer->iob.bytesleft==0) {
-	cleanup(sockfd);
-	return -3;
-      }
+      cleanup(sockfd);
     }
     H->buddy=-1;
     io_wantwrite(H->buddy);
@@ -1205,9 +1290,9 @@ static inline int issafe(unsigned char c) {
   return (c!='"' && c!='%' && c>=' ' && c!='+' && c!=':' && c!='#');
 }
 
-unsigned long fmt_urlencoded(char* dest,const char* src,unsigned long len) {
+size_t fmt_urlencoded(char* dest,const char* src,size_t len) {
   register const unsigned char* s=(const unsigned char*) src;
-  unsigned long written=0,i;
+  size_t written=0,i;
   for (i=0; i<len; ++i) {
     if (!issafe(s[i])) {
       if (dest) {
@@ -1357,7 +1442,7 @@ username2:password2
  * authentication was OK or -1 if authentication is needed (the HTTP
  * response was then already written to the iob). */
 int http_dohtaccess(struct http_data* h,const char* filename,int nobody) {
-  unsigned long filesize;
+  size_t filesize;
   char* map;
   char* s;
   char* auth;
@@ -1377,7 +1462,7 @@ int http_dohtaccess(struct http_data* h,const char* filename,int nobody) {
       char* username,* password;
       char* decoded;
       int i;
-      unsigned long l,dl,ul;
+      size_t l,dl,ul;
       auth+=6;
       while (*auth==' ' || *auth=='\t') ++auth;
       i=str_chr(auth,'\n');
@@ -1454,7 +1539,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
   char* dir=0;
   char* s;
   char* args;
-  unsigned long i;
+  size_t i;
   int64 fd;
   int doesgzip;
 #ifdef SUPPORT_BZIP2
@@ -3503,7 +3588,7 @@ void forkslave(int fd,buffer* in) {
 		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
 		k=str_chr(x,' ');
 		if (k<j) {
-		  unsigned long dl;
+		  size_t dl;
 		  remoteuser=alloca(20+k-j);
 		  i=fmt_str(remoteuser,"REMOTE_USER=");
 		  scan_base64(x+k+1,remoteuser+i,&dl);
@@ -3840,61 +3925,41 @@ nothingmoretocopy:
 }
 
 static void handle_write_httppost(int64 i,struct http_data* h) {
-  struct http_data* H=io_getcookie(h->buddy);
-  /* write answers from proxy */
-  if (H && h->still_to_copy) {
-    char* c=array_start(&H->r);
-    long alen=array_bytes(&H->r);
-    long l;
-    if (alen>h->still_to_copy) alen=h->still_to_copy;
-    l=write(i,c,alen);
-    if (l<1) {
-      /* ARGH!  Client hung up on us! *groan* */
+  int64 r;
+  r=iob_send(i,&h->iob);
+  if (r==-1)
+    io_eagain(i);
+  else if (r<=0) {
+    if (r==-3) {
       if (logging) {
-	buffer_puts(buffer_1,"http_postdata_writetoclient_error ");
-	buffer_putulong(buffer_1,i);
-	buffer_putspace(buffer_1);
-	buffer_puterror(buffer_1);
-	buffer_puts(buffer_1,"\nclose/acceptfail ");
-	buffer_putulong(buffer_1,i);
-	buffer_putnlflush(buffer_1);
+	char a[FMT_ULONG];
+	char r[FMT_ULONG];
+	char s[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	r[fmt_ulonglong(r,h->received)]=0;
+	s[fmt_ulonglong(s,h->sent)]=0;
+	buffer_putmflush(buffer_1,"socket_error ",a," ",strerror(errno),"\nclose/writefail ",a," ",r," ",s,"\n");
+      }
+      cleanup(i);
+      return;
+    }
+    if (h->buddy==-1) {
+      if (logging) {
+	char a[FMT_ULONG];
+	char r[FMT_ULONG];
+	char s[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	r[fmt_ulonglong(r,h->received)]=0;
+	s[fmt_ulonglong(s,h->sent)]=0;
+	buffer_putmflush(buffer_1,"close/proxydone ",a," ",r," ",s,"\n");
       }
       cleanup(i);
     } else {
-      h->sent+=l;
-      byte_copy(c,alen-l,c+l);
-      array_truncate(&H->r,1,alen-l);
-//	    printf("still_to_copy HTTPPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-l);
-      h->still_to_copy-=l;
-      if (alen-l==0)
-	io_dontwantwrite(i);
-      if (!h->still_to_copy) {
-	/* we got all we asked for */
-//	      printf("  got all we asked for!\n");
-	io_dontwantwrite(i);
-	io_wantread(i);
-	io_dontwantread(h->buddy);
-	io_wantwrite(h->buddy);
-      } else {
-	io_wantread(h->buddy);
-	if (l==alen) io_dontwantwrite(i);
-      }
+      io_dontwantwrite(i);
+      io_wantread(h->buddy);
     }
-  } else {
-    int buddy=h->buddy;
-    struct http_data* H=io_getcookie(buddy);
-    h->buddy=-1;
-    if (H) {
-      H->buddy=-1;
-      if (logging) {
-	buffer_puts(buffer_1,"\nclose/proxydone ");
-	buffer_putulong(buffer_1,i);
-	buffer_putnlflush(buffer_1);
-      }
-      cleanup(buddy);
-    }
-    io_dontwantwrite(i);
-  }
+  } else
+    h->sent+=r;
 }
 
 static void handle_write_proxyslave(int64 i,struct http_data* h) {
@@ -4221,7 +4286,13 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #ifdef __broken_itojun_v6__
     carp(H->t==HTTPSERVER4||H->t==FTPSERVER4?"socket_accept4":"socket_accept6");
 #else
-    carp("socket_accept6");
+    if (errno==EINVAL) {
+      static int64 lasteinval;
+      if (lasteinval!=i) {
+	lasteinval=i;
+	carp("socket_accept6");
+      }
+    }
 #endif
 }
 
@@ -4581,6 +4652,21 @@ static void prepare_listen(int s,void* whatever) {
   }
 }
 
+#ifdef SUPPORT_BITTORRENT
+int handle_torrent_request(int64 sock,struct http_data* h) {
+  /* http://wiki.theory.org/BitTorrentSpecification#Tracker_HTTP.2FHTTPS_Protocol */
+  /* http://www.bittorrent.org/protocol.html */
+  char* req=array_start(&h->r); /* "GET /announce?info_hash=%c3%f4%31%0e%aa%ec%ae%3d%84%c1%63%70%a2%36%67%6b%24%99%b6%e1&peer_id=-TR0006-u0u5j57kcmm4&port=6887&uploaded=0&downloaded=0&left=243269632&compact=1&numwant=50&key=njyytouhv5fymdafkhzi&event=started\r\n" */
+  char* t=strchr(req,'\n');
+  char* s=strchr(req,'?');
+  if (s && t && s<t) {
+    if (t[-1]=='\r') --t;
+  } else
+    httperror(h,"500 invalid bittorrent request","Invalid BitTorrent request",*req=='H');
+  return 0;
+}
+#endif
+
 int main(int argc,char* argv[],char* envp[]) {
   int s;		/* http socket */
   int f=-1;		/* ftp socket */
@@ -4622,6 +4708,10 @@ int main(int argc,char* argv[],char* envp[]) {
   char* chroot_to=0;
   uint64 prefetchquantum=0;
   pid_t* Instances;
+
+#ifdef SMDEBUG
+  setup_smdebug_strings();
+#endif
 
 #ifdef SUPPORT_HTTPS
   SSL_load_error_strings();
@@ -5301,6 +5391,7 @@ usage:
     /* HANDLE READ EVENTS */
     while ((i=io_canread())!=-1) {
       struct http_data* H=io_getcookie(i);
+
       ++eps1;
       if (!H) {
 	char a[FMT_ULONG];
@@ -5310,6 +5401,16 @@ usage:
 	io_close(i);
 	continue;
       }
+
+#ifdef SMDEBUG
+      {
+	char a[FMT_ULONG];
+	char b[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	b[fmt_ulong(b,H->t)]=0;
+	buffer_putmflush(buffer_2,"DEBUG: fd ",a," got READ event ",conntypestring[H->t]?conntypestring[H->t]:b,"!\n");
+      }
+#endif
 
       if (++events==10) {
 	events=0;
@@ -5385,6 +5486,16 @@ usage:
 	io_close(i);
 	continue;
       }
+
+#ifdef SMDEBUG
+      {
+	char a[FMT_ULONG];
+	char b[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	b[fmt_ulong(b,h->t)]=0;
+	buffer_putmflush(buffer_2,"DEBUG: fd ",a," got WRITE event ",conntypestring[h->t]?conntypestring[h->t]:b,"!\n");
+      }
+#endif
 
       if (++events==10) {
 	events=0;
