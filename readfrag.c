@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <linux/fs.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -16,10 +17,43 @@ struct lookup {
   unsigned int l,p; /* logical block, physical block */
 };
 
-int compare(const void *a, const void *b) {
-  register const struct lookup* A=a;
-  register const struct lookup* B=b;
-  return A->p-B->p;
+void rsort(struct lookup* tab,unsigned long blocksperchunk) {
+  struct lookup* x[2];
+  unsigned long i,j,c[2];
+  x[0]=(struct lookup*)malloc(blocksperchunk*sizeof(*tab));
+  x[1]=(struct lookup*)malloc(blocksperchunk*sizeof(*tab));
+  if (!x[0] || !x[1]) return;
+  for (i=1; i; i<<=1) {
+    c[0]=c[1]=0;
+    for (j=0; j<blocksperchunk; ++j) {
+      unsigned int idx=!!(tab[j].p&i);
+      x[idx][c[idx]]=tab[j];
+      ++c[idx];
+    }
+    if (c[0] && c[1]) {
+      memcpy(tab,x[0],c[0]*sizeof(tab[0]));
+      memcpy(tab+c[0],x[1],c[1]*sizeof(tab[0]));
+
+#if 0
+      printf("\n%16lx mask, %lu zeros, %lu ones.\n\n",i,c[0],c[1]);
+      for (j=0; j<blocksperchunk; ++j)
+	printf("%16lx%s",tab[j].p,((j&15)==15)?"\n":" ");
+      printf("\n");
+#endif
+
+    }
+//    printf("%16lx - %lu zeros, %lu ones\n",i,c[0],c[1]);
+  }
+  free(x[0]);
+  free(x[1]);
+#if 0
+  for (i=1; i<blocksperchunk; ++i) {
+    if (tab[i-1].p > tab[i].p) {
+      printf("not sorted: %lu : %lu vs %lu\n",i-1,tab[i-1].p,tab[i].p);
+      exit(1);
+    }
+  }
+#endif
 }
 
 static int dryrun;
@@ -30,7 +64,7 @@ void touch(const char* block) {
   x=*block;
 }
 
-static unsigned long abs(long a) {
+static unsigned long myabs(long a) {
   return (a<0)?-a:a;
 }
 
@@ -72,7 +106,7 @@ int main(int argc,char* argv[]) {
       return 1;
     }
     lt[i].l=i; lt[i].p=block;
-    if (i) h1+=abs(lt[i].p-lt[i-1].p);
+    if (i) h1+=myabs(lt[i].p-lt[i-1].p);
   }
 
   /* the next step is to sort the look-up table so that we read in
@@ -108,7 +142,7 @@ int main(int argc,char* argv[]) {
     /* how many blocks are in this chunk? */
     blocksperchunk=chunksize/s.st_blksize;
 
-    qsort(lt+cur,blocksperchunk,sizeof(struct lookup),compare);
+    rsort(lt+cur,blocksperchunk);
     for (i=0; i<blocksperchunk; ++i) {
       if (!dryrun && !(i%100)) {
 	int j;
@@ -117,7 +151,7 @@ int main(int argc,char* argv[]) {
 	for (j=0; j<i; ++j)
 	  touch(map+((lt[cur+j].l-blocksdone)*s.st_blksize));
       }
-      if (cur+i) h2+=abs(lt[cur+i].p-lt[cur+i-1].p);
+      if (cur+i) h2+=myabs(lt[cur+i].p-lt[cur+i-1].p);
       if (!dryrun)
 	touch(map+((lt[cur+i].l-blocksdone)*s.st_blksize));
     }

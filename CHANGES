@@ -26,6 +26,7 @@
     output, before or after tai64nlocal)
   use setresuid and setresgid if available
   for HEAD, suppress body of error messages (Andreas Krennmair)
+  use radix sort in readfrag instead of qsort for big speedup
 
 0.8:
   fix pipelining bug
