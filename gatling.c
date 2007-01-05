@@ -1153,7 +1153,7 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "mov",	"video/quicktime" },
   { "qt",	"video/quicktime" },
   { "mp3",	"audio/mpeg" },
-  { "ogg",	"audio/x-oggvorbis" },
+  { "ogg",	"application/ogg" },
   { "wav",	"audio/x-wav" },
   { "pac",	"application/x-ns-proxy-autoconfig" },
   { "sig",	"application/pgp-signature" },
@@ -1178,6 +1178,7 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "md5",	"text/plain" },
   { "wmv",	"video/x-ms-wmv" },
   { "mp4",	"video/mp4" },
+  { "m4a",	"audio/mp4" },
   { "nzb",	"application/x-nzb" },
   { 0 } };
 
@@ -1220,7 +1221,7 @@ const char* mimetype(const char* filename,int fd) {
     else if (r>=4 && (byte_equal(buf,3,"ID3") || byte_equal(buf,2,"\xff\xfb")))
       return "audio/mpeg";
     else if (r>=4 && byte_equal(buf,4,"OggS"))
-      return "audio/x-oggvorbis";
+      return "application/ogg";
     else if (r>=4 && byte_equal(buf,4,"RIFF")) {
       if (r>=16 && byte_equal(buf+8,3,"AVI"))
 	return "video/x-msvideo";
