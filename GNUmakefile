@@ -73,8 +73,11 @@ forksbench: forkbench.o
 
 gatling.o: version.h havesetresuid.h
 
-tlsgatling: gatling.c ssl.o
-	-$(CC) -o $@ gatling.c ssl.o $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+tlsgatling: gatling.c ssl.o mime.o
+	-$(CC) -o $@ gatling.c ssl.o mime.o $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+
+gatling: gatling.o mime.o
+	$(CC) $(LDFLAGS) $@.o mime.o -o $@ $(LDLIBS)
 
 httpbench: httpbench.o
 bindbench: bindbench.o

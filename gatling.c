@@ -1182,10 +1182,17 @@ static struct mimeentry { const char* name, *type; } mimetab[] = {
   { "nzb",	"application/x-nzb" },
   { 0 } };
 
+extern const char* find_mime_type(const char* extension,const char* filename,time_t now);
+const char* mimetypesfilename;
+
 const char* mimetype(const char* filename,int fd) {
   int i,e=str_rchr(filename,'.');
   if (filename[e]) {
     ++e;
+    if (mimetypesfilename) {
+      const char* x=find_mime_type(filename+e,mimetypesfilename,now.sec.x-4611686018427387914ULL);
+      if (x) return x;
+    }
     for (i=0; mimetab[i].name; ++i)
       if (str_equal(mimetab[i].name,filename+e))
 	return mimetab[i].type;
@@ -4877,7 +4884,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:");
+    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -4894,6 +4901,9 @@ int main(int argc,char* argv[],char* envp[]) {
       break;
     case 'c':
       chroot_to=optarg;
+      break;
+    case 'm':
+      mimetypesfilename=optarg;
       break;
     case 'P':
       i=scan_ulonglong(optarg,&prefetchquantum);
