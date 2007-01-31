@@ -1618,7 +1618,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     }
   }
 #ifdef __MINGW32__
-  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
+//  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
   chdir(origdir);
 #else
   fchdir(origdir);
@@ -1628,7 +1628,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     if (chdir(dir=s)==-1)
       if (chdir(dir="default")==-1)
 	if (virtual_hosts==1) {
-	  printf("chdir FAILED and virtual_hosts is 1\n");
+	  buffer_putsflush(buffer_2,"chdir FAILED and virtual_hosts is 1\n");
 	  return -1;
 	}
   while (Filename[1]=='/') ++Filename;
@@ -2277,7 +2277,7 @@ static int ftp_vhost(struct http_data* h) {
   y[i]=0;
 
 #ifdef __MINGW32__
-  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
+//  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
   chdir(origdir);
 #else
   fchdir(origdir);
@@ -4233,7 +4233,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #ifdef SUPPORT_HTTPS
 	} else if (H->t==HTTPSSERVER4 || H->t==HTTPSSERVER6) {
 #ifdef __MINGW32__
-	  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
+//	  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
 //	  chdir(origdir);
 #else
 	  fchdir(origdir);
@@ -5231,7 +5231,7 @@ usage:
 
 #ifdef __MINGW32__
   _getcwd(origdir,sizeof(origdir));
-  printf("origdir is \"%s\"\n",origdir);
+//  printf("origdir is \"%s\"\n",origdir);
 #else
   if (!io_readfile(&origdir,".")) panic("open()");
   /* get fd for . so we can always fchdir back */
