@@ -99,29 +99,29 @@ version.h: CHANGES
 	$(CC) $(LDFLAGS) $@.o -o $@ $(LDLIBS)
 
 libsocket: trysocket.c
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lwsock32 >/dev/null 2>&1; then echo "-lwsock32"; \
+	if $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
+	if $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; else \
+	if $(CC) $(CFLAGS) -o trysocket trysocket.c -lwsock32 >/dev/null 2>&1; then echo "-lwsock32"; \
 	fi; fi; fi; fi > libsocket
 	rm -f trysocket
 
 libiconv: tryiconv.c
-	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
-	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
+	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
 	fi; fi > libiconv
 	rm -f tryiconv
 
 libcrypt: trycrypt.c
-	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c >/dev/null 2>&1; then echo ""; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c -lcrypt >/dev/null 2>&1; then echo "-lcrypt"; \
+	if $(CC) $(CFLAGS) -o trycrypt trycrypt.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o trycrypt trycrypt.c -lcrypt >/dev/null 2>&1; then echo "-lcrypt"; \
 	fi; fi > libcrypt
 	rm -f trycrypt
 
 havesetresuid.h: trysetresuid.c
 	-rm -f $@
-	if $(DIET) $(CC) $(CFLAGS) -c $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
-	-rm -f tryresuid.o
+	if $(CC) $(CFLAGS) -o tryresuid $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
+	-rm -f tryresuid
 
 dummy.c:
 	touch $@

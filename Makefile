@@ -70,28 +70,28 @@ tlsgatling: gatling.c ssl.o libsocket libiconv libcrypt
 	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
 
 libsocket: trysocket.c
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
+	if $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket >/dev/null 2>&1; then echo "-lsocket"; else \
+	if $(CC) $(CFLAGS) -o trysocket trysocket.c -lsocket -lnsl >/dev/null 2>&1; then echo "-lsocket -lnsl"; \
 	fi; fi; fi > libsocket
 	rm -f trysocket
 
 libiconv: tryiconv.c
-	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
-	if $(DIET) $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
+	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
 	fi; fi > libiconv
 	rm -f tryiconv
 
 libcrypt: trycrypt.c
-	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c >/dev/null 2>&1; then echo ""; else \
-	if $(DIET) $(CC) $(CFLAGS) -o trycrypt trycrypt.c -lcrypt >/dev/null 2>&1; then echo "-lcrypt"; \
+	if $(CC) $(CFLAGS) -o trycrypt trycrypt.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o trycrypt trycrypt.c -lcrypt >/dev/null 2>&1; then echo "-lcrypt"; \
 	fi; fi > libcrypt
 	rm -f trycrypt
 
 havesetresuid.h: trysetresuid.c
 	-rm -f $@
-	if $(DIET) $(CC) $(CFLAGS) -c $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
-	-rm -f tryresuid.o
+	if $(CC) $(CFLAGS) -o tryresuid $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
+	-rm -f tryresuid
 
 install: gatling dl getlinks
 	install -d $(BINDIR) $(man1dir)
