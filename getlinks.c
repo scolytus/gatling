@@ -176,22 +176,26 @@ static int params(struct param* P) {
   for (p=P; p->name; ++p) stralloc_zero(&p->sa);
   for (;;) {
     int r,found;
-    if (eatwhitespace()==-1) return -1;
+    if (eatwhitespace()==-1)
+      return -1;
     if ((r=get())=='>') return 1;
     if (r=='/') {
       if ((r=get())=='>')
 	return 1;
       else
-	return -1;
+	break;
     }
     unget(r);
     if (!isalnum(r)) return r;
-    if ((r=readtoken(&sa))!=1) return r;
+    if ((r=readtoken(&sa))!=1)
+      return r;
     for (found=0, p=P; p->name; ++p) {
       if (stralloc_equals(&sa,p->name)) {
-	if (eatwhitespace()==-1) return -1;
+	if (eatwhitespace()==-1)
+	  return -1;
 	if ((r=get())=='=') {
-	  if ((r=readstring(&p->sa))!=1) return r;
+	  if ((r=readstring(&p->sa))!=1)
+	    return r;
 	  found=1;
 	  break;
 	} else
@@ -208,7 +212,8 @@ static int params(struct param* P) {
 
       eatwhitespace();
       if ((r=get())=='=') {
-	if (readstring(&sa)==-1) return -1;
+	if (readstring(&sa)==-1)
+	  return -1;
       } else
 	unget(r);
     }
