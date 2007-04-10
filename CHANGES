@@ -28,6 +28,8 @@
   for HEAD, suppress body of error messages (Andreas Krennmair)
   use radix sort in readfrag instead of qsort for big speedup
   add support for external mime types file (gatling -m /etc/mime.types)
+  switch to binary mode in dl in FTP mode
+  fix memory leak in proxy_connection() (Johannes Vetter)
 
 0.8:
   fix pipelining bug

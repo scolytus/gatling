@@ -407,7 +407,7 @@ again:
       stralloc a={0};
       stralloc_copys(&a,host);
       if (verbose) buffer_putsflush(buffer_1,"DNS lookup... ");
-      if (dns_ip6(&ips,&a)==-1) {
+      if (dns_ip6(&ips,&a)==-1 || ips.len==0) {
 	buffer_puts(buffer_2,"dl: could not resolve IP: ");
 	buffer_puts(buffer_2,host);
 	buffer_putnlflush(buffer_2);
@@ -517,6 +517,9 @@ again:
     if ((i=(ftpcmd(s,&ftpbuf,"USER ftp\r\n")/100))>3) panic("ftp login failed.\n");
     if (verbose) buffer_putsflush(buffer_1,"\nPASS luser@...");
     if ((i=(ftpcmd(s,&ftpbuf,"PASS luser@\r\n")/100))!=2) panic("ftp login failed.\n");
+
+    if (verbose) buffer_putsflush(buffer_1,"\nTYPE I");
+    if ((i=(ftpcmd(s,&ftpbuf,"TYPE I\r\n")/100))!=2) panic("Switching to binary mode failed.\n");
 
     if (verbose) {
       buffer_puts(buffer_1,"\nMDTM ");

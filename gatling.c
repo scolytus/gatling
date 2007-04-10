@@ -636,11 +636,12 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	/* proxy mode */
 	h->t=PROXYSLAVE;
 	s=socket_tcp6();
-	if (s==-1) return -1;
+	if (s==-1) goto punt2;
 	if (!io_fd(s)) {
 punt:
-	  free(h);
 	  io_close(s);
+punt2:
+	  free(h);
 	  return -1;
 	}
 	io_block(s);
