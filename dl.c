@@ -695,13 +695,22 @@ again:
     }
     {
       char buf[8192];
-      int l;
+      unsigned int l;
       int64 d;
       if (filename[0]) {
 	if ((resume?io_appendfile(&d,filename):io_createfile(&d,filename))==0)
 	  panic("creat");
       } else d=1;
       while ((l=read(dataconn,buf,sizeof buf))>0) {
+	if (d==1) {
+	  unsigned int i,j;
+	  for (i=j=0; i<l; ++i)
+	    if (buf[i]!='\r') {
+	      buf[j]=buf[i];
+	      ++j;
+	    }
+	  l=j;
+	}
 	if (write(d,buf,l) != l) panic("short write");
       }
       if (l==-1) panic("read");
