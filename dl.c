@@ -25,6 +25,7 @@
 #include <sys/uio.h>
 #endif
 #include <sys/stat.h>
+#include <errno.h>
 #include "havealloca.h"
 
 char* todel;
@@ -260,6 +261,7 @@ int main(int argc,char* argv[]) {
   int newer=0;
   int resume=0;
   int keepalive=0;
+  int imode=0;
   char ip[16];
   uint16 port=80;
   uint32 scope_id=0;
@@ -293,8 +295,10 @@ int main(int argc,char* argv[]) {
     case 'i':
       {
 	struct stat ss;
-	if (stat(optarg,&ss)==0)
+	if (stat(optarg,&ss)==0) {
 	  ims=ss.st_mtime;
+	  imode=1;
+	}
       }
       break;
     case 'r':
@@ -727,7 +731,9 @@ skipdownload:
   close(s);
   if (filename[0] && u.actime) {
     u.modtime=u.actime;
-    if (strcmp(filename,"-") && utime(filename,&u)==-1) panic("utime");
+    if (strcmp(filename,"-") && utime(filename,&u)==-1)
+      if (errno!=ENOENT || !imode)
+	panic("utime");
   }
   return 0;
 }

@@ -30,6 +30,8 @@
   add support for external mime types file (gatling -m /etc/mime.types)
   switch to binary mode in dl in FTP mode
   fix memory leak in proxy_connection() (Johannes Vetter)
+  dl: when printing an ftp directory listing, filter \r
+  dl: in -i mode, don't complain if utime fails
 
 0.8:
   fix pipelining bug
