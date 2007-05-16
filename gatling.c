@@ -1688,8 +1688,8 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 	  compressed[2]=8; /* deflate */
 	  compressed[3]=1; /* indicate ASCII */
 	  compressed[9]=3; /* OS = Unix */
-	  uint32_pack(compressed+10-2-4+destlen,crc);
-	  uint32_pack(compressed+14-2-4+destlen,h->blen);
+	  uint32_pack((char*)compressed+10-2-4+destlen,crc);
+	  uint32_pack((char*)compressed+14-2-4+destlen,h->blen);
 	  h->blen=destlen+18-2-4;
 	} else {
 	  free(compressed);
