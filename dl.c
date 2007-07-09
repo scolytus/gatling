@@ -114,8 +114,8 @@ static int readanswer(int s,const char* filename) {
 	  write(2,buf,j+1);
 	  return 0;
 	}
-	if (r-j-4)
-	  if (write(d,buf+body,r-j-4)!=r-j-4) panic("write");
+	if (i-j-4)
+	  if (write(d,buf+body,i-j-4)!=i-j-4) panic("write");
 	break;
       }
     }
