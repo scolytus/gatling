@@ -101,6 +101,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <ctype.h>
+#include <crypt.h>
 #include "havealloca.h"
 #include "havesetresuid.h"
 
@@ -364,7 +365,7 @@ struct http_data {
   uint64 sent_until,prefetched_until;
 #ifdef SUPPORT_PROXY
   enum proxyprotocol proxyproto;
-  uint64 still_to_copy;	/* for POST requests */
+  unsigned long long still_to_copy;	/* for POST/PUT requests */
   int havefirst;	/* first read contains cgi header */
   char* oldheader;	/* old, unmodified request */
 #endif
@@ -566,9 +567,9 @@ static char* http_header(struct http_data* r,char* h);
 int buffer_putlogstr(buffer* b,const char* s);
 void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm,int nobody);
 void httperror(struct http_data* r,const char* title,const char* message,int nobody);
-static int header_complete(struct http_data* r);
+static size_t header_complete(struct http_data* r);
 
-static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* d,int isexec,const char* args) {
+static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* ctx_for_sockfd,int isexec,const char* args) {
   struct cgi_proxy* x=cgis;
   struct stat ss;
 
@@ -581,13 +582,13 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
     }
     if (x->file_executable || regexec(&x->r,c,0,0,0)==0) {
       /* if the port is zero, then use local execution proxy mode instead */
-      int s;
-      struct http_data* h;
+      int fd_to_gateway;
+      struct http_data* ctx_for_gatewayfd;
 
-      d->proxyproto=x->proxyproto;
+      ctx_for_sockfd->proxyproto=x->proxyproto;
 
-      if (!(h=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
-      byte_zero(h,sizeof(struct http_data));
+      if (!(ctx_for_gatewayfd=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
+      byte_zero(ctx_for_gatewayfd,sizeof(struct http_data));
 
       if (logging) {
 	char buf[IP6_FMT+10];
@@ -595,23 +596,28 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	const char* method="???";
 	{
 	  int x;
-	  x=fmt_ip6c(buf,h->myip);
+	  x=fmt_ip6c(buf,ctx_for_gatewayfd->myip);
 	  x+=fmt_str(buf+x,"/");
-	  x+=fmt_ulong(buf+x,h->myport);
+	  x+=fmt_ulong(buf+x,ctx_for_gatewayfd->myport);
 	  buf[x]=0;
 	}
-	tmp=array_start(&d->r);
+	tmp=array_start(&ctx_for_sockfd->r);
 #ifdef SUPPORT_HTTPS
 	switch (*tmp) {
-	case 'H': method=(d->t==HTTPREQUEST)?"HEAD":"HEAD/SSL"; break;
-	case 'G': method=(d->t==HTTPREQUEST)?"GET":"GET/SSL"; break;
-	case 'P': method=(d->t==HTTPREQUEST)?"POST":"POST/SSL"; break;
+	case 'H': method=(ctx_for_sockfd->t==HTTPREQUEST)?"HEAD":"HEAD/SSL"; break;
+	case 'G': method=(ctx_for_sockfd->t==HTTPREQUEST)?"GET":"GET/SSL"; break;
+	case 'P':
+		  if (tmp[1]=='O')
+		    method=(ctx_for_sockfd->t==HTTPREQUEST)?"POST":"POST/SSL";
+		  else
+		    method=(ctx_for_sockfd->t==HTTPREQUEST)?"PUT":"PUT/SSL";
+		  break;
 	}
 #else
 	switch (*tmp) {
 	case 'H': method="HEAD"; break;
 	case 'G': method="GET"; break;
-	case 'P': method="POST"; break;
+	case 'P': method=(tmp[1]=='O')?"POST":"PUT"; break;
 	}
 #endif
 	buffer_putm(buffer_1,method,x->port?"/PROXY ":"/CGI ");
@@ -623,30 +629,30 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	  buffer_putlogstr(buffer_1,args);
 	}
 	buffer_puts(buffer_1," 0 ");
-	buffer_putlogstr(buffer_1,(tmp=http_header(d,"User-Agent"))?tmp:"[no_user_agent]");
+	buffer_putlogstr(buffer_1,(tmp=http_header(ctx_for_sockfd,"User-Agent"))?tmp:"[no_user_agent]");
 	buffer_puts(buffer_1," ");
-	buffer_putlogstr(buffer_1,(tmp=http_header(d,"Referer"))?tmp:"[no_referrer]");
+	buffer_putlogstr(buffer_1,(tmp=http_header(ctx_for_sockfd,"Referer"))?tmp:"[no_referrer]");
 	buffer_puts(buffer_1," ");
-	buffer_putlogstr(buffer_1,(tmp=http_header(d,"Host"))?tmp:buf);
+	buffer_putlogstr(buffer_1,(tmp=http_header(ctx_for_sockfd,"Host"))?tmp:buf);
 	buffer_putsflush(buffer_1,"\n");
       }
       ++rps1;
 
       if (x->port) {
 	/* proxy mode */
-	h->t=PROXYSLAVE;
-	s=socket_tcp6();
-	if (s==-1) goto punt2;
-	if (!io_fd(s)) {
+	ctx_for_gatewayfd->t=PROXYSLAVE;
+	fd_to_gateway=socket_tcp6();
+	if (fd_to_gateway==-1) goto punt2;
+	if (!io_fd(fd_to_gateway)) {
 punt:
-	  io_close(s);
+	  io_close(fd_to_gateway);
 punt2:
-	  free(h);
+	  free(ctx_for_gatewayfd);
 	  return -1;
 	}
-	io_block(s);
-	io_eagain(s);
-	if (socket_connect6(s,x->ip,x->port,x->scope_id)==-1)
+	io_block(fd_to_gateway);
+	io_eagain(fd_to_gateway);
+	if (socket_connect6(fd_to_gateway,x->ip,x->port,x->scope_id)==-1)
 	  if (errno!=EINPROGRESS)
 	    goto punt;
 	if (logging) {
@@ -656,7 +662,7 @@ punt2:
 	  char bufport[FMT_ULONG];
 
 	  bufsockfd[fmt_ulong(bufsockfd,sockfd)]=0;
-	  bufs[fmt_ulong(bufs,s)]=0;
+	  bufs[fmt_ulong(bufs,fd_to_gateway)]=0;
 	  bufport[fmt_ulong(bufport,x->port)]=0;
 	  tmp[fmt_ip6ifc(tmp,x->ip,x->scope_id)]=0;
 
@@ -664,26 +670,26 @@ punt2:
 	  buffer_putlogstr(buffer_1,c);
 	  buffer_putnlflush(buffer_1);
 	}
-	io_wantwrite(s);
+	io_wantwrite(fd_to_gateway);
 #ifdef SUPPORT_CGI
       } else {
 	/* local CGI mode */
 	uint32 a,len; uint16 b;
 	pid_t pid;
-	char* req=array_start(&d->r); /* "GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n"; */
+	char* req=array_start(&ctx_for_sockfd->r); /* "GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n"; */
 	char ra[IP6_FMT];
-	h->t=PROXYPOST;
+	ctx_for_gatewayfd->t=PROXYPOST;
 	req[strlen(req)]=' ';
-	d->keepalive=0;
-	ra[fmt_ip6c(ra,d->peerip)]=0;
+	ctx_for_sockfd->keepalive=0;
+	ra[fmt_ip6c(ra,ctx_for_sockfd->peerip)]=0;
 	a=strlen(req); write(forksock[0],&a,4);
 	a=strlen(dir); write(forksock[0],&a,4);
 	a=strlen(ra); write(forksock[0],&a,4);
 	write(forksock[0],req,strlen(req));
 	write(forksock[0],dir,strlen(dir));
 	write(forksock[0],ra,strlen(ra));
-	b=d->peerport; write(forksock[0],&b,2);
-	b=d->myport; write(forksock[0],&b,2);
+	b=ctx_for_sockfd->peerport; write(forksock[0],&b,2);
+	b=ctx_for_sockfd->myport; write(forksock[0],&b,2);
 
 	read(forksock[0],&a,4);		/* code; 0 means OK */
 	read(forksock[0],&len,4);	/* length of error message */
@@ -692,96 +698,126 @@ punt2:
 	  char* c=alloca(len+1);
 	  read(forksock[0],c,len);
 	  c[len]=0;
-	  httperror(d,"502 Gateway Broken",c,*d->r.p=='H'?1:0);
-	  free(h);
+	  httperror(ctx_for_sockfd,"502 Gateway Broken",c,*ctx_for_sockfd->r.p=='H'?1:0);
+	  free(ctx_for_gatewayfd);
 	  return -1;
 	} else {
-	  s=io_receivefd(forksock[0]);
-	  if (s==-1) {
+	  fd_to_gateway=io_receivefd(forksock[0]);
+	  if (fd_to_gateway==-1) {
 	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
-	    free(h);
+	    free(ctx_for_gatewayfd);
 	    return -1;
 	  }
-	  if (!io_fd(s)) {
-	    httperror(d,"502 Gateway Broken",c,*d->r.p=='H'?1:0);
-	    io_close(s);
-	    free(h);
+	  if (!io_fd(fd_to_gateway)) {
+	    httperror(ctx_for_sockfd,"502 Gateway Broken",c,*ctx_for_sockfd->r.p=='H'?1:0);
+	    io_close(fd_to_gateway);
+	    free(ctx_for_gatewayfd);
 	    return -1;
 	  }
 	}
-	d->t=HTTPPOST;
+	ctx_for_sockfd->t=HTTPPOST;
 	if (logging) {
 	  char bufsfd[FMT_ULONG];
 	  char bufs[FMT_ULONG];
 	  char bufpid[FMT_ULONG];
 
 	  bufsfd[fmt_ulong(bufsfd,sockfd)]=0;
-	  bufs[fmt_ulong(bufs,s)]=0;
+	  bufs[fmt_ulong(bufs,fd_to_gateway)]=0;
 	  bufpid[fmt_ulong(bufpid,pid)]=0;
 
 	  buffer_putmflush(buffer_1,"cgi_fork ",bufsfd," ",bufs," ",bufpid,"\n");
 	}
 #endif
       }
-      h->buddy=sockfd;
-      d->buddy=s;
-      io_setcookie(s,h);
+      ctx_for_gatewayfd->buddy=sockfd;
+      ctx_for_sockfd->buddy=fd_to_gateway;
+      io_setcookie(fd_to_gateway,ctx_for_gatewayfd);
+
+     /* Have:
+      *   - the header and possibly some data left in ctx_for_sockfd->r.
+      * Want:
+      *   - leave the data (not the header) in ctx_for_sockfd->r.
+      *   - set ctl_for_gatewayfd->still_to_copy to Content-Length.
+      *   - set ctl_for_sockfd->still_to_copy to Content-Length -
+      *     the size of the copied data.  If that is non-zero, set t to
+      *     HTTPPOST.
+      */
+
       {
-	struct http_data* x=io_getcookie(sockfd);
-	if (x) {
-	  char* cl=http_header(x,"Content-Length");
-	  if (cl) {
-	    char c;
-	    if ((c=cl[scan_ulonglong(cl,&h->still_to_copy)])!='\r' && c!='\n') h->still_to_copy=0;
+	char* cl=http_header(ctx_for_sockfd,"Content-Length");
+	unsigned long long content_length;
+	if (cl) {
+	  char c;
+	  if ((c=cl[scan_ulonglong(cl,&content_length)])!='\r' && c!='\n') content_length=0;
+	}
+
+	ctx_for_gatewayfd->still_to_copy=content_length;
+
+	/* If the client sent "Expect: 100-continue", do so */
+	{
+	  char* e=http_header(ctx_for_sockfd,"Expect");
+	  if (e && byte_equal(e,4,"100-")) {
+	    const char contmsg[]="HTTP/1.1 100 Continue\r\n\r\n";
+	    /* if this fails, tough luck.  I'm not bloating my state
+	      * engine for this crap. */
+	    io_trywrite(sockfd,contmsg,sizeof(contmsg)-1);
 	  }
-	  x->still_to_copy=0;
-//	  printf("still_to_copy init: %p %llu <-> %p %llu\n",x,x->still_to_copy,h,h->still_to_copy);
-	  byte_copy(h->peerip,16,x->peerip);
-	  if (!h->still_to_copy && h->t==PROXYPOST) {
-	    io_wantread(s);
-	    io_dontwantwrite(s);
-	    io_dontwantread(sockfd);
-	    io_dontwantwrite(sockfd);
-	  } else {
-	    /* there is still data to copy */
+	}
 
-	    io_wantread(sockfd);
-	    io_dontwantwrite(sockfd);
-	    io_wantread(s);
-	    /* If the client sent "Expect: 100-continue", do so */
-	    {
-	      char* e=http_header(d,"Expect");
-	      if (e && byte_equal(e,4,"100-")) {
-		const char contmsg[]="HTTP/1.1 100 Continue\r\n\r\n";
-		/* if this fails, tough luck.  I'm not bloating my state
-		 * engine for this crap. */
-		io_trywrite(sockfd,contmsg,sizeof(contmsg)-1);
-	      }
-	    }
+	/* figure out how much data we have */
+	{
+	  size_t size_of_header=header_complete(ctx_for_sockfd);
+	  size_t size_of_data_in_packet=array_bytes(&ctx_for_sockfd->r) - size_of_header - 1;
+	    /* the -1 is for the \0 we appended */
+	  size_t size_to_copy=size_of_data_in_packet>content_length?content_length:size_of_data_in_packet;
 
-	    /* remove HTTP header, want only POST data in array */
-	    {
-	      unsigned long l=header_complete(d);	/* we know the header is complete, or we wouldn't be here */
-	      unsigned long m=array_bytes(&d->r);
-	      if (m) --m; /* we added a \0 */
-	      d->t=PROXYPOST;
-	      if (m>l) {
-		byte_copyr(array_start(&d->r),m-l,array_get(&d->r,1,m-l));
-		array_truncate(&d->r,1,m-l);
-	      } else
-		array_trunc(&d->r);
-	    }
-	    if (array_bytes(&d->r))
-	      io_wantwrite(s);
+	  if (size_of_data_in_packet) {
+	    byte_copy(array_start(&ctx_for_sockfd->r),
+		      size_of_data_in_packet,
+		      array_start(&ctx_for_sockfd->r)+size_of_header);
+	    array_truncate(&ctx_for_sockfd->r,1,size_of_data_in_packet);
+	    if (content_length>size_of_data_in_packet)
+	      ctx_for_sockfd->still_to_copy=content_length-size_of_data_in_packet;
 	    else
-	      io_dontwantwrite(s);
+	      ctx_for_sockfd->still_to_copy=0;
+	  } else {
+	    array_trunc(&ctx_for_sockfd->r);
+	    ctx_for_sockfd->still_to_copy=content_length;
 	  }
+
+#if 0
+	  if (size_to_copy)
+	    array_catb(&ctx_for_gatewayfd->r,array_start(&ctx_for_sockfd->r)+size_of_header,size_to_copy);
+	  ctx_for_sockfd->still_to_copy=content_length-size_to_copy;
+
+	  if (size_of_data_in_packet > size_to_copy) {	/* there is more data in the buffer, copy it to the front */
+	    size_t size_of_rest=array_bytes(&ctx_for_sockfd->r)-size_of_header-size_to_copy;
+	    byte_copy(array_start(&ctx_for_sockfd->r),
+		      size_of_rest,
+		      array_start(&ctx_for_sockfd->r)+size_of_header+size_to_copy);
+	    array_truncate(&ctx_for_sockfd->r,1,size_of_rest);
+	  }
+
+	  if (ctx_for_sockfd->still_to_copy)
+	    ctx_for_sockfd->t=HTTPPOST;
+	  else
+	    ctx_for_sockfd->t=HTTPREQUEST;
+#endif
+
+	  if (ctx_for_gatewayfd->still_to_copy && array_bytes(&ctx_for_sockfd->r))
+	    io_wantwrite(fd_to_gateway);
+
+	  if (ctx_for_sockfd->still_to_copy)
+	    io_wantread(sockfd);
+	  else
+	    io_dontwantread(sockfd);
+
 	}
       }
 
       if (timeout_secs)
-	io_timeout(s,next);
-      return s;
+	io_timeout(fd_to_gateway,next);
+      return fd_to_gateway;
     }
     x=x->next;
   }
@@ -942,7 +978,7 @@ nomem:
 int read_http_post(int sockfd,struct http_data* H) {
   char buf[8192];
   int i;
-  long l=H->still_to_copy;
+  unsigned long long l=H->still_to_copy;
   if (l>sizeof(buf)) l=sizeof(buf);
   i=read(sockfd,buf,sizeof(buf));
 //  printf("read_http_post: want to read %ld bytes from %d; got %d\n",l,sockfd,i);
@@ -1027,7 +1063,7 @@ static int canonpath(char* s) {
 }
 #endif
 
-static int header_complete(struct http_data* r) {
+static size_t header_complete(struct http_data* r) {
   long i;
   long l=array_bytes(&r->r);
   const char* c=array_start(&r->r);
@@ -1640,14 +1676,17 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 
 #ifdef SUPPORT_PROXY
   noproxy=0;
-  switch ((i=proxy_connection(sockfd,Filename,dir,h,0,args))) {
-  case -3: noproxy=1; /* fall through */
-  case -2: break;
-  case -1: return -1;
-  default:
-    if (i>=0) {
-      h->buddy=i;
-      return -3;
+  {
+    int res;
+    switch ((res=proxy_connection(sockfd,Filename,dir,h,0,args))) {
+    case -3: noproxy=1; /* fall through */
+    case -2: break;
+    case -1: return -1;
+    default:
+      if (res>=0) {
+	h->buddy=res;
+	return -3;
+      }
     }
   }
 #else
@@ -1705,16 +1744,17 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       char* temp=alloca(strlen(Filename)+10);
       if (pread(fd,temp,4,0)==4) {
 	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
+	  int res;
 	  i=fmt_str(temp,Filename);
 	  i+=fmt_str(temp+i,"index.html");
 	  temp[i]=0;
-	  switch ((i=proxy_connection(sockfd,temp,dir,h,1,args))) {
+	  switch ((res=proxy_connection(sockfd,temp,dir,h,1,args))) {
 	  case -2: break;
 	  case -1: return -1;
 	  default:
-	    if (i>=0) {
+	    if (res>=0) {
 	      close(fd);
-	      h->buddy=i;
+	      h->buddy=res;
 	      return -3;
 	    }
 	  }
@@ -1762,13 +1802,14 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       char temp[5];
       if (pread(fd,temp,4,0)==4) {
 	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
-	  switch ((i=proxy_connection(sockfd,Filename,dir,h,1,args))) {
+	  int res;
+	  switch ((res=proxy_connection(sockfd,Filename,dir,h,1,args))) {
 	  case -2: break;
 	  case -1: return -1;
 	  default:
-	    if (i>=0) {
+	    if (res>=0) {
 	      close(fd);
-	      h->buddy=i;
+	      h->buddy=res;
 	      return -3;
 	    }
 	  }
@@ -1948,20 +1989,26 @@ static int is_private_ip(const unsigned char* ip) {
 #endif
 
 void httpresponse(struct http_data* h,int64 s,long headerlen) {
-  int head;
-  int post;
+  int head,post;
+#ifdef SUPPORT_PUT
+  int put;
+#endif
   char* c;
   const char* m;
   time_t ims=0;
-  uint64 range_first,range_last;
+  unsigned long long range_first,range_last;
   h->filefd=-1;
 
   ++rps1;
   array_cat0(&h->r);
   c=array_start(&h->r);
-  if (byte_diff(c,4,"GET ") && byte_diff(c,5,"POST ") && byte_diff(c,5,"HEAD ")) {
+  if (byte_diff(c,4,"GET ") && byte_diff(c,5,"POST ") &&
+#ifdef SUPPORT_PUT
+      byte_diff(c,4,"PUT ") &&
+#endif
+      byte_diff(c,5,"HEAD ")) {
 e400:
-    httperror(h,"400 Invalid Request","This server only understands GET and HEAD.",0);
+    httperror(h,"400 Invalid Request","This server does not understand this HTTP verb.",0);
 
     if (logging) {
       char numbuf[FMT_ULONG];
@@ -1975,7 +2022,10 @@ e400:
     struct stat ss;
     char* tmp;
     head=c[0]=='H';
-    post=c[0]=='P';
+    post=c[1]=='O';
+#ifdef SUPPORT_PUT
+    put=c[1]=='U';
+#endif
     c+=(head||post)?5:4;
     for (d=c; *d!=' '&&*d!='\t'&&*d!='\n'&&*d!='\r'; ++d) ;
     if (*d!=' ') goto e400;
@@ -2017,6 +2067,9 @@ e404:
 #ifdef SUPPORT_HTTPS
 	if (h->t == HTTPSREQUEST)
 	  buffer_puts(buffer_1,"HTTPS/");
+#endif
+#ifdef SUPPORT_PUT
+	if (put) buffer_puts(buffer_1,"PUT/404 "); else
 #endif
 	buffer_puts(buffer_1,head?"HEAD/404 ":post?"POST/404 ":"GET/404 ");
 	buffer_putulong(buffer_1,s);
@@ -2823,9 +2876,9 @@ void ftpresponse(struct http_data* h,int64 s) {
 	h->hdrbuf="230 No need for passwords, you're logged in now.\r\n";
     } else {
       if (askforpassword)
-	h->hdrbuf="230 I only serve anonymous users.  But I'll make an exception.\r\n";
-      else
 	h->hdrbuf="331 I only serve anonymous users.  But I'll make an exception.\r\n";
+      else
+	h->hdrbuf="230 I only serve anonymous users.  But I'll make an exception.\r\n";
     }
     h->f=LOGGEDIN;
   } else if (case_starts(c,"PASS ")) {
@@ -3023,7 +3076,7 @@ syntaxerror:
   } else if (case_equals(c,"SYST")) {
     h->hdrbuf="215 UNIX Type: L8\r\n";
   } else if (case_starts(c,"REST ")) {
-    uint64 x;
+    unsigned long long x;
     c+=5;
     if (!c[scan_ulonglong(c,&x)]) {
       h->hdrbuf="350 ok.\r\n";
@@ -4491,28 +4544,29 @@ pipeline:
 	  ftpresponse(H,i);
 #endif
 #ifdef SUPPORT_PROXY
-	if (H->t != HTTPPOST && l < (alen=array_bytes(&H->r)))
-#else
-	if (l < (alen=array_bytes(&H->r)))
+	if (H->t != HTTPPOST) {
 #endif
-	{
-	  char* c=array_start(&H->r);
-	  byte_copy(c,alen-l,c+l);
-	  array_truncate(&H->r,1,alen-l);
-	  l=header_complete(H);
+	  if (l < (alen=array_bytes(&H->r))) {
+	    char* c=array_start(&H->r);
+	    byte_copy(c,alen-l,c+l);
+	    array_truncate(&H->r,1,alen-l);
+	    l=header_complete(H);
 
 #if 0
-	  write(1,"\n\n",2);
-	  write(1,array_start(&H->r),array_bytes(&H->r));
-	  write(1,"\n\n",2);
+	    write(1,"\n\n",2);
+	    write(1,array_start(&H->r),array_bytes(&H->r));
+	    write(1,"\n\n",2);
 #endif
 
-	  if (l) {
-	    if (H->r.initialized) --H->r.initialized;
-	    goto pipeline;
-	  }
-	} else
-	  array_reset(&H->r);
+	    if (l) {
+	      if (H->r.initialized) --H->r.initialized;
+	      goto pipeline;
+	    }
+	  } else
+	    array_reset(&H->r);
+#ifdef SUPPORT_PROXY
+	}
+#endif
       }
     }
   }
@@ -4715,7 +4769,7 @@ int main(int argc,char* argv[],char* envp[]) {
   unsigned long ftptimeout_secs=600;
   char* new_uid=0;
   char* chroot_to=0;
-  uint64 prefetchquantum=0;
+  unsigned long long prefetchquantum=0;
   pid_t* Instances;
 
 #ifdef SMDEBUG

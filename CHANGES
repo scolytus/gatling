@@ -32,6 +32,7 @@
   fix memory leak in proxy_connection() (Johannes Vetter)
   dl: when printing an ftp directory listing, filter \r
   dl: in -i mode, don't complain if utime fails
+  attempt to fix POST
 
 0.8:
   fix pipelining bug
