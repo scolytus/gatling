@@ -769,7 +769,6 @@ punt2:
 	  size_t size_of_header=header_complete(ctx_for_sockfd);
 	  size_t size_of_data_in_packet=array_bytes(&ctx_for_sockfd->r) - size_of_header - 1;
 	    /* the -1 is for the \0 we appended */
-	  size_t size_to_copy=size_of_data_in_packet>content_length?content_length:size_of_data_in_packet;
 
 	  if (size_of_data_in_packet) {
 	    byte_copy(array_start(&ctx_for_sockfd->r),
@@ -785,27 +784,10 @@ punt2:
 	    ctx_for_sockfd->still_to_copy=content_length;
 	  }
 
-#if 0
-	  if (size_to_copy)
-	    array_catb(&ctx_for_gatewayfd->r,array_start(&ctx_for_sockfd->r)+size_of_header,size_to_copy);
-	  ctx_for_sockfd->still_to_copy=content_length-size_to_copy;
-
-	  if (size_of_data_in_packet > size_to_copy) {	/* there is more data in the buffer, copy it to the front */
-	    size_t size_of_rest=array_bytes(&ctx_for_sockfd->r)-size_of_header-size_to_copy;
-	    byte_copy(array_start(&ctx_for_sockfd->r),
-		      size_of_rest,
-		      array_start(&ctx_for_sockfd->r)+size_of_header+size_to_copy);
-	    array_truncate(&ctx_for_sockfd->r,1,size_of_rest);
-	  }
-
-	  if (ctx_for_sockfd->still_to_copy)
-	    ctx_for_sockfd->t=HTTPPOST;
-	  else
-	    ctx_for_sockfd->t=HTTPREQUEST;
-#endif
-
 	  if (ctx_for_gatewayfd->still_to_copy && array_bytes(&ctx_for_sockfd->r))
 	    io_wantwrite(fd_to_gateway);
+	  else
+	    io_wantread(fd_to_gateway);
 
 	  if (ctx_for_sockfd->still_to_copy)
 	    io_wantread(sockfd);
