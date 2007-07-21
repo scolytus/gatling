@@ -33,7 +33,7 @@ char* todel;
 void alarm_handler(int dummy) {
   (void)dummy;
   if (todel) unlink(todel);
-  exit(0);
+  exit(1);
 }
 
 static void carp(const char* routine) {
