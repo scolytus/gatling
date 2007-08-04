@@ -1,7 +1,6 @@
 #define _FILE_OFFSET_BITS 64
 #include "socket.h"
 #include "byte.h"
-#include "dns.h"
 #include "buffer.h"
 #include "scan.h"
 #include "ip6.h"
@@ -9,6 +8,7 @@
 #include "fmt.h"
 #include "ip4.h"
 #include "io.h"
+#include "stralloc.h"
 #include "textcode.h"
 #include <sys/types.h>
 #include <unistd.h>
@@ -26,7 +26,12 @@
 #endif
 #include <sys/stat.h>
 #include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 #include "havealloca.h"
+
+int dostats;
 
 char* todel;
 
@@ -51,6 +56,73 @@ static void panic(const char* routine) {
   carp(routine);
   exit(111);
 }
+
+static unsigned long long int total;
+
+void printstats(unsigned long long nextchunk) {
+  static unsigned long long int finished;
+  static time_t start,now,prev;
+  finished+=nextchunk;
+  if (start==0) {
+    start=now=prev=time(0);
+    return;
+  }
+  prev=now; now=time(0);
+  if (prev!=now) {
+    char received[FMT_ULONG], totalsize[FMT_ULONG], timedone[FMT_ULONG], percent[10];
+    size_t i,j;
+    if (total) {
+      if (total>1000000000)
+	i=finished/(total/10000);
+      else
+	i=finished*10000/total;
+      j=fmt_ulong(percent,i/100);
+      percent[j]='.';
+      percent[j+1]=((i/10)%10)+'0';
+      percent[j+2]=(i%10)+'0';
+      percent[j+3]=0;
+    } else
+      strcpy(percent,"100.00");
+    received[fmt_humank(received,finished)]=0;
+    totalsize[fmt_humank(totalsize,total)]=0;
+
+    if (now-start>=60) {
+      j=fmt_ulong(timedone,(now-start)/60);
+      timedone[j]=':';
+      i=(now-start)%60;
+      timedone[j+1]=(i/10)+'0';
+      timedone[j+2]=(i%10)+'0';
+      timedone[j+3]=0;
+    } else {
+      j=fmt_ulong(timedone,now-start);
+      j+=fmt_str(timedone+j," sec");
+      timedone[j]=0;
+    }
+
+    if (now-start) {
+      unsigned long long int bps=finished/(now-start);
+      size_t k=(total-finished)/bps;
+      char lm[FMT_ULONG];
+
+      if (k>=60) {
+	j=fmt_ulong(lm,k/60);
+	lm[j]=':';
+	i=k%60;
+	lm[j+1]=(i/10)+'0';
+	lm[j+2]=(i%10)+'0';
+	lm[j+3]=0;
+      } else {
+	j=fmt_ulong(lm,k);
+	j+=fmt_str(lm+j," sec");
+	lm[j]=0;
+      }
+
+      buffer_putmflush(buffer_2,percent,"% done; got ",received," of ",totalsize," in ",timedone,", ",lm," to go.    \r");
+    } else
+      buffer_putmflush(buffer_2,percent,"% done; got ",received," of ",totalsize," in ",timedone,".    \r");
+  }
+}
+
 
 static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   int v6=byte_diff(ip,12,V4mappedprefix);
@@ -128,6 +200,7 @@ static int readanswer(int s,const char* filename) {
     }
   }
   if (r==-1) return -1;
+  if (d==1) dostats=!isatty(1);
   if (httpcode!= (resumeofs?206:200)) return 0;
   rest=-1; nocl=1;
   buf[r]=0;
@@ -148,7 +221,9 @@ static int readanswer(int s,const char* filename) {
     }
     ++j;
   }
+  total=rest;
   rest-=(r-body);
+  printstats(total-rest);
   while (nocl || rest) {
     r=read(s,buf,nocl?sizeof(buf):(rest>sizeof(buf)?sizeof(buf):rest));
     if (r<1) {
@@ -162,6 +237,7 @@ static int readanswer(int s,const char* filename) {
 	return -1;
       }
     } else {
+      printstats(r);
       if (write(d,buf,r)!=r)
 	panic("write");
       rest-=r;
@@ -232,7 +308,7 @@ static int scan_int2digit(const char* s, int* i) {
 }
 
 static inline int issafe(unsigned char c) {
-  return (c!='"' && c>=' ' && c!='+');
+  return (c!='"' && c>' ' && c!='+');
 }
 
 size_t fmt_urlencoded(char* dest,const char* src,size_t len) {
@@ -277,6 +353,8 @@ int main(int argc,char* argv[]) {
   enum {HTTP, FTP} mode;
   int skip;
   buffer ftpbuf;
+
+  dostats=isatty(2);
 
 #ifndef __MINGW32__
   signal(SIGPIPE,SIG_IGN);
@@ -408,14 +486,30 @@ again:
     }
 
     {
-      stralloc a={0};
-      stralloc_copys(&a,host);
+      struct addrinfo hints, *ai, *aitop;
+      int gaierr;
+      char p[FMT_ULONG];
+      p[fmt_ulong(p,port)]=0;
+      memset(&hints,0,sizeof(hints));
+      hints.ai_family=AF_UNSPEC;
+      hints.ai_flags=0;
+      hints.ai_socktype=0;
       if (verbose) buffer_putsflush(buffer_1,"DNS lookup... ");
-      if (dns_ip6(&ips,&a)==-1 || ips.len==0) {
+      if ((gaierr = getaddrinfo(host,p,&hints,&aitop)) != 0 || !aitop) {
 	buffer_puts(buffer_2,"dl: could not resolve IP: ");
 	buffer_puts(buffer_2,host);
 	buffer_putnlflush(buffer_2);
 	return 1;
+      }
+      ai=aitop;
+      while (ai) {
+	if (ai->ai_family==AF_INET6)
+	  stralloc_catb(&ips,(char*)&(((struct sockaddr_in6*)ai->ai_addr)->sin6_addr),16);
+	else {
+	  stralloc_catb(&ips,V4mappedprefix,12);
+	  stralloc_catb(&ips,(char*)&(((struct sockaddr_in*)ai->ai_addr)->sin_addr),4);
+	}
+	ai=ai->ai_next;
       }
       if (verbose) buffer_putsflush(buffer_1,"done\n");
     }
@@ -696,6 +790,15 @@ again:
       }
       if (((i=ftpcmd2(s,&ftpbuf,"RETR ",pathname))!=150) && i!=125) panic("No 125/150 response to RETR\n");
       if (verbose) buffer_putsflush(buffer_1,"ok.  Downloading...\n");
+      total=0;
+      if (stralloc_0(&ftpresponse)) {
+	char* c=strchr(ftpresponse.s,'(');
+	if (c) {
+	  ++c;
+	  if (!scan_ulonglong(c,&total))
+	    total=0;
+	}
+      }
     }
     {
       char buf[8192];
@@ -704,8 +807,12 @@ again:
       if (filename[0]) {
 	if ((resume?io_appendfile(&d,filename):io_createfile(&d,filename))==0)
 	  panic("creat");
-      } else d=1;
+      } else {
+	d=1;
+	dostats=!isatty(1);
+      }
       while ((l=read(dataconn,buf,sizeof buf))>0) {
+	if (dostats) printstats(l);
 	if (d==1) {
 	  unsigned int i,j;
 	  for (i=j=0; i<l; ++i)

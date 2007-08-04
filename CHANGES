@@ -33,6 +33,7 @@
   dl: when printing an ftp directory listing, filter \r
   dl: in -i mode, don't complain if utime fails
   attempt to fix POST
+  make dl print some statistics if stderr is a TTY
 
 0.8:
   fix pipelining bug
