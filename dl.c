@@ -41,7 +41,10 @@ void alarm_handler(int dummy) {
   exit(1);
 }
 
+static void clearstats();
+
 static void carp(const char* routine) {
+  clearstats();
   buffer_puts(buffer_2,"dl: ");
   buffer_puts(buffer_2,routine);
   if (routine[0] && routine[str_len(routine)-1]!='\n') {
@@ -58,6 +61,8 @@ static void panic(const char* routine) {
 }
 
 static unsigned long long int total;
+
+static int statsprinted;
 
 void printstats(unsigned long long nextchunk) {
   static unsigned long long int finished;
@@ -99,7 +104,7 @@ void printstats(unsigned long long nextchunk) {
       timedone[j]=0;
     }
 
-    if (now-start) {
+    if (now > start+3 && now-start) {
       unsigned long long int bps=finished/(now-start);
       size_t k=(total-finished)/bps;
       char lm[FMT_ULONG];
@@ -120,7 +125,12 @@ void printstats(unsigned long long nextchunk) {
       buffer_putmflush(buffer_2,percent,"% done; got ",received," of ",totalsize," in ",timedone,", ",lm," to go.    \r");
     } else
       buffer_putmflush(buffer_2,percent,"% done; got ",received," of ",totalsize," in ",timedone,".    \r");
+    statsprinted=1;
   }
+}
+
+static void clearstats() {
+  if (statsprinted) buffer_putsflush(buffer_2,"\e[K");
 }
 
 
@@ -842,5 +852,6 @@ skipdownload:
       if (errno!=ENOENT || !imode)
 	panic("utime");
   }
+  clearstats();
   return 0;
 }
