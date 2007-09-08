@@ -1,4 +1,5 @@
 #define _FILE_OFFSET_BITS 64
+#define _GNU_SOURCE
 #include "socket.h"
 #include "byte.h"
 #include "buffer.h"
@@ -188,6 +189,7 @@ static int readanswer(int s,const char* filename) {
 	      location=l;
 	      while (*l && *l != '\r' && *l != '\n') ++l;
 	      *l=0;
+	      location=strndup(location,l-location);
 	      return -2;
 	    }
 	    return -1;
