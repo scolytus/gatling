@@ -606,12 +606,13 @@ again:
     if (write(s,request,rlen)!=rlen) panic("write");
     switch (readanswer(s,filename)) {
     case -1: exit(1);
-    case -2: argv[optind]=location; location=0;
+    case -2: argv[optind]=location;
 	     if (verbose) {
 	       buffer_puts(buffer_1,"redirected to ");
 	       buffer_puts(buffer_1,location);
 	       buffer_putsflush(buffer_1,"...\n");
 	     }
+	     location=0;
 	     goto again;
     }
   } else if (mode==FTP) {
