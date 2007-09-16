@@ -161,7 +161,7 @@ unsigned long long resumeofs;
 
 char* location;
 
-static int readanswer(int s,const char* filename) {
+static int readanswer(int s,const char* filename,int onlyprintlocation) {
   char buf[8192];
   int i,j,body=-1,r;
   int64 d;
@@ -175,7 +175,11 @@ static int readanswer(int s,const char* filename) {
       if (buf[j]=='\r' && buf[j+1]=='\n' && buf[j+2]=='\r' && buf[j+3]=='\n') {
 	unsigned long code;
 	body=j+4;
-	if (scan_ulong(buf+9,&code)) httpcode=code;
+	if (scan_ulong(buf+9,&code))
+	  httpcode=code;
+	else
+	  goto kaputt;
+	if (onlyprintlocation && (code/10 != 30)) return 0;
 	if ((resumeofs && code==206 && io_appendfile(&d,filename)==0) ||
 	    (!resumeofs && code==200 && ((strcmp(filename,"-"))?io_createfile(&d,filename)==0:((d=1)-1))))
 	  panic("creat");
@@ -205,6 +209,7 @@ static int readanswer(int s,const char* filename) {
     }
     if (body!=-1) {
       if (byte_diff(buf,7,"HTTP/1.")) {
+kaputt:
 	buffer_putsflush(buffer_2,"invalid HTTP response!\n");
 	return -1;
       }
@@ -350,6 +355,7 @@ int main(int argc,char* argv[]) {
   int resume=0;
   int keepalive=0;
   int imode=0;
+  int onlyprintlocation=0;
   char ip[16];
   uint16 port=80;
   uint32 scope_id=0;
@@ -373,7 +379,7 @@ int main(int argc,char* argv[]) {
 #endif
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:");
+    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:l");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -412,6 +418,9 @@ int main(int argc,char* argv[]) {
     case 'R':
       referer=optarg;
       break;
+    case 'l':
+      onlyprintlocation=1;
+      break;
     case 'a':
 #ifndef __MINGW32__
       {
@@ -434,6 +443,7 @@ usage:
 		       "	-O fn	write output to fn\n"
 		       "	-U s	set User-Agent HTTP header\n"
 		       "	-R s	set Referer HTTP header\n"
+		       "	-l	just print value of Location: header\n"
 		       "	-v	be verbose\n");
       return 0;
     }
@@ -553,7 +563,10 @@ again:
       if (!request) panic("malloc");
       {
 	int i;
-	i=fmt_str(request,"GET ");
+	if (onlyprintlocation)
+	  i=fmt_str(request,"HEAD ");
+	else
+	  i=fmt_str(request,"GET ");
 	i+=fmt_urlencoded(request+i,c,str_len(c));
 	i+=fmt_str(request+i," HTTP/1.0\r\nHost: ");
 	i+=fmt_str(request+i,host);
@@ -606,9 +619,14 @@ again:
   }
   if (mode==HTTP) {
     if (write(s,request,rlen)!=rlen) panic("write");
-    switch (readanswer(s,filename)) {
+    switch (readanswer(s,filename,onlyprintlocation)) {
     case -1: exit(1);
     case -2: argv[optind]=location;
+	     if (onlyprintlocation) {
+	       buffer_puts(buffer_1,location);
+	       buffer_putnlflush(buffer_1);
+	       return 0;
+	     }
 	     if (verbose) {
 	       buffer_puts(buffer_1,"redirected to ");
 	       buffer_puts(buffer_1,location);
