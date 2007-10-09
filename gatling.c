@@ -101,7 +101,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <ctype.h>
-#include <crypt.h>
+// #include <crypt.h>
 #include <md5.h>
 #include "havealloca.h"
 #include "havesetresuid.h"
