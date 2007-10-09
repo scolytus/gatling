@@ -102,8 +102,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <crypt.h>
+#include <md5.h>
 #include "havealloca.h"
 #include "havesetresuid.h"
+
+MD5_CTX md5_ctx;
 
 unsigned long instances=1;
 unsigned long timeout_secs=23;
@@ -1970,6 +1973,54 @@ static int is_private_ip(const unsigned char* ip) {
 }
 #endif
 
+static void get_md5_randomness(const uint8_t* randomness,size_t len,char digest[16]) {
+  MD5_CTX temp;
+  static int initialized;
+  if (!initialized) {
+    int fd=open("/dev/urandom",O_RDONLY);
+    unsigned char buf[16];
+    read(fd,buf,16);
+    close(fd);
+    MD5Init(&md5_ctx);
+    MD5Update(&md5_ctx,buf,16);
+    initialized=1;
+  }
+  MD5Update(&md5_ctx,randomness,len);
+  memcpy(&temp,&md5_ctx,sizeof(temp));
+  MD5Final((uint8_t*)digest,&temp);
+}
+
+size_t scan_range(const char* s,unsigned long long* x,size_t maxranges,unsigned long long filesize) {
+  unsigned long long start,end;
+  size_t used=0;
+  /* possible formats: "-5", "1-3", "10-" */
+  while (*s!='\r' && *s!='\n' && *s) {
+    if (isdigit(*s))
+      s+=scan_ulonglong(s,&start);
+    else
+      start=0;
+    end=filesize;
+    if (*s=='-') {
+      ++s;
+      if (isdigit(*s))
+	s+=scan_ulonglong(s,&end);
+    }
+    if (used+1<maxranges) {
+      x[used]=start;
+      x[used+1]=end;
+    } else
+      return 0;
+    used+=2;
+    if (*s==',') {
+      ++s;
+      continue;
+    }
+    if (*s=='\r' || *s=='\n' || *s==0)
+      return used;
+  }
+  return 0;
+}
+
 void httpresponse(struct http_data* h,int64 s,long headerlen) {
   int head,post;
 #ifdef SUPPORT_PUT
@@ -2146,6 +2197,11 @@ e404:
 	return;
 #endif
       } else {
+	char* multirange=0;
+	unsigned long long ranges[20];
+	unsigned long long bytes=0;
+	size_t n=0,headersize=0;
+	char hex[16];
 #ifdef DEBUG
 	if (logging) {
 	  buffer_puts(buffer_1,"filefd ");
@@ -2162,19 +2218,47 @@ e404:
 	    ims=0;
 	if ((c=http_header(h,"Range"))) {
 	  if (byte_equal(c,6,"bytes=")) {
-	    int i;
+	    size_t i;
 	    c+=6;
-	    if ((i=scan_ulonglong(c,&range_first))) {
-	      c+=i;
-	      if (*c=='-' && c[1]) {
-		++c;
-		if ((i=scan_ulonglong(c,&range_last))) {
-		  if (!i) goto rangeerror;
-		  ++range_last;
-		}
+	    n=scan_range(c,ranges,sizeof(ranges)/sizeof(ranges[0])/2,ss.st_size);
+
+	    /* the ranges could still be bogus, i.e. 4-2, or the sum
+	      * could be more than just sending the whole file. */
+	    for (i=0; i<n; i+=2) {
+	      if (ranges[i]>=ranges[i+1] ||	// zero or less size
+	          bytes+(ranges[i+1]-ranges[i]+1) < bytes) {	/* int overflow */
+		n=0;
+		break;
+	      }
+	      bytes+=(ranges[i+1]-ranges[i]+1);
+	      if (bytes>ss.st_size) {
+		n=0;
+		break;
+	      }
+	    }
+
+	    if (n) {
+	      /* n will be a multiple of two here */
+	      if (n==2) {
+		/* just one range, common case */
+		range_first=ranges[0];
+		range_last=ranges[1];
+	      } else {
+		size_t overhead=(sizeof("\r\n--eba5aaeb1a3913f0ed90259cf85a1ea7\r\nContent-Type: \r\nContent-Range: bytes -/\r\n\r\n")-1+
+		  strlen(h->mimetype)+fmt_ulonglong(NULL,ss.st_size))*(n/2)+
+		  sizeof("\r\n--eba5aaeb1a3913f0ed90259cf85a1ea7--\r\n")-1;
+		for (i=0; i<n; i+=2)
+		  overhead+=fmt_ulonglong(NULL,ranges[i])+fmt_ulonglong(NULL,ranges[i+1]);
+		if (bytes+overhead<bytes)
+		  goto rangekaputt;
+		headersize=overhead;
+//		printf("bytes=%llu, overhead=%zu, header size=%zu\n",bytes,overhead,headersize);
+		bytes+=overhead;
+		if (bytes<ss.st_size)
+		  multirange=c;
 	      }
 	    } else {
-rangeerror:
+rangekaputt:
 #ifdef DEBUG
 	      if (logging) {
 		buffer_puts(buffer_1,"bad_range_close ");
@@ -2201,16 +2285,26 @@ rangeerror:
 	  c+=fmt_str(c,"HTTP/1.1 304 Not Changed");
 	  head=1; range_last=range_first;
 	  io_close(fd); fd=-1;
-	} else
-	  if (range_first || range_last!=ss.st_size)
+	  multirange=0;
+	} else {
+	  if (multirange || range_first || range_last!=ss.st_size)
 	    c+=fmt_str(c,"HTTP/1.1 206 Partial Content");
 	  else
 	    c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
+	}
 
-	c+=fmt_str(c,"\r\nContent-Type: ");
-	c+=fmt_str(c,h->mimetype);
-	c+=fmt_str(c,"\r\nAccept-Ranges: bytes\r\nServer: " RELEASE "\r\nContent-Length: ");
-	c+=fmt_ulonglong(c,range_last-range_first);
+	c+=fmt_str(c,"\r\nAccept-Ranges: bytes\r\nServer: " RELEASE "\r\nContent-Type: ");
+	if (multirange) {
+	  c+=fmt_str(c,"multipart/byteranges; boundary=");
+	  get_md5_randomness((uint8_t*)multirange,str_chr(multirange,'\n'),hex);
+	  c+=fmt_hexdump(c,hex,16);
+	  c+=fmt_str(c,"\r\nContent-Length: ");
+	  c+=fmt_ulonglong(c,bytes);
+	} else {
+	  c+=fmt_str(c,h->mimetype);
+	  c+=fmt_str(c,"\r\nContent-Length: ");
+	  c+=fmt_ulonglong(c,range_last-range_first);
+	}
 
 	c+=fmt_str(c,"\r\nDate: ");
 	c+=fmt_httpdate(c,now.sec.x&0xfffffffffffull);
@@ -2242,9 +2336,43 @@ rangeerror:
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	  c+=fmt_str(c,"\r\n\r\n");
 	  iob_addbuf_free(&h->iob,h->hdrbuf,c - h->hdrbuf);
-	  if (!head)
-	    iob_addfile_close(&h->iob,fd,range_first,range_last-range_first);
-	  else
+	  if (!head) {
+	    if (multirange) {
+	      char* buf=malloc(headersize+5);
+	      char* c,* x;
+	      size_t i,flen;
+
+	      c=buf+fmt_str(buf,"\r\n--");
+	      c+=fmt_hexdump(c,hex,16);
+	      c+=fmt_str(c,"--\r\n");
+	      flen=c-buf;
+
+	      x=c;
+
+	      for (i=0; i<n; i+=2) {
+		c=x+fmt_str(x,"\r\n--");
+		c+=fmt_hexdump(c,hex,16);
+		c+=fmt_str(c,"\r\nContent-Type: ");
+		c+=fmt_str(c,h->mimetype);
+		c+=fmt_str(c,"\r\nContent-Range: bytes ");
+		c+=fmt_ulonglong(c,ranges[i]);
+		c+=fmt_str(c,"-");
+		c+=fmt_ulonglong(c,ranges[i+1]);
+		c+=fmt_str(c,"/");
+		c+=fmt_ulonglong(c,ss.st_size);
+		c+=fmt_str(c,"\r\n\r\n");
+		iob_addbuf(&h->iob,x,c-x);
+		if (i+2<n)
+		  iob_addfile(&h->iob,fd,ranges[i],ranges[i+1]-ranges[i]+1);
+		else
+		  iob_addfile_close(&h->iob,fd,ranges[i],ranges[i+1]-ranges[i]+1);
+		x=c;
+	      }
+	      printf("wrote %lu bytes, reserved %lu\n",c-buf,headersize);
+	      iob_addbuf_free(&h->iob,buf,flen);
+	    } else
+	      iob_addfile_close(&h->iob,fd,range_first,range_last-range_first);
+	  } else
 	    if (fd!=-1) io_close(fd);
 	  if (logging) {
 	    if (h->hdrbuf[9]=='3') {

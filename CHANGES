@@ -1,4 +1,5 @@
 0.10:
+  add multi-ranges (only used by the Acrobat Reader plugin AFAIK)
 
 0.9:
   add /server-status

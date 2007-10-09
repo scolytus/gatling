@@ -6,9 +6,8 @@
 
 size_t hash(const char* word) {
   size_t x;
-  for (x=0; *word; ++word) {
-    x = x*5^*word;
-  }
+  for (x=0; *word; ++word)
+    x = (x + (x << 5)) ^ *word;
   return x;
 }
 
