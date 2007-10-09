@@ -2368,7 +2368,6 @@ rangekaputt:
 		  iob_addfile_close(&h->iob,fd,ranges[i],ranges[i+1]-ranges[i]+1);
 		x=c;
 	      }
-	      printf("wrote %lu bytes, reserved %lu\n",c-buf,headersize);
 	      iob_addbuf_free(&h->iob,buf,flen);
 	    } else
 	      iob_addfile_close(&h->iob,fd,range_first,range_last-range_first);
