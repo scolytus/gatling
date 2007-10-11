@@ -3707,6 +3707,7 @@ void forkslave(int fd,buffer* in) {
 	    if (cginame[j]=='?') {
 	      args=cginame+j+1;
 	      cginame[j]=0;
+	      i=j;
 	    }
 
 	    /* now cginame is test/t.cgi/something */
@@ -4959,7 +4960,7 @@ int main(int argc,char* argv[],char* envp[]) {
   {	/* debug test for the forkslave code */
     int64 fd;
     uint32 a; uint16 b;
-    char* req="GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n";
+    char* req="GET /?/ HTTP/1.0\r\nHost: localhost:80\r\n\r\n";
     char* dir="default";
     char* ra="127.0.0.1";
     a=strlen(req); write(forksock[0],&a,4);
