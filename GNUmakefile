@@ -71,13 +71,17 @@ pthreadbench: pthreadbench.o
 forksbench: forkbench.o
 	$(CC) -static -o $@ forkbench.o $(LDFLAGS) $(LDLIBS)
 
-gatling.o: version.h havesetresuid.h
+gatling.o: havesetresuid.h
 
-tlsgatling: gatling.c ssl.o mime.o
-	-$(CC) -o $@ gatling.c ssl.o mime.o $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+OBJS=mime.o ftp.o http.o
 
-gatling: gatling.o mime.o
-	$(CC) $(LDFLAGS) $@.o mime.o -o $@ $(LDLIBS)
+$(OBJS) gatling.o: gatling.h version.h features.h
+
+tlsgatling: gatling.c ssl.o $(OBJS)
+	-$(CC) -o $@ gatling.c ssl.o $(OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+
+gatling: gatling.o $(OBJS)
+	$(CC) $(LDFLAGS) $@.o $(OBJS) -o $@ $(LDLIBS)
 
 httpbench: httpbench.o
 bindbench: bindbench.o

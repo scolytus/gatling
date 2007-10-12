@@ -1,11 +1,15 @@
+#include "gatling.h"
+
 #include "mmap.h"
+#include "str.h"
+#include "byte.h"
+
 #include <sys/types.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include <stdio.h>
+#include <ctype.h>
 
 struct arena {
   struct arena* next;
@@ -204,7 +208,124 @@ const char* find_mime_type(const char* extension,const char* filename,time_t now
   return 0;
 }
 
+struct mimeentry mimetab[] = {
+  { "html",	"text/html" },
+  { "ico",	"image/x-icon" },
+  { "txt",	"text/plain" },
+  { "css",	"text/css" },
+  { "dvi",	"application/x-dvi" },
+  { "ps",	"application/postscript" },
+  { "pdf",	"application/pdf" },
+  { "gif",	"image/gif" },
+  { "png",	"image/png" },
+  { "jpeg",	"image/jpeg" },
+  { "bild",	"image/jpeg" },
+  { "jpg",	"image/jpeg" },
+  { "mpeg",	"video/mpeg" },
+  { "mpg",	"video/mpeg" },
+  { "avi",	"video/x-msvideo" },
+  { "mov",	"video/quicktime" },
+  { "qt",	"video/quicktime" },
+  { "mp3",	"audio/mpeg" },
+  { "ogg",	"application/ogg" },
+  { "wav",	"audio/x-wav" },
+  { "pac",	"application/x-ns-proxy-autoconfig" },
+  { "sig",	"application/pgp-signature" },
+  { "torrent",	"application/x-bittorrent" },
+  { "rss",	"application/rss+xml" },
+  { "class",	"application/octet-stream" },
+  { "js",	"application/x-javascript" },
+  { "tar",	"application/x-tar" },
+  { "zip",	"application/zip" },
+  { "rar",	"application/x-rar-compressed" },
+  { "7z",	"application/x-7z-compressed" },
+  { "dtd",	"text/xml" },
+  { "xml",	"text/xml" },
+  { "xbm",	"image/x-xbitmap" },
+  { "xpm",	"image/x-xpixmap" },
+  { "xwd",	"image/x-xwindowdump" },
+  { "text",	"text/plain" },
+  { "txt",	"text/plain" },
+  { "m3u",	"audio/x-mpegurl" },
+  { "htm",	"text/html" },
+  { "swf",	"application/x-shockwave-flash" },
+  { "md5",	"text/plain" },
+  { "wmv",	"video/x-ms-wmv" },
+  { "mp4",	"video/mp4" },
+  { "m4a",	"audio/mp4" },
+  { "nzb",	"application/x-nzb" },
+  { 0 } };
+
+const char* mimetype(const char* filename,int fd) {
+  int i,e=str_rchr(filename,'.');
+  if (filename[e]) {
+    ++e;
+    if (mimetypesfilename) {
+      const char* x=find_mime_type(filename+e,mimetypesfilename,now.sec.x-4611686018427387914ULL);
+      if (x) return x;
+    }
+    for (i=0; mimetab[i].name; ++i)
+      if (str_equal(mimetab[i].name,filename+e))
+	return mimetab[i].type;
+  }
+#ifdef SUPPORT_MIMEMAGIC
+  {
+    char buf[300];
+    int r;
+    r=pread(fd,buf,sizeof(buf),0);
+    if (r>=1 && buf[0]=='<') {
+      if (r>1 && buf[1]=='?') {
+	char* c;
+	if (r>=100)
+	  for (c=buf+1; c<buf+r-5; ++c) {
+	    if (*c=='<') {
+	      if (c<buf+r-8 && byte_equal(c,8,"<rdf:RDF"))
+		return "application/rss+xml";
+	      else if (c<buf+r-8 && byte_equal(c,5,"<rss "))
+		return "application/rss+xml";
+	    }
+	  }
+	return "text/xml";
+      } else if (buf[1]=='!' || isalnum(buf[1]))
+	return "text/html";
+    } else if (r>=5 && byte_equal(buf,4,"GIF9"))
+      return "image/gif";
+    else if (r>=4 && byte_equal(buf,4,"\x89PNG"))
+      return "image/png";
+    else if (r>=10 && byte_equal(buf,2,"\xff\xd8"))
+      return "image/jpeg";
+    else if (r>=5 && byte_equal(buf,5,"%PDF-"))
+      return "application/pdf";
+    else if (r>=4 && (byte_equal(buf,3,"ID3") || byte_equal(buf,2,"\xff\xfb")))
+      return "audio/mpeg";
+    else if (r>=4 && byte_equal(buf,4,"OggS"))
+      return "application/ogg";
+    else if (r>=4 && byte_equal(buf,4,"RIFF")) {
+      if (r>=16 && byte_equal(buf+8,3,"AVI"))
+	return "video/x-msvideo";
+      else
+	return "audio/x-wav";
+    } else if (r==100 && byte_equal(buf+4,4,"moov"))
+      return "video/quicktime";
+    else if (r==100 && byte_equal(buf+4,8,"ftypqt  ") && byte_equal(buf+0x24,4,"moov"))
+      return "video/quicktime";
+    else if (r==100 && byte_equal(buf+4,7,"ftypmp4"))
+      return "video/mp4";
+    else if (r>=4 && byte_equal(buf,4,"\x30\x26\xb2\x75"))
+      return "video/x-ms-asf";
+  }
+#else
+  else
+    return "text/plain";
+#endif
+  return "application/octet-stream";
+}
+
+
 #ifdef MIME_MAIN
+
+#include <stdio.h>
+
 int main() {
   unsigned int i;
   parse_mime_types("/etc/mime.types");

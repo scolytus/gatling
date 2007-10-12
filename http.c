@@ -1,0 +1,1755 @@
+#include "gatling.h"
+
+#include "buffer.h"
+#include "fmt.h"
+#include "ip6.h"
+#include "mmap.h"
+#include "str.h"
+#include "textcode.h"
+#include "scan.h"
+#include "socket.h"
+#include "case.h"
+#include "ip4.h"
+
+#include <stdlib.h>
+#include <dirent.h>
+#include <md5.h>
+#include <errno.h>
+#include <string.h>
+#include <time.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <ctype.h>
+
+MD5_CTX md5_ctx;
+
+static inline int issafe(unsigned char c) {
+  return (c!='"' && c!='%' && c>=' ' && c!='+' && c!=':' && c!='#');
+}
+
+size_t fmt_urlencoded(char* dest,const char* src,size_t len) {
+  register const unsigned char* s=(const unsigned char*) src;
+  size_t written=0,i;
+  for (i=0; i<len; ++i) {
+    if (!issafe(s[i])) {
+      if (dest) {
+	dest[written]='%';
+	dest[written+1]=fmt_tohex(s[i]>>4);
+	dest[written+2]=fmt_tohex(s[i]&15);
+      }
+      written+=3;
+    } else {
+      if (dest) dest[written]=s[i]; ++written;
+    }
+  }
+  return written;
+}
+
+void catencoded(array* a,char* s) {
+  unsigned int len=str_len(s);
+  char* buf=alloca(fmt_urlencoded(0,s,len));
+  array_catb(a,buf,fmt_urlencoded(buf,s,len));
+}
+
+void cathtml(array* a,char* s) {
+  unsigned int len=str_len(s);
+  char* buf=alloca(fmt_html(0,s,len));
+  array_catb(a,buf,fmt_html(buf,s,len));
+}
+
+int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg) {
+  long i,o,n;
+  struct dirent* d;
+  int (*sortfun)(de*,de*);
+  array a,b,c;
+  de* ab;
+  byte_zero(&a,sizeof(a));
+  byte_zero(&b,sizeof(b));
+  byte_zero(&c,sizeof(c));
+  o=n=0;
+  while ((d=readdir(D))) {
+    de* x=array_allocate(&a,sizeof(de),n);
+    if (!x) break;
+    x->name=o;
+#ifdef __MINGW32__
+    if (stat(d->d_name,&x->ss)==-1) continue;
+#else
+    if (lstat(d->d_name,&x->ss)==-1) continue;
+#endif
+    array_cats0(&b,d->d_name);
+    o+=str_len(d->d_name)+1;
+    ++n;
+  }
+  closedir(D);
+  if (array_failed(&a) || array_failed(&b)) {
+    array_reset(&a);
+    array_reset(&b);
+    return 0;
+  }
+  base=array_start(&b);
+  sortfun=sort_name_a;
+  if (arg) {
+    if (str_equal(arg,"N=D")) sortfun=sort_name_d;
+    else if (str_equal(arg,"N=A")) sortfun=sort_name_a;
+    else if (str_equal(arg,"M=A")) sortfun=sort_mtime_a;
+    else if (str_equal(arg,"M=D")) sortfun=sort_mtime_d;
+    else if (str_equal(arg,"S=A")) sortfun=sort_size_a;
+    else if (str_equal(arg,"S=D")) sortfun=sort_size_d;
+  }
+  qsort(array_start(&a),n,sizeof(de),(int(*)(const void*,const void*))sortfun);
+  array_cats(&c,"<title>Index of ");
+  array_cats(&c,path);
+  array_cats(&c,"</title>\n<h1>Index of ");
+  array_cats(&c,path);
+  {
+    char* tmp=http_header(h,"User-Agent");
+    if (tmp && byte_equal(tmp,5,"Wget/"))
+      array_cats(&c,"</h1>\n<table><tr><th>Name<th>Last Modified<th>Size\n");
+    else {
+      array_cats(&c,"</h1>\n<table><tr><th><a href=\"?N=");
+      array_cats(&c,sortfun==sort_name_a?"D":"A");
+      array_cats(&c,"\">Name</a><th><a href=\"?M=");
+      array_cats(&c,sortfun==sort_mtime_a?"D":"A");
+      array_cats(&c,"\">Last Modified</a><th><a href=\"?S=");
+      array_cats(&c,sortfun==sort_size_a?"D":"A");
+      array_cats(&c,"\">Size</a>\n");
+    }
+  }
+  ab=array_start(&a);
+  for (i=0; i<n; ++i) {
+    char* name=base+ab[i].name;
+    char buf[31];
+    int j;
+    struct tm* x=localtime(&ab[i].ss.st_mtime);
+    if (name[0]=='.') {
+      if (name[1]==0) continue; /* skip "." */
+      if (name[1]!='.' || name[2]!=0)	/* skip dot-files */
+	continue;
+    }
+    if (name[0]==':') name[0]='.';
+    array_cats(&c,"<tr><td><a href=\"");
+    catencoded(&c,base+ab[i].name);
+    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
+    array_cats(&c,"\">");
+    cathtml(&c,base+ab[i].name);
+    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/"); else
+#ifndef __MINGW32__
+    if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@");
+#endif
+    array_cats(&c,"</a><td>");
+
+    j=fmt_2digits(buf,x->tm_mday);
+    j+=fmt_str(buf+j,"-");
+    byte_copy(buf+j,3,months+3*x->tm_mon); j+=3;
+    j+=fmt_str(buf+j,"-");
+    j+=fmt_2digits(buf+j,(x->tm_year+1900)/100);
+    j+=fmt_2digits(buf+j,(x->tm_year+1900)%100);
+    j+=fmt_str(buf+j," ");
+    j+=fmt_2digits(buf+j,x->tm_hour);
+    j+=fmt_str(buf+j,":");
+    j+=fmt_2digits(buf+j,x->tm_min);
+
+    array_catb(&c,buf,j);
+    array_cats(&c,"<td align=right>");
+    array_catb(&c,buf,fmt_humank(buf,ab[i].ss.st_size));
+  }
+  array_cats(&c,"</table>");
+  array_reset(&a);
+  array_reset(&b);
+  if (array_failed(&c)) return 0;
+  h->bodybuf=array_start(&c);
+  h->blen=array_bytes(&c);
+  return 1;
+}
+
+#ifdef SUPPORT_PROXY
+int add_proxy(const char* c) {
+  struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
+  int i;
+  if (!x) return -1;
+  byte_zero(x,sizeof(struct cgi_proxy));
+  if (c[1]=='/') {
+    if (c[0]=='F')
+      x->proxyproto=FASTCGI;
+    else
+      goto nixgut;
+    c+=2;
+  }
+  i=scan_ip6if(c,x->ip,&x->scope_id);
+  if (c[i]!='/') { nixgut: free(x); return -1; }
+  c+=i+1;
+  i=scan_ushort(c,&x->port);
+  if (c[i]!='/') goto nixgut;
+  c+=i+1;
+  if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) goto nixgut;
+  if (!last)
+    cgis=last=x;
+  else
+    last->next=x; last=x;
+  return 0;
+}
+
+int buffer_putlogstr(buffer* b,const char* s) {
+  unsigned long l=str_len(s);
+  char* x;
+  for (l=0; s[l] && s[l]!='\r' && s[l]!='\n'; ++l) ;
+  if (!l) return 0;
+  x=alloca(l);
+  return buffer_put(b,x,fmt_foldwhitespace(x,s,l));
+}
+
+static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* ctx_for_sockfd,int isexec,const char* args) {
+  struct cgi_proxy* x=cgis;
+  struct stat ss;
+
+  /* if isexec is set, we already found that .proxy is there */
+  if (!isexec && stat(".proxy",&ss)==-1) return -3;
+  while (x) {
+    if (x->file_executable && (!isexec || x->port)) {
+      x=x->next;
+      continue;
+    }
+    if (x->file_executable || regexec(&x->r,c,0,0,0)==0) {
+      /* if the port is zero, then use local execution proxy mode instead */
+      int fd_to_gateway;
+      struct http_data* ctx_for_gatewayfd;
+
+      ctx_for_sockfd->proxyproto=x->proxyproto;
+
+      if (!(ctx_for_gatewayfd=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
+      byte_zero(ctx_for_gatewayfd,sizeof(struct http_data));
+
+      if (logging) {
+	char buf[IP6_FMT+10];
+	char* tmp;
+	const char* method="???";
+	{
+	  int x;
+	  x=fmt_ip6c(buf,ctx_for_gatewayfd->myip);
+	  x+=fmt_str(buf+x,"/");
+	  x+=fmt_ulong(buf+x,ctx_for_gatewayfd->myport);
+	  buf[x]=0;
+	}
+	tmp=array_start(&ctx_for_sockfd->r);
+#ifdef SUPPORT_HTTPS
+	switch (*tmp) {
+	case 'H': method=(ctx_for_sockfd->t==HTTPREQUEST)?"HEAD":"HEAD/SSL"; break;
+	case 'G': method=(ctx_for_sockfd->t==HTTPREQUEST)?"GET":"GET/SSL"; break;
+	case 'P':
+		  if (tmp[1]=='O')
+		    method=(ctx_for_sockfd->t==HTTPREQUEST)?"POST":"POST/SSL";
+		  else
+		    method=(ctx_for_sockfd->t==HTTPREQUEST)?"PUT":"PUT/SSL";
+		  break;
+	}
+#else
+	switch (*tmp) {
+	case 'H': method="HEAD"; break;
+	case 'G': method="GET"; break;
+	case 'P': method=(tmp[1]=='O')?"POST":"PUT"; break;
+	}
+#endif
+	buffer_putm(buffer_1,method,x->port?"/PROXY ":"/CGI ");
+	buffer_putulong(buffer_1,sockfd);
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,c);
+	if (args) {
+	  buffer_puts(buffer_1,"?");
+	  buffer_putlogstr(buffer_1,args);
+	}
+	buffer_puts(buffer_1," 0 ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(ctx_for_sockfd,"User-Agent"))?tmp:"[no_user_agent]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(ctx_for_sockfd,"Referer"))?tmp:"[no_referrer]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(ctx_for_sockfd,"Host"))?tmp:buf);
+	buffer_putsflush(buffer_1,"\n");
+      }
+      ++rps1;
+
+      if (x->port) {
+	/* proxy mode */
+	ctx_for_gatewayfd->t=PROXYSLAVE;
+	fd_to_gateway=socket_tcp6();
+	if (fd_to_gateway==-1) goto punt2;
+	if (!io_fd(fd_to_gateway)) {
+punt:
+	  io_close(fd_to_gateway);
+punt2:
+	  free(ctx_for_gatewayfd);
+	  return -1;
+	}
+	io_block(fd_to_gateway);
+	io_eagain(fd_to_gateway);
+	if (socket_connect6(fd_to_gateway,x->ip,x->port,x->scope_id)==-1)
+	  if (errno!=EINPROGRESS)
+	    goto punt;
+	if (logging) {
+	  char tmp[100];
+	  char bufsockfd[FMT_ULONG];
+	  char bufs[FMT_ULONG];
+	  char bufport[FMT_ULONG];
+
+	  bufsockfd[fmt_ulong(bufsockfd,sockfd)]=0;
+	  bufs[fmt_ulong(bufs,fd_to_gateway)]=0;
+	  bufport[fmt_ulong(bufport,x->port)]=0;
+	  tmp[fmt_ip6ifc(tmp,x->ip,x->scope_id)]=0;
+
+	  buffer_putm(buffer_1,"proxy_connect ",bufsockfd," ",bufs," ",tmp," ",bufport," ");
+	  buffer_putlogstr(buffer_1,c);
+	  buffer_putnlflush(buffer_1);
+	}
+	io_wantwrite(fd_to_gateway);
+#ifdef SUPPORT_CGI
+      } else {
+	/* local CGI mode */
+	uint32 a,len; uint16 b;
+	pid_t pid;
+	char* req=array_start(&ctx_for_sockfd->r); /* "GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n"; */
+	char ra[IP6_FMT];
+	ctx_for_gatewayfd->t=PROXYPOST;
+	req[strlen(req)]=' ';
+	ctx_for_sockfd->keepalive=0;
+	ra[fmt_ip6c(ra,ctx_for_sockfd->peerip)]=0;
+	a=strlen(req); write(forksock[0],&a,4);
+	a=strlen(dir); write(forksock[0],&a,4);
+	a=strlen(ra); write(forksock[0],&a,4);
+	write(forksock[0],req,strlen(req));
+	write(forksock[0],dir,strlen(dir));
+	write(forksock[0],ra,strlen(ra));
+	b=ctx_for_sockfd->peerport; write(forksock[0],&b,2);
+	b=ctx_for_sockfd->myport; write(forksock[0],&b,2);
+
+	read(forksock[0],&a,4);		/* code; 0 means OK */
+	read(forksock[0],&len,4);	/* length of error message */
+	read(forksock[0],&pid,sizeof(pid));
+	if (len) {
+	  char* c=alloca(len+1);
+	  read(forksock[0],c,len);
+	  c[len]=0;
+	  httperror(ctx_for_sockfd,"502 Gateway Broken",c,*ctx_for_sockfd->r.p=='H'?1:0);
+	  free(ctx_for_gatewayfd);
+	  return -1;
+	} else {
+	  fd_to_gateway=io_receivefd(forksock[0]);
+	  if (fd_to_gateway==-1) {
+	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
+	    free(ctx_for_gatewayfd);
+	    return -1;
+	  }
+	  if (!io_fd(fd_to_gateway)) {
+	    httperror(ctx_for_sockfd,"502 Gateway Broken",c,*ctx_for_sockfd->r.p=='H'?1:0);
+	    io_close(fd_to_gateway);
+	    free(ctx_for_gatewayfd);
+	    return -1;
+	  }
+	}
+	ctx_for_sockfd->t=HTTPPOST;
+	if (logging) {
+	  char bufsfd[FMT_ULONG];
+	  char bufs[FMT_ULONG];
+	  char bufpid[FMT_ULONG];
+
+	  bufsfd[fmt_ulong(bufsfd,sockfd)]=0;
+	  bufs[fmt_ulong(bufs,fd_to_gateway)]=0;
+	  bufpid[fmt_ulong(bufpid,pid)]=0;
+
+	  buffer_putmflush(buffer_1,"cgi_fork ",bufsfd," ",bufs," ",bufpid,"\n");
+	}
+#endif
+      }
+      ctx_for_gatewayfd->buddy=sockfd;
+      ctx_for_sockfd->buddy=fd_to_gateway;
+      io_setcookie(fd_to_gateway,ctx_for_gatewayfd);
+
+     /* Have:
+      *   - the header and possibly some data left in ctx_for_sockfd->r.
+      * Want:
+      *   - leave the data (not the header) in ctx_for_sockfd->r.
+      *   - set ctl_for_gatewayfd->still_to_copy to Content-Length.
+      *   - set ctl_for_sockfd->still_to_copy to Content-Length -
+      *     the size of the copied data.  If that is non-zero, set t to
+      *     HTTPPOST.
+      */
+
+      {
+	char* cl=http_header(ctx_for_sockfd,"Content-Length");
+	unsigned long long content_length;
+	if (cl) {
+	  char c;
+	  if ((c=cl[scan_ulonglong(cl,&content_length)])!='\r' && c!='\n') content_length=0;
+	}
+
+	ctx_for_gatewayfd->still_to_copy=content_length;
+
+	/* If the client sent "Expect: 100-continue", do so */
+	{
+	  char* e=http_header(ctx_for_sockfd,"Expect");
+	  if (e && byte_equal(e,4,"100-")) {
+	    const char contmsg[]="HTTP/1.1 100 Continue\r\n\r\n";
+	    /* if this fails, tough luck.  I'm not bloating my state
+	      * engine for this crap. */
+	    io_trywrite(sockfd,contmsg,sizeof(contmsg)-1);
+	  }
+	}
+
+	/* figure out how much data we have */
+	{
+	  size_t size_of_header=header_complete(ctx_for_sockfd);
+	  size_t size_of_data_in_packet=array_bytes(&ctx_for_sockfd->r) - size_of_header - 1;
+	    /* the -1 is for the \0 we appended */
+
+	  if (size_of_data_in_packet) {
+	    byte_copy(array_start(&ctx_for_sockfd->r),
+		      size_of_data_in_packet,
+		      array_start(&ctx_for_sockfd->r)+size_of_header);
+	    array_truncate(&ctx_for_sockfd->r,1,size_of_data_in_packet);
+	    if (content_length>size_of_data_in_packet)
+	      ctx_for_sockfd->still_to_copy=content_length-size_of_data_in_packet;
+	    else
+	      ctx_for_sockfd->still_to_copy=0;
+	  } else {
+	    array_trunc(&ctx_for_sockfd->r);
+	    ctx_for_sockfd->still_to_copy=content_length;
+	  }
+
+	  if (ctx_for_gatewayfd->still_to_copy && array_bytes(&ctx_for_sockfd->r))
+	    io_wantwrite(fd_to_gateway);
+	  else
+	    io_wantread(fd_to_gateway);
+
+	  if (ctx_for_sockfd->still_to_copy)
+	    io_wantread(sockfd);
+	  else
+	    io_dontwantread(sockfd);
+
+	}
+      }
+
+      if (timeout_secs)
+	io_timeout(fd_to_gateway,next);
+      return fd_to_gateway;
+    }
+    x=x->next;
+  }
+  return -2;
+}
+
+unsigned int fmt_fastcgi_keyvalue(char* dest,const char* key,const char* value,unsigned int vlen) {
+  int l,o;
+  dest[0]=l=strlen(key);
+  if (vlen<127) {
+    dest[1]=vlen;
+    o=2;
+  } else {
+    uint32_pack_big(dest+1,vlen);
+    o=5;
+  }
+  byte_copy(dest+o,l,key);
+  byte_copy(dest+o+l,vlen,value);
+  return vlen+o+l;
+}
+
+int proxy_write_header(int sockfd,struct http_data* h) {
+  /* assume we can write the header in full. */
+  /* slight complication: we need to turn keep-alive off and we need to
+   * add a X-Forwarded-For header so the handling web server can write
+   * the real IP to the log file. */
+  struct http_data* H=io_getcookie(h->buddy);
+  int i,j=0;
+  long hlen=array_bytes(&h->r);
+  char* hdr=array_start(&h->r);
+  char* newheader=0;
+  if (h->proxyproto==HTTP) {
+    newheader=alloca(hlen+200);
+    for (i=j=0; i<hlen; ) {
+      int k=str_chr(hdr+i,'\n');
+      if (k==0) break;
+      if (case_starts(hdr+i,"Connection: ") || case_starts(hdr+i,"X-Forwarded-For: "))
+	i+=k+1;
+      else {
+	byte_copy(newheader+j,k+1,hdr+i);
+	i+=k+1;
+	j+=k+1;
+      }
+    }
+    if (j) j-=2;
+    H->keepalive=0;
+    j+=fmt_str(newheader+j,"Connection: close\r\nX-Forwarded-For: ");
+    j+=fmt_ip6c(newheader+j,H->peerip);
+    j+=fmt_str(newheader+j,"\r\n\r\n");
+  } else if (h->proxyproto==FASTCGI) {
+    newheader=alloca(hlen*4+400);
+#if 0
+         typedef struct {
+             unsigned char version;
+             unsigned char type;
+             unsigned char requestIdB1;
+             unsigned char requestIdB0;
+             unsigned char contentLengthB1;
+             unsigned char contentLengthB0;
+             unsigned char paddingLength;
+             unsigned char reserved;
+             unsigned char contentData[contentLength];
+             unsigned char paddingData[paddingLength];
+         } FCGI_Record;
+#endif
+    /* {FCGI_BEGIN_REQUEST,   1, {FCGI_RESPONDER, 0}} */
+#if 0
+         typedef struct {
+             unsigned char roleB1;
+             unsigned char roleB0;
+             unsigned char flags;
+             unsigned char reserved[5];
+         } FCGI_BeginRequestBody;
+#endif
+    byte_copy(newheader,24,"\x01\x01\x00\x01\x00\x08\x00\x00" /* FCGI_Record: FCGI_BEGIN_REQUEST */
+	                   "\x00\x01\x00\x00\x00\x00\x00\x00" /* FCGI_BeginRequestBody */
+			   "\x01\x04\x00\x01\x00\x00\x00\x00" /* fcgirecord: FCGI_PARAMS */
+			   );
+    i=24;
+
+#if 0
+     {FCGI_PARAMS,          1, "\013\002SERVER_PORT80\013\016SERVER_ADDR199.170.183.42 ... "}
+     {FCGI_PARAMS,          1, ""}
+     {FCGI_STDIN,           1, ""}
+#endif
+    /* TODO */
+  }
+  if (write(sockfd,newheader,j)!=j)
+    return -1;
+  H->sent+=j;
+  return 0;
+}
+
+
+
+int proxy_is_readable(int sockfd,struct http_data* H) {
+  char buf[8192];
+  int i;
+  char* x;
+  int res=0;
+  struct http_data* peer=io_getcookie(H->buddy);
+  i=read(sockfd,buf,sizeof(buf));
+  if (i==-1) return -1;
+  H->sent+=i;
+  if (i==0) {
+    if (logging) {
+      char numbuf[FMT_ULONG];
+      char r[FMT_ULONG];
+      char s[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,sockfd)]=0;
+      r[fmt_ulonglong(r,peer->received)]=0;
+      s[fmt_ulonglong(s,peer->sent)]=0;
+      buffer_putmflush(buffer_1,"cgiproxy_read0 ",numbuf," ",r," ",s,"\n");
+    }
+    if (peer) {
+      peer->buddy=-1;
+      cleanup(sockfd);
+    }
+    H->buddy=-1;
+    io_wantwrite(H->buddy);
+    io_close(sockfd);
+    return -3;
+  } else {
+    int needheader=0;
+    if (!H->havefirst) {
+      H->havefirst=1;
+      if (byte_diff(buf,5,"HTTP/"))
+	/* No "HTTP/1.0 200 OK", need to write our own header. */
+	needheader=1;
+    }
+    if (needheader) {
+      int j;
+      x=malloc(i+100);
+      if (!x) goto nomem;
+      j=fmt_str(x,"HTTP/1.0 200 Here you go\r\nServer: " RELEASE "\r\n");
+      byte_copy(x+j,i,buf);
+      i+=j;
+    } else {
+      x=malloc(i);
+      if (!x) goto nomem;
+      byte_copy(x,i,buf);
+    }
+    if (peer) iob_addbuf_free(&peer->iob,x,i);
+  }
+  io_dontwantread(sockfd);
+  io_wantwrite(H->buddy);
+  return res;
+nomem:
+  if (logging) {
+    char numbuf[FMT_ULONG];
+    numbuf[fmt_ulong(numbuf,sockfd)]=0;
+    buffer_putmflush(buffer_1,"outofmemory ",numbuf,"\n");
+  }
+  cleanup(sockfd);
+  return -1;
+}
+
+int read_http_post(int sockfd,struct http_data* H) {
+  char buf[8192];
+  int i;
+  unsigned long long l=H->still_to_copy;
+  if (l>sizeof(buf)) l=sizeof(buf);
+  i=read(sockfd,buf,sizeof(buf));
+//  printf("read_http_post: want to read %ld bytes from %d; got %d\n",l,sockfd,i);
+  if (i<1) return -1;
+  H->received+=i;
+  H->still_to_copy-=i;
+//  printf("still_to_copy read_http_post: %p %llu -> %llu\n",H,H->still_to_copy+i,H->still_to_copy);
+  array_catb(&H->r,buf,i);
+  if (array_failed(&H->r))
+    return -1;
+  return 0;
+}
+
+#endif
+
+
+
+
+#ifdef SUPPORT_HTACCESS
+/* check whether there is a .htaccess file in the current directory.
+ * if it is, expect the following format:
+
+Realm
+username:password
+username2:password2
+...
+
+ * Realm is the HTTP realm (transmitted in the http authentication
+ * required message and usually displayed by the browser).  Only basic
+ * authentication is supported.  Please note that .htaccess files are
+ * not looked for in other directories.  If you want subdirectories
+ * covered, use hard or symbolic links.  The function returns 0 if the
+ * authentication was OK or -1 if authentication is needed (the HTTP
+ * response was then already written to the iob). */
+int http_dohtaccess(struct http_data* h,const char* filename,int nobody) {
+  size_t filesize;
+  char* map;
+  char* s;
+  char* auth;
+  char* realm;
+  int r=0;
+  map=mmap_read(filename,&filesize);
+  if (!map) return 1;
+  for (s=map; (s<map+filesize) && (*s!='\n'); ++s);		/* XXX */
+  if (s>=map+filesize) goto done;
+  realm=alloca(s-map+1);
+  memmove(realm,map,s-map);
+  realm[s-map]=0;
+  ++s;
+  auth=http_header(h,"Authorization");
+  if (auth) {
+    if (str_start(auth,"Basic ")) {
+      char* username,* password;
+      char* decoded;
+      int i;
+      size_t l,dl,ul;
+      auth+=6;
+      while (*auth==' ' || *auth=='\t') ++auth;
+      i=str_chr(auth,'\n');
+      if (i && auth[i-1]=='\r') --i;
+      decoded=alloca(i+1);
+      l=scan_base64(auth,decoded,&dl);
+      if (auth[l]!='\n' && auth[l]!='\r') goto needauth;
+      decoded[dl]=0;
+      l=str_rchr(decoded,':');
+      if (decoded[l]!=':') goto needauth;
+      username=decoded; ul=l;
+      decoded[l]=0; password=decoded+l+1;
+
+      for (l=0; l<filesize; ) {
+	while (l<filesize && map[l]!='\n') ++l; if (map[l]=='\n') ++l;
+	if (l>=filesize) break;
+	if (byte_equal(map+l,ul,username) && map[l+ul]==':') {
+	  char* crypted=crypt(password,map+l+ul+1);
+	  i=str_len(crypted);
+	  if (l+ul+1+i <= filesize)
+	    if (byte_equal(map+l+ul+1,i,crypted)) {
+	      r=1;
+	      goto done;
+	    }
+	}
+      }
+    }
+  }
+needauth:
+  httperror_realm(h,"401 Authorization Required","Authorization required to view this web page",realm,nobody);
+done:
+  munmap(map,filesize);
+  return r;
+}
+#endif
+
+int http_redirect(struct http_data* h,const char* Filename) {
+#ifndef __MINGW32__
+  char buf[2048];
+  int i;
+  if ((i=readlink(Filename,buf,sizeof(buf)))!=-1) {
+    buf[i]=0;
+    if (strstr(buf,"://")) {
+      h->bodybuf=malloc(strlen(buf)+300);
+      h->hdrbuf=malloc(strlen(buf)+300);
+      if (h->bodybuf && h->hdrbuf) {
+	int i;
+	i=fmt_str(h->bodybuf,"Look <a href=\"");
+	i+=fmt_str(h->bodybuf+i,buf);
+	i+=fmt_str(h->bodybuf+i,"\">here</a>!\n");
+	h->blen=i;
+
+	i=fmt_str(h->hdrbuf,"HTTP/1.0 301 Go Away\r\nConnection: ");
+	i+=fmt_str(h->hdrbuf+i,h->keepalive?"keep-alive":"close");
+	i+=fmt_str(h->hdrbuf+i,"\r\nServer: " RELEASE "\r\nContent-Length: ");
+	i+=fmt_ulong(h->hdrbuf+i,h->blen);
+	i+=fmt_str(h->hdrbuf+i,"\r\nLocation: ");
+	i+=fmt_str(h->hdrbuf+i,buf);
+	i+=fmt_str(h->hdrbuf+i,"\r\n\r\n");
+	h->hlen=i;
+	return -4;
+      }
+      free(h->bodybuf); free(h->hdrbuf);
+    }
+  }
+#endif
+  return 0;
+}
+
+int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd,int nobody) {
+#ifdef SUPPORT_PROXY
+  int noproxy=0;
+#endif
+  char* dir=0;
+  char* s;
+  char* args;
+  size_t i;
+  int64 fd;
+  int doesgzip;
+#ifdef SUPPORT_BZIP2
+  int doesbzip2;
+#endif
+
+  char* Filename;
+
+  doesgzip=0; h->encoding=NORMAL;
+#ifdef SUPPORT_BZIP2
+  doesbzip2=0;
+#endif
+  {
+    char* tmp=http_header(h,"Accept-Encoding");
+    if (tmp) {	/* yeah this is crude, but it gets the job done */
+      int end=str_chr(tmp,'\n');
+      for (i=0; i+4<end; ++i)
+	if (byte_equal(tmp+i,4,"gzip"))
+	  doesgzip=1;
+#ifdef SUPPORT_BZIP2
+	else if (byte_equal(tmp+i,4,"bzip2"))
+	  doesbzip2=1;
+#endif
+    }
+  }
+
+  args=0;
+  /* the file name needs to start with a / */
+  if (filename[0]!='/') return -1;
+
+
+  /* first, we need to strip "?.*" from the end */
+  i=str_chr(filename,'?');
+  Filename=alloca(i+5);	/* enough space for .gz and .bz2 */
+  byte_copy(Filename,i+1,filename);
+  if (Filename[i]=='?') { Filename[i]=0; args=filename+i+1; }
+  /* second, we need to un-urlencode the file name */
+  /* we can do it in-place, the decoded string can never be longer */
+  scan_urlencoded2(Filename,Filename,&i);
+  Filename[i]=0;
+  /* third, change /. to /: so .procmailrc is visible in ls as
+   * :procmailrc, and it also thwarts most web root escape attacks */
+  for (i=0; Filename[i]; ++i)
+    if (Filename[i]=='/' && Filename[i+1]=='.')
+      Filename[i+1]=':';
+  /* fourth, try to do some el-cheapo virtual hosting */
+  if (!(s=http_header(h,"Host"))) {
+    /* construct artificial Host header from IP */
+    s=alloca(IP6_FMT+7);
+    i=fmt_ip6c(s,h->myip);
+    i+=fmt_str(s+i,":");
+    i+=fmt_ulong(s+i,h->myport);
+    s[i]=0;
+  } else {
+    if (virtual_hosts>=0) {
+      char* tmp;
+      int j=str_chr(s,'\r');
+      /* replace port in Host: with actual port */
+      if (!s[i=str_chr(s,':')] || i>j || !transproxy) {	/* add :port */
+	if (i>j) i=j;
+	tmp=alloca(i+7);
+	byte_copy(tmp,i,s);
+	tmp[i]=':'; ++i;
+	i+=fmt_ulong(tmp+i,h->myport);
+	tmp[i]=0;
+	s=tmp;
+      }
+    }
+  }
+#ifdef __MINGW32__
+//  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
+  chdir(origdir);
+#else
+  fchdir(origdir);
+#endif
+
+  if (virtual_hosts>=0)
+    if (chdir(dir=s)==-1)
+      if (chdir(dir="default")==-1)
+	if (virtual_hosts==1) {
+	  buffer_putsflush(buffer_2,"chdir FAILED and virtual_hosts is 1\n");
+	  return -1;
+	}
+  while (Filename[1]=='/') ++Filename;
+
+#ifdef SUPPORT_HTACCESS
+  if (http_dohtaccess(h,".htaccess_global",nobody)==0) return -5;
+#endif
+
+#ifdef SUPPORT_PROXY
+  noproxy=0;
+  {
+    int res;
+    switch ((res=proxy_connection(sockfd,Filename,dir,h,0,args))) {
+    case -3: noproxy=1; /* fall through */
+    case -2: break;
+    case -1: return -1;
+    default:
+      if (res>=0) {
+	h->buddy=res;
+	return -3;
+      }
+    }
+  }
+#else
+  (void)sockfd;		/* shut up gcc warning about unused variable */
+#endif
+  if (Filename[(i=str_len(Filename))-1] == '/') {
+    /* Damn.  Directory. */
+    if (Filename[1] && chdir(Filename+1)==-1) return -1;
+#ifdef SUPPORT_HTACCESS
+    if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
+#endif
+    h->mimetype="text/html";
+    if (!open_for_reading(&fd,"index.html",ss)) {
+      DIR* d;
+      if (errno==ENOENT)
+	if (http_redirect(h,"index.html")) return -4;
+      if (!directory_index) return -1;
+      if (!(d=opendir("."))) return -1;
+      if (!http_dirlisting(h,d,Filename,args)) return -1;
+#ifdef USE_ZLIB
+      if (doesgzip) {
+	uLongf destlen=h->blen+30+h->blen/1000;
+	unsigned char *compressed=malloc(destlen+15);
+	if (!compressed) return -2;
+	if (compress2(compressed+8,&destlen,(unsigned char*)h->bodybuf,h->blen,3)==Z_OK && destlen<h->blen) {
+	  /* I am absolutely _not_ sure why this works, but we
+	   * apparently have to ignore the first two and the last four
+	   * bytes of the output of compress2.  I got this from googling
+	   * for "compress2 header" and finding some obscure gzip
+	   * integration in aolserver */
+	  unsigned int crc=crc32(0,0,0);
+	  crc=crc32(crc,(unsigned char*)h->bodybuf,h->blen);
+	  free(h->bodybuf);
+	  h->bodybuf=(char*)compressed;
+	  h->encoding=GZIP;
+	  byte_zero(compressed,10);
+	  compressed[0]=0x1f; compressed[1]=0x8b;
+	  compressed[2]=8; /* deflate */
+	  compressed[3]=1; /* indicate ASCII */
+	  compressed[9]=3; /* OS = Unix */
+	  uint32_pack((char*)compressed+10-2-4+destlen,crc);
+	  uint32_pack((char*)compressed+14-2-4+destlen,h->blen);
+	  h->blen=destlen+18-2-4;
+	} else {
+	  free(compressed);
+	}
+      }
+#endif
+      return -2;
+    }
+#ifdef SUPPORT_PROXY
+    /* if index.html is executable, see if we have a file_executable
+     * CGI rule */
+    if (!noproxy && (ss->st_mode&S_IXOTH)) {
+      char* temp=alloca(strlen(Filename)+10);
+      if (pread(fd,temp,4,0)==4) {
+	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
+	  int res;
+	  i=fmt_str(temp,Filename);
+	  i+=fmt_str(temp+i,"index.html");
+	  temp[i]=0;
+	  switch ((res=proxy_connection(sockfd,temp,dir,h,1,args))) {
+	  case -2: break;
+	  case -1: return -1;
+	  default:
+	    if (res>=0) {
+	      close(fd);
+	      h->buddy=res;
+	      return -3;
+	    }
+	  }
+	}
+      }
+    }
+#endif
+#ifdef SUPPORT_BZIP2
+    if (doesbzip2) {
+      int64 gfd;
+      if (open_for_reading(&gfd,"index.html.bz2",ss)) {
+	io_close(fd);
+	fd=gfd;
+	h->encoding=BZIP2;
+      }
+    }
+#endif
+    if (doesgzip) {
+      int64 gfd;
+      if (open_for_reading(&gfd,"index.html.gz",ss)) {
+	io_close(fd);
+	fd=gfd;
+	h->encoding=GZIP;
+      }
+    }
+  } else {
+#ifdef SUPPORT_HTACCESS
+    char* x=alloca(strlen(Filename)+30);
+    int lso=str_rchr(x,'/');
+    if (x[lso]=='/') {
+      byte_copy(x,lso+1,Filename);
+      str_copy(x+lso+1,".htaccess");
+      if (http_dohtaccess(h,x,nobody)==0) return -5;
+    } else
+      if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
+#endif
+    if (!open_for_reading(&fd,Filename+1,ss)) {
+      if (errno==ENOENT)
+	if (http_redirect(h,Filename+1)) return -4;
+      return -1;
+    }
+    h->mimetype=mimetype(Filename,fd);
+#ifdef SUPPORT_PROXY
+    if (!noproxy && (ss->st_mode&S_IXOTH)) {
+      char temp[5];
+      if (pread(fd,temp,4,0)==4) {
+	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
+	  int res;
+	  switch ((res=proxy_connection(sockfd,Filename,dir,h,1,args))) {
+	  case -2: break;
+	  case -1: return -1;
+	  default:
+	    if (res>=0) {
+	      close(fd);
+	      h->buddy=res;
+	      return -3;
+	    }
+	  }
+	}
+      }
+    }
+#endif
+#ifdef DEBUG
+    if (logging) {
+      buffer_puts(buffer_1,"open_file ");
+      buffer_putulong(buffer_1,sockfd);
+      buffer_putspace(buffer_1);
+      buffer_putulong(buffer_1,fd);
+      buffer_putspace(buffer_1);
+      buffer_puts(buffer_1,Filename);
+      buffer_putnlflush(buffer_1);
+    }
+#endif
+    if (doesgzip
+#ifdef SUPPORT_BZIP2
+                 || doesbzip2
+#endif
+                             ) {
+      int64 gfd;
+      i=str_len(Filename);
+#ifdef SUPPORT_BZIP2
+      if (doesbzip2) {
+	Filename[i+fmt_str(Filename+i,".bz2")]=0;
+	if (open_for_reading(&gfd,Filename+1,ss)) {
+	  io_close(fd);
+	  fd=gfd;
+	  h->encoding=BZIP2;
+	}
+      }
+#endif
+      if (doesgzip && h->encoding==NORMAL) {
+	Filename[i+fmt_str(Filename+i,".gz")]=0;
+	if (open_for_reading(&gfd,Filename+1,ss)) {
+	  io_close(fd);
+	  fd=gfd;
+	  h->encoding=GZIP;
+	}
+      }
+      Filename[i]=0;
+    }
+  }
+#ifndef __MINGW32__
+  if (S_ISDIR(ss->st_mode)) {
+    io_close(fd);
+    return -1;
+  }
+#endif
+  return fd;
+}
+
+#ifdef SUPPORT_FALLBACK_REDIR
+const char* redir;
+
+void do_redirect(struct http_data* h,const char* filename,int64 s) {
+  char* nh=malloc((strlen(filename)+strlen(redir))*2+300);
+  int i;
+  if (!nh) {
+    if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,s)]=0;
+      buffer_putmflush(buffer_1,"outofmemory ",numbuf,"\n");
+    }
+    cleanup(s);
+    return;
+  }
+  i=fmt_str(nh,"HTTP/1.0 302 Over There\r\nServer: " RELEASE "\r\nLocation: ");
+  i+=fmt_str(nh+i,redir);
+  i+=fmt_str(nh+i,filename);
+  i+=fmt_str(nh+i,"\r\nContent-Type: text/html\r\nContent-Length: ");
+  i+=fmt_ulong(nh+i,strlen(filename)+strlen(redir)+23);
+  i+=fmt_str(nh+i,"\r\n\r\n");
+  i+=fmt_str(nh+i,"Look <a href=");
+  i+=fmt_str(nh+i,redir);
+  i+=fmt_str(nh+i,filename);
+  i+=fmt_str(nh+i,">here!</a>\n");
+  iob_addbuf_free(&h->iob,nh,strlen(nh));
+}
+#endif
+
+#ifdef SUPPORT_SERVERSTATUS
+void do_server_status(struct http_data* h,int64 s) {
+  char* nh=malloc(1000);
+  int i,l;
+  char buf[FMT_ULONG*10+600];
+  if (!nh) {
+    if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,s)]=0;
+      buffer_putmflush(buffer_1,"outofmemory ",numbuf,"\n");
+    }
+    cleanup(s);
+    return;
+  }
+  i=fmt_str(buf,"<title>Gatling Server Status</title>\n<h2>Open Connections</h2>\nHTTP: ");
+  i+=fmt_ulong(buf+i,http_connections);
+  i+=fmt_str(buf+i,"<br>\nHTTPS: ");
+  i+=fmt_ulong(buf+i,https_connections);
+  i+=fmt_str(buf+i,"<br>\nFTP: ");
+  i+=fmt_ulong(buf+i,ftp_connections);
+  i+=fmt_str(buf+i,"<br>\nSMB: ");
+  i+=fmt_ulong(buf+i,smb_connections);
+  i+=fmt_str(buf+i,"<p>\n<h2>Per second:</h2>Connections: ");
+  i+=fmt_ulong(buf+i,cps);
+  i+=fmt_str(buf+i,"<br>\nRequests: ");
+  i+=fmt_ulong(buf+i,rps);
+  i+=fmt_str(buf+i,"<br>\nEvents: ");
+  i+=fmt_ulong(buf+i,eps);
+  i+=fmt_str(buf+i,"<br>\nInbound Traffic: ");
+  i+=fmt_ulong(buf+i,tin/1024);
+  i+=fmt_str(buf+i," KiB<br>\nOutbound Traffic: ");
+  i+=fmt_ulong(buf+i,tout/1024);
+  i+=fmt_str(buf+i," KiB");
+  buf[i]=0;
+  l=i;
+
+  i=fmt_str(nh,"HTTP/1.0 200 OK\r\nServer: " RELEASE "\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: ");
+  i+=fmt_ulong(nh+i,l);
+  i+=fmt_str(nh+i,"\r\n\r\n");
+  i+=fmt_str(nh+i,buf);
+  iob_addbuf_free(&h->iob,nh,strlen(nh));
+  h->keepalive=0;
+  io_wantwrite(s);
+
+  if (logging) {
+    char buf[IP6_FMT+10];
+    int x;
+    char* tmp;
+    x=fmt_ip6c(buf,h->myip);
+    x+=fmt_str(buf+x,"/");
+    x+=fmt_ulong(buf+x,h->myport);
+    buf[x]=0;
+#ifdef SUPPORT_HTTPS
+    if (h->t == HTTPSREQUEST)
+      buffer_puts(buffer_1,"HTTPS/");
+#endif
+    buffer_puts(buffer_1,"GET ");
+    buffer_putulong(buffer_1,s);
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,"server-status");
+    buffer_puts(buffer_1," ");
+    buffer_putulonglong(buffer_1,l);
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+    buffer_puts(buffer_1," ");
+    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
+    buffer_putsflush(buffer_1,"\n");
+  }
+}
+#endif
+
+#ifdef SUPPORT_SERVERSTATUS
+static int is_private_ip(const unsigned char* ip) {
+  if (ip6_isv4mapped(ip))
+    return byte_equal(ip+12,4,ip4loopback) ||	/* localhost */
+	   (ip[12]==10) ||			/* rfc1918 */
+	   (ip[12]==192 && ip[13]==168) ||
+	   (ip[12]==172 && (ip[13]>=16 && ip[13]<=31));
+  return byte_equal(ip,16,V6loopback) || (ip[0]==0xfe && (ip[1]==0x80 || ip[1]==0xc0));
+  /* localhost or link-local or site-local */
+}
+#endif
+
+static void get_md5_randomness(const uint8_t* randomness,size_t len,char digest[16]) {
+  MD5_CTX temp;
+  static int initialized;
+  if (!initialized) {
+    int fd=open("/dev/urandom",O_RDONLY);
+    unsigned char buf[16];
+    read(fd,buf,16);
+    close(fd);
+    MD5Init(&md5_ctx);
+    MD5Update(&md5_ctx,buf,16);
+    initialized=1;
+  }
+  MD5Update(&md5_ctx,randomness,len);
+  memcpy(&temp,&md5_ctx,sizeof(temp));
+  MD5Final((uint8_t*)digest,&temp);
+}
+
+size_t scan_range(const char* s,unsigned long long* x,size_t maxranges,unsigned long long filesize) {
+  unsigned long long start,end;
+  size_t used=0;
+  /* possible formats: "-5", "1-3", "10-" */
+  while (*s!='\r' && *s!='\n' && *s) {
+    if (isdigit(*s))
+      s+=scan_ulonglong(s,&start);
+    else
+      start=0;
+    end=filesize;
+    if (*s=='-') {
+      ++s;
+      if (isdigit(*s))
+	s+=scan_ulonglong(s,&end);
+    }
+    if (used+1<maxranges) {
+      x[used]=start;
+      x[used+1]=end;
+    } else
+      return 0;
+    used+=2;
+    if (*s==',') {
+      ++s;
+      continue;
+    }
+    if (*s=='\r' || *s=='\n' || *s==0)
+      return used;
+  }
+  return 0;
+}
+
+static int mytolower(int a) {
+  return a>='A' && a<='Z' ? a-'A'+'a' : a;
+}
+
+static int header_diff(const char* s,const char* t) {
+  /* like str_diff but s may also end with '\r' or '\n' */
+  register int j;
+  j=0;
+  for (;;) {
+    if ((j=(mytolower(*s)-mytolower(*t)))) break; if (!*t) break; ++s; ++t;
+  }
+  if (*s=='\r' || *s=='\n') j=-*t;
+  return j;
+}
+
+void httpresponse(struct http_data* h,int64 s,long headerlen) {
+  int head,post;
+#ifdef SUPPORT_PUT
+  int put;
+#endif
+  char* c;
+  const char* m;
+  time_t ims=0;
+  unsigned long long range_first,range_last;
+  h->filefd=-1;
+
+  ++rps1;
+  array_cat0(&h->r);
+  c=array_start(&h->r);
+  if (byte_diff(c,4,"GET ") && byte_diff(c,5,"POST ") &&
+#ifdef SUPPORT_PUT
+      byte_diff(c,4,"PUT ") &&
+#endif
+      byte_diff(c,5,"HEAD ")) {
+e400:
+    httperror(h,"400 Invalid Request","This server does not understand this HTTP verb.",0);
+
+    if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,s)]=0;
+      buffer_putmflush(buffer_1,"error_400 ",numbuf,"\n");
+    }
+
+  } else {
+    char *d;
+    int64 fd;
+    struct stat ss;
+    char* tmp;
+    head=c[0]=='H';
+    post=c[1]=='O';
+#ifdef SUPPORT_PUT
+    put=c[1]=='U';
+#endif
+    c+=(head||post)?5:4;
+    for (d=c; *d!=' '&&*d!='\t'&&*d!='\n'&&*d!='\r'; ++d) ;
+    if (*d!=' ') goto e400;
+    *d=0;
+
+    if ((m=http_header(h,"Connection"))) {
+      if (!header_diff(m,"keep-alive"))
+	h->keepalive=1;
+      else
+	h->keepalive=0;
+    } else {
+      if (byte_equal(d+1,8,"HTTP/1.0"))
+	h->keepalive=0;
+      else
+	h->keepalive=1;
+    }
+
+    if (c[0]!='/') goto e404;
+#ifdef SUPPORT_SERVERSTATUS
+    if (!strcmp(c,"/server-status") && is_private_ip((const unsigned char*)h->myip)) {
+      do_server_status(h,s);
+      return;
+    }
+#endif
+    fd=http_openfile(h,c,&ss,s,head);
+    if (fd==-1) {
+e404:
+#ifdef SUPPORT_FALLBACK_REDIR
+      if (redir)
+	do_redirect(h,c,s);
+#endif
+      if (logging) {
+	char buf[IP6_FMT+10];
+	int x;
+	x=fmt_ip6c(buf,h->myip);
+	x+=fmt_str(buf+x,"/");
+	x+=fmt_ulong(buf+x,h->myport);
+	buf[x]=0;
+#ifdef SUPPORT_HTTPS
+	if (h->t == HTTPSREQUEST)
+	  buffer_puts(buffer_1,"HTTPS/");
+#endif
+#ifdef SUPPORT_PUT
+	if (put) buffer_puts(buffer_1,"PUT/404 "); else
+#endif
+	buffer_puts(buffer_1,head?"HEAD/404 ":post?"POST/404 ":"GET/404 ");
+	buffer_putulong(buffer_1,s);
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,c);
+	buffer_puts(buffer_1," 0 ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+	buffer_puts(buffer_1," ");
+	buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
+	buffer_putsflush(buffer_1,"\n");
+      }
+#ifdef SUPPORT_FALLBACK_REDIR
+      if (redir)
+	goto fini;
+#endif
+      httperror(h,"404 Not Found","No such file or directory.",head);
+
+    } else {
+      char* filename=c;
+      if (fd==-4) {	/* redirect */
+	iob_addbuf_free(&h->iob,h->hdrbuf,h->hlen);
+	iob_addbuf_free(&h->iob,h->bodybuf,h->blen);
+      } else if (fd==-5) {
+	/* 401 -> log nothing. */
+      } else if (fd==-2) {
+	char* c;
+	c=h->hdrbuf=(char*)malloc(250);
+	if (!c)
+	  httperror(h,"500 Sorry","Out of Memory.",head);
+	else {
+
+	  if (logging) {
+	    char buf[IP6_FMT+10];
+	    int x;
+	    x=fmt_ip6c(buf,h->myip);
+	    x+=fmt_str(buf+x,"/");
+	    x+=fmt_ulong(buf+x,h->myport);
+	    buf[x]=0;
+#ifdef SUPPORT_HTTPS
+	    if (h->t == HTTPSREQUEST)
+	      buffer_puts(buffer_1,"HTTPS/");
+#endif
+	    buffer_puts(buffer_1,head?"HEAD ":"GET ");
+	    buffer_putulong(buffer_1,s);
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,filename);
+	    buffer_puts(buffer_1," ");
+	    buffer_putulonglong(buffer_1,h->blen);
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+	    buffer_puts(buffer_1," ");
+	    buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
+	    buffer_putsflush(buffer_1,"\n");
+	  }
+
+	  c+=fmt_str(c,"HTTP/1.1 200 Here you go\r\nContent-Type: text/html\r\nConnection: ");
+	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
+	  c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
+	  c+=fmt_ulong(c,h->blen);
+	  if (h->encoding!=NORMAL) {
+	    c+=fmt_str(c,"\r\nContent-Encoding: ");
+#ifdef SUPPORT_BZIP2
+	    c+=fmt_str(c,h->encoding==GZIP?"gzip":"bzip2");
+#else
+	    c+=fmt_str(c,"gzip");
+#endif
+	  }
+	  c+=fmt_str(c,"\r\n\r\n");
+	  h->hlen=c-h->hdrbuf;
+	  iob_addbuf_free(&h->iob,h->hdrbuf,h->hlen);
+	  if (head)
+	    free(h->bodybuf);
+	  else
+	    iob_addbuf_free(&h->iob,h->bodybuf,h->blen);
+	}
+#ifdef SUPPORT_PROXY
+      } else if (fd==-3) {
+#if 0
+	/* bogus */
+	struct http_data* x=io_getcookie(h->buddy);
+	if (x) {
+	  char *c=array_start(&h->r);
+	  c[str_len(c)]=' ';
+	  array_catb(&x->r,array_start(&h->r),headerlen);
+	}
+	io_dontwantread(s);
+#endif
+	return;
+#endif
+      } else {
+	char* multirange=0;
+	unsigned long long ranges[20];
+	unsigned long long bytes=0;
+	size_t n=0,headersize=0;
+	char hex[16];
+#ifdef DEBUG
+	if (logging) {
+	  buffer_puts(buffer_1,"filefd ");
+	  buffer_putulong(buffer_1,s);
+	  buffer_putspace(buffer_1);
+	  buffer_putulong(buffer_1,fd);
+	  buffer_putnlflush(buffer_1);
+	}
+#endif
+	h->filefd=fd;
+	range_first=0; range_last=ss.st_size;
+	if ((c=http_header(h,"If-Modified-Since")))
+	  if ((unsigned char)(c[scan_httpdate(c,&ims)])>' ')
+	    ims=0;
+	if ((c=http_header(h,"Range"))) {
+	  if (byte_equal(c,6,"bytes=")) {
+	    size_t i;
+	    c+=6;
+	    n=scan_range(c,ranges,sizeof(ranges)/sizeof(ranges[0])/2,ss.st_size);
+
+	    /* the ranges could still be bogus, i.e. 4-2, or the sum
+	      * could be more than just sending the whole file. */
+	    for (i=0; i<n; i+=2) {
+	      if (ranges[i]>=ranges[i+1] ||	// zero or less size
+	          bytes+(ranges[i+1]-ranges[i]+1) < bytes) {	/* int overflow */
+		n=0;
+		break;
+	      }
+	      bytes+=(ranges[i+1]-ranges[i]+1);
+	      if (bytes>ss.st_size) {
+		n=0;
+		break;
+	      }
+	    }
+
+	    if (n) {
+	      /* n will be a multiple of two here */
+	      if (n==2) {
+		/* just one range, common case */
+		range_first=ranges[0];
+		range_last=ranges[1];
+	      } else {
+		size_t overhead=(sizeof("\r\n--eba5aaeb1a3913f0ed90259cf85a1ea7\r\nContent-Type: \r\nContent-Range: bytes -/\r\n\r\n")-1+
+		  strlen(h->mimetype)+fmt_ulonglong(NULL,ss.st_size))*(n/2)+
+		  sizeof("\r\n--eba5aaeb1a3913f0ed90259cf85a1ea7--\r\n")-1;
+		for (i=0; i<n; i+=2)
+		  overhead+=fmt_ulonglong(NULL,ranges[i])+fmt_ulonglong(NULL,ranges[i+1]);
+		if (bytes+overhead<bytes)
+		  goto rangekaputt;
+		headersize=overhead;
+//		printf("bytes=%llu, overhead=%zu, header size=%zu\n",bytes,overhead,headersize);
+		bytes+=overhead;
+		if (bytes<ss.st_size)
+		  multirange=c;
+	      }
+	    } else {
+rangekaputt:
+#ifdef DEBUG
+	      if (logging) {
+		buffer_puts(buffer_1,"bad_range_close ");
+		buffer_putulong(buffer_1,s);
+		buffer_putspace(buffer_1);
+		buffer_putulong(buffer_1,fd);
+		buffer_putnlflush(buffer_1);
+	      }
+#endif
+	      io_close(h->filefd); h->filefd=-1;
+	      httperror(h,"416 Bad Range","The requested range can not be satisfied.",head);
+	      goto fini;
+	    }
+	  }
+	}
+	if (range_last<range_first) {
+	  /* rfc2616, page 123 */
+	  range_first=0; range_last=ss.st_size;
+	}
+	if (range_last>ss.st_size) range_last=ss.st_size;
+
+	c=h->hdrbuf=(char*)malloc(500);
+	if (ss.st_mtime<=ims) {
+	  c+=fmt_str(c,"HTTP/1.1 304 Not Changed");
+	  head=1; range_last=range_first;
+	  io_close(fd); fd=-1;
+	  multirange=0;
+	} else {
+	  if (multirange || range_first || range_last!=ss.st_size)
+	    c+=fmt_str(c,"HTTP/1.1 206 Partial Content");
+	  else
+	    c+=fmt_str(c,"HTTP/1.1 200 Coming Up");
+	}
+
+	c+=fmt_str(c,"\r\nAccept-Ranges: bytes\r\nServer: " RELEASE "\r\nContent-Type: ");
+	if (multirange) {
+	  c+=fmt_str(c,"multipart/byteranges; boundary=");
+	  get_md5_randomness((uint8_t*)multirange,str_chr(multirange,'\n'),hex);
+	  c+=fmt_hexdump(c,hex,16);
+	  c+=fmt_str(c,"\r\nContent-Length: ");
+	  c+=fmt_ulonglong(c,bytes);
+	} else {
+	  c+=fmt_str(c,h->mimetype);
+	  c+=fmt_str(c,"\r\nContent-Length: ");
+	  c+=fmt_ulonglong(c,range_last-range_first);
+	}
+
+	c+=fmt_str(c,"\r\nDate: ");
+	c+=fmt_httpdate(c,now.sec.x&0xfffffffffffull);
+
+	c+=fmt_str(c,"\r\nLast-Modified: ");
+	c+=fmt_httpdate(c,ss.st_mtime);
+	if (h->encoding!=NORMAL) {
+	  c+=fmt_str(c,"\r\nContent-Encoding: ");
+#ifdef SUPPORT_BZIP2
+	  c+=fmt_str(c,h->encoding==GZIP?"gzip":"bzip2");
+#else
+	  c+=fmt_str(c,"gzip");
+#endif
+	}
+	if ((range_first || range_last!=ss.st_size)) {
+	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
+	  c+=fmt_ulonglong(c,range_first);
+	  c+=fmt_str(c,"-");
+	  c+=fmt_ulonglong(c,range_last-1);
+	  c+=fmt_str(c,"/");
+	  c+=fmt_ulonglong(c,ss.st_size);
+	}
+	if (range_first>ss.st_size) {
+	  free(c);
+	  httperror(h,"416 Bad Range","The requested range can not be satisfied.",head);
+	  buffer_puts(buffer_1,"error_416 ");
+	} else {
+	  c+=fmt_str(c,"\r\nConnection: ");
+	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
+	  c+=fmt_str(c,"\r\n\r\n");
+	  iob_addbuf_free(&h->iob,h->hdrbuf,c - h->hdrbuf);
+	  if (!head) {
+	    if (multirange) {
+	      char* buf=malloc(headersize+5);
+	      char* c,* x;
+	      size_t i,flen;
+
+	      c=buf+fmt_str(buf,"\r\n--");
+	      c+=fmt_hexdump(c,hex,16);
+	      c+=fmt_str(c,"--\r\n");
+	      flen=c-buf;
+
+	      x=c;
+
+	      for (i=0; i<n; i+=2) {
+		c=x+fmt_str(x,"\r\n--");
+		c+=fmt_hexdump(c,hex,16);
+		c+=fmt_str(c,"\r\nContent-Type: ");
+		c+=fmt_str(c,h->mimetype);
+		c+=fmt_str(c,"\r\nContent-Range: bytes ");
+		c+=fmt_ulonglong(c,ranges[i]);
+		c+=fmt_str(c,"-");
+		c+=fmt_ulonglong(c,ranges[i+1]);
+		c+=fmt_str(c,"/");
+		c+=fmt_ulonglong(c,ss.st_size);
+		c+=fmt_str(c,"\r\n\r\n");
+		iob_addbuf(&h->iob,x,c-x);
+		if (i+2<n)
+		  iob_addfile(&h->iob,fd,ranges[i],ranges[i+1]-ranges[i]+1);
+		else
+		  iob_addfile_close(&h->iob,fd,ranges[i],ranges[i+1]-ranges[i]+1);
+		x=c;
+	      }
+	      iob_addbuf_free(&h->iob,buf,flen);
+	    } else
+	      iob_addfile_close(&h->iob,fd,range_first,range_last-range_first);
+	  } else
+	    if (fd!=-1) io_close(fd);
+	  if (logging) {
+	    if (h->hdrbuf[9]=='3') {
+	      buffer_puts(buffer_1,head?"HEAD/304 ":"GET/304 ");
+	    } else {
+	      buffer_puts(buffer_1,head?"HEAD ":"GET ");
+	    }
+	  }
+	}
+
+	if (logging) {
+	  char buf[IP6_FMT+10];
+	  int x;
+	  x=fmt_ip6c(buf,h->myip);
+	  x+=fmt_str(buf+x,"/");
+	  x+=fmt_ulong(buf+x,h->myport);
+	  buf[x]=0;
+	  buffer_putulong(buffer_1,s);
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,filename);
+	  switch (h->encoding) {
+	  case GZIP: buffer_puts(buffer_1,".gz"); break;
+#ifdef SUPPORT_BZIP2
+	  case BZIP2: buffer_puts(buffer_1,".bz2");
+#endif
+	  case NORMAL: break;
+	  }
+	  buffer_puts(buffer_1," ");
+	  buffer_putulonglong(buffer_1,range_last-range_first);
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"User-Agent"))?tmp:"[no_user_agent]");
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Referer"))?tmp:"[no_referrer]");
+	  buffer_puts(buffer_1," ");
+	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
+	  buffer_putsflush(buffer_1,"\n");
+	}
+      }
+    }
+  }
+fini:
+  io_dontwantread(s);
+  io_wantwrite(s);
+}
+
+
+#ifdef SUPPORT_PROXY
+void handle_read_proxypost(int64 i,struct http_data* H) {
+  switch (proxy_is_readable(i,H)) {
+  case -1:
+    {
+      struct http_data* h=io_getcookie(H->buddy);
+      if (logging) {
+	char numbuf[FMT_ULONG];
+	numbuf[fmt_ulong(numbuf,i)]=0;
+
+	buffer_putmflush(buffer_1,"proxy_read_error ",numbuf," ",strerror(errno),"\nclose/acceptfail ",numbuf,"\n");
+      }
+      H->buddy=-1;
+      h->buddy=-1;
+      cleanup(i);
+    }
+    break;
+  }
+}
+
+void handle_read_httppost(int64 i,struct http_data* H) {
+  /* read POST data. */
+//	printf("read POST data state for %d\n",i);
+  if (H->still_to_copy) {
+    if (array_bytes(&H->r)>0) {
+//	    printf("  but there was still data in H->r!\n");
+      io_dontwantread(i);
+      io_wantwrite(H->buddy);
+    } else if (read_http_post(i,H)==-1) {
+      if (logging) {
+	char a[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	buffer_putmflush(buffer_1,"http_postdata_read_error ",a," ",strerror(errno),"\nclose/acceptfail ",a,"\n");
+      }
+      cleanup(i);
+    } else {
+//	    printf("  read something\n");
+      io_dontwantread(i);
+      io_wantwrite(H->buddy);
+    }
+  } else {
+    /* should not happen */
+    io_dontwantread(i);
+//	  printf("ARGH!!!\n");
+  }
+}
+
+void handle_write_proxypost(int64 i,struct http_data* h) {
+  struct http_data* H=io_getcookie(h->buddy);
+  /* do we have some POST data to write? */
+//	printf("event: write POST data (%llu) to proxy on %d\n",h->still_to_copy,i);
+  if (!array_bytes(&H->r)) {
+//	  printf("  but nothing here to write!\n");
+    io_dontwantwrite(i);	/* nope */
+    io_wantread(h->buddy);
+  } else {
+//	  printf("  yeah!\n");
+    if (H) {
+      char* c=array_start(&H->r);
+      long alen=array_bytes(&H->r);
+      long l;
+//	    printf("%ld bytes still in H->r (%ld in h->r), still to copy: %lld (%lld in h)\n",alen,(long)array_bytes(&h->r),H->still_to_copy,h->still_to_copy);
+      if (alen>h->still_to_copy) alen=h->still_to_copy;
+      if (alen==0) goto nothingmoretocopy;
+      l=write(i,c,alen);
+//	    printf("wrote %ld bytes (wanted to write %ld; had %lld still to copy)\n",l,alen,H->still_to_copy);
+      if (l<1) {
+	/* ARGH!  Proxy crashed! *groan* */
+	if (logging) {
+	  buffer_puts(buffer_1,"http_postdata_write_error ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putspace(buffer_1);
+	  buffer_puterror(buffer_1);
+	  buffer_puts(buffer_1,"\nclose/acceptfail ");
+	  buffer_putulong(buffer_1,i);
+	  buffer_putnlflush(buffer_1);
+	}
+	cleanup(i);
+      } else {
+	byte_copy(c,alen-l,c+l);
+	array_truncate(&H->r,1,alen-l);
+//	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",H,H->still_to_copy,H->still_to_copy-l);
+	H->still_to_copy-=l;
+//	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-i);
+//	      h->still_to_copy-=i;
+	if (alen-l==0)
+	  io_dontwantwrite(i);
+	if (h->still_to_copy) {
+	  /* we got all we asked for */
+nothingmoretocopy:
+	  io_dontwantwrite(i);
+	  io_wantread(i);
+	  io_dontwantread(h->buddy);
+	  io_wantwrite(h->buddy);
+	}
+      }
+    }
+  }
+}
+
+void handle_write_httppost(int64 i,struct http_data* h) {
+  int64 r;
+  r=iob_send(i,&h->iob);
+  if (r==-1)
+    io_eagain(i);
+  else if (r<=0) {
+    if (r==-3) {
+      if (logging) {
+	char a[FMT_ULONG];
+	char r[FMT_ULONG];
+	char s[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	r[fmt_ulonglong(r,h->received)]=0;
+	s[fmt_ulonglong(s,h->sent)]=0;
+	buffer_putmflush(buffer_1,"socket_error ",a," ",strerror(errno),"\nclose/writefail ",a," ",r," ",s,"\n");
+      }
+      cleanup(i);
+      return;
+    }
+    if (h->buddy==-1) {
+      if (logging) {
+	char a[FMT_ULONG];
+	char r[FMT_ULONG];
+	char s[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	r[fmt_ulonglong(r,h->received)]=0;
+	s[fmt_ulonglong(s,h->sent)]=0;
+	buffer_putmflush(buffer_1,"close/proxydone ",a," ",r," ",s,"\n");
+      }
+      cleanup(i);
+    } else {
+      io_dontwantwrite(i);
+      io_wantread(h->buddy);
+    }
+  } else
+    h->sent+=r;
+}
+
+void handle_write_proxyslave(int64 i,struct http_data* h) {
+  /* the connect() to the proxy just finished or failed */
+  struct http_data* H;
+  H=io_getcookie(h->buddy);
+  if (proxy_write_header(i,h)==-1) {
+    if (logging) {
+      buffer_puts(buffer_1,"proxy_connect_error ");
+      buffer_putulong(buffer_1,i);
+      buffer_putspace(buffer_1);
+      buffer_puterror(buffer_1);
+      buffer_puts(buffer_1,"\nclose/connectfail ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+    }
+    H->buddy=-1;
+    httperror(H,"502 Gateway Broken","Request relaying error.",0); /* FIXME, what about HEAD? */
+    h->buddy=-1;
+    free(h);
+    io_close(i);
+  }
+  /* it worked.  We wrote the header.  Now see if there is
+    * POST data to write.  h->still_to_copy is Content-Length. */
+//	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
+  if (h->still_to_copy) {
+    h->t=PROXYPOST;
+    handle_write_httppost(i,H);
+    return;
+//    goto httpposthandler;
+//	  io_wantwrite(h->buddy);
+  } else {
+    io_dontwantwrite(i);
+    io_wantread(i);
+  }
+  h->t=PROXYPOST;
+}
+
+#endif
+
