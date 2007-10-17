@@ -76,6 +76,7 @@ void printstats(unsigned long long nextchunk) {
   prev=now; now=time(0);
   if (prev!=now) {
     char received[FMT_ULONG], totalsize[FMT_ULONG], timedone[FMT_ULONG], percent[10];
+    char speed[FMT_ULONG+20];
     size_t i,j;
     if (total) {
       if (total>1000000000)
@@ -105,6 +106,15 @@ void printstats(unsigned long long nextchunk) {
       timedone[j]=0;
     }
 
+    if (now-start>1) {
+      i=finished/(now-start);
+      j=fmt_str(speed," (");
+      j+=fmt_humank(speed+j,i);
+      j+=fmt_str(speed+j,"iB/sec)");
+      speed[j]=0;
+    } else
+      speed[0]=0;
+
     if (now > start+3 && now-start) {
       unsigned long long int bps=finished/(now-start);
       size_t k=(total-finished)/bps;
@@ -123,9 +133,9 @@ void printstats(unsigned long long nextchunk) {
 	lm[j]=0;
       }
 
-      buffer_putmflush(buffer_2,percent,"% done; got ",received," of ",totalsize," in ",timedone,", ",lm," to go.    \r");
+      buffer_putmflush(buffer_2,percent,"% done; got ",received,"iB of ",totalsize,"iB in ",timedone,speed,", ",lm," to go.    \r");
     } else
-      buffer_putmflush(buffer_2,percent,"% done; got ",received," of ",totalsize," in ",timedone,".    \r");
+      buffer_putmflush(buffer_2,percent,"% done; got ",received,"iB of ",totalsize,"iB in ",timedone,speed,".    \r");
     statsprinted=1;
   }
 }
