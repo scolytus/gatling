@@ -605,6 +605,15 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
       }
     }
 
+#ifdef TCP_NODELAY
+    {
+      int i=1;
+      setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&i,sizeof(i));
+    }
+#else
+#warning TCP_NODELAY not defined
+#endif
+
     if (io_fd(n)) {
       struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
       if (h) {
@@ -680,14 +689,6 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	h->buddy=-1;
 	h->filefd=-1;
 	io_setcookie(n,h);
-#ifdef TCP_NODELAY
-	{
-	  int i=1;
-	  setsockopt(n,IPPROTO_TCP,TCP_NODELAY,&i,sizeof(i));
-	}
-#else
-#warning TCP_NODELAY not defined
-#endif
       } else
 	io_close(n);
     } else
@@ -1540,9 +1541,10 @@ usage:
     if (byte_equal(ip,16,V6any)) {
       if (dohttp==-1) {
 	close(s); s=-1;
-      } else
+      } else {
 	if (socket_bind6_reuse(s,ip,port,scope_id)==-1 || socket_listen(s,16)==-1)
 	  panic("socket_bind6_reuse for http");
+      }
 #ifdef SUPPORT_FTP
       f=socket_tcp6();
       if (doftp>=0)
@@ -1571,9 +1573,10 @@ usage:
     if (dohttp==-1) {
       close(s);
       s=-1;
-    } else
+    } else {
       if (socket_bind6_reuse(s,ip,port,scope_id)==-1 || socket_listen(s,16)==-1)
 	panic("socket_bind6_reuse");
+    }
     s4=-1;
 #ifdef SUPPORT_FTP
     if (doftp>=0)
@@ -1592,9 +1595,14 @@ usage:
   if (dohttp==-1) {
     close(s);
     s=-1;
-  } else
+  } else {
+#ifdef TCP_DEFER_ACCEPT
+    int i=1;
+    setsockopt(s,IPPROTO_TCP,TCP_DEFER_ACCEPT,&i,sizeof(i));
+#endif
     if (socket_bind6_reuse(s,ip,port,0)==-1 || socket_listen(s,16)==-1)
       panic("socket_bind6_reuse");
+  }
 #ifdef SUPPORT_FTP
   if (doftp>=0) {
     f=socket_tcp6();
@@ -1609,6 +1617,10 @@ usage:
 #ifdef SUPPORT_SMB
   if (dosmb>=0) {
     smbs=socket_tcp6();
+#ifdef TCP_DEFER_ACCEPT
+    int i=1;
+    setsockopt(smbs,IPPROTO_TCP,TCP_DEFER_ACCEPT,&i,sizeof(i));
+#endif
     if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1 || socket_listen(smbs,16)) {
       if (dosmb==1)
 	panic("socket_bind6_reuse");
@@ -1620,6 +1632,10 @@ usage:
 #ifdef SUPPORT_HTTPS
   if (dohttps>=0) {
     httpss=socket_tcp6();
+#ifdef TCP_DEFER_ACCEPT
+    int i=1;
+    setsockopt(httpss,IPPROTO_TCP,TCP_DEFER_ACCEPT,&i,sizeof(i));
+#endif
     if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1 || socket_listen(httpss,16)) {
       if (dohttps==1)
 	panic("socket_bind6_reuse");

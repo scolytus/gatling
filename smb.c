@@ -219,7 +219,7 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
     "\x04\x41\x00\x00"	// Max Buffer Size (16644, like XP)
     "\x00\x00\x01\x00"	// Max Raw Buffer (65536, like XP)
     "\x01\x02\x03\x04"	// Session Key
-    "\x5c\x00\x00\x00"	// Capabilities, the bare minimum
+    "\x5c\x40\x00\x00"	// Capabilities, the bare minimum
     "xxxxxxxx"	// system time; ofs 24
     "xx"	// server time zone; ofs 32
     "\x00"	// key len
@@ -538,7 +538,8 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
   if (subcommand==7 || subcommand==5) {	// QUERY_FILE_INFO, QUERY_PATH_INFO
     if (subcommand==7) {
       // QUERY_FILE_INFO
-      if (!(hdl=deref_handle(&h->h,pid,uint16_read((char*)c-smbheadersize+dataofs)))) {
+      if (paramcount<4) return -1;
+      if (!(hdl=deref_handle(&h->h,pid,uint16_read((char*)c-smbheadersize+paramofs)))) {
 	set_smb_error(sr,STATUS_INVALID_HANDLE,0x32);
 	return 0;
       }
@@ -548,7 +549,7 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
 	fnlen=hdl->filename[0];
 	filename=hdl->filename+1;
       }
-      loi=uint16_read((char*)c-smbheadersize+dataofs+2);
+      loi=uint16_read((char*)c-smbheadersize+paramofs+2);
     } else if (subcommand==5) {
       // QUERY_PATH_INFO
       filename=(uint16_t*)(c-smbheadersize+paramofs+6);
