@@ -13,8 +13,10 @@ CC=gcc
 CFLAGS=-pipe -Wall -O -I../libowfat/
 LDFLAGS=-s -L../libowfat/ -lowfat
 
-gatling: gatling.o libsocket libiconv libcrypt
-	$(CC) -o $@ gatling.o $(LDFLAGS) `cat libsocket libiconv libcrypt`
+OBJS=mime.o ftp.o http.o smb.o common.o
+
+gatling: gatling.o $(OBJS) libsocket libiconv libcrypt
+	$(CC) -o $@ gatling.o $(OBJS) $(LDFLAGS) `cat libsocket libiconv libcrypt`
 
 httpbench: httpbench.o libsocket
 	$(CC) -o $@ httpbench.o $(LDFLAGS) `cat libsocket`
@@ -58,7 +60,7 @@ cgi: cgi.o
 getlinks: getlinks.o
 	$(CC) -o $@ getlinks.o $(LDFLAGS)
 
-gatling.o: version.h havesetresuid.h
+gatling.o: version.h gatling.h havesetresuid.h
 
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
@@ -66,8 +68,8 @@ version.h: CHANGES
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
 
-tlsgatling: gatling.c ssl.o libsocket libiconv libcrypt
-	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
+tlsgatling: gatling.c ssl.o version.h gatling.h libsocket libiconv libcrypt $(OBJS)
+	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o $(OBJS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
 
 libsocket: trysocket.c
 	if $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \

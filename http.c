@@ -20,8 +20,25 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <ctype.h>
+#include <sys/socket.h>
 
 MD5_CTX md5_ctx;
+
+char* http_header_blob(char* b,long l,char* h) {
+  long i;
+  long sl=str_len(h);
+  for (i=0; i+sl+2<l; ++i)
+    if (b[i]=='\n' && case_equalb(b+i+1,sl,h) && b[i+sl+1]==':') {
+      b+=i+sl+2;
+      while (*b==' ' || *b=='\t') ++b;
+      return b;
+    }
+  return 0;
+}
+
+char* http_header(struct http_data* r,char* h) {
+  return http_header_blob(array_start(&r->r),array_bytes(&r->r),h);
+}
 
 static inline int issafe(unsigned char c) {
   return (c!='"' && c!='%' && c>=' ' && c!='+' && c!=':' && c!='#');
@@ -1751,5 +1768,420 @@ void handle_write_proxyslave(int64 i,struct http_data* h) {
   h->t=PROXYPOST;
 }
 
+#endif
+
+#ifdef SUPPORT_CGI
+/* gatling is expected to have 10000 file descriptors open.
+ * so forking off CGIs is bound to be expensive because after the fork
+ * all the file descriptors have to be closed.  So this code makes
+ * gatling fork off a child first thing in main().  gatling has a Unix
+ * domain socket open to the child.  When gatling needs to start a CGI,
+ * it sends a message to the child.  The child then creates a new socket
+ * pair, sets up the CGI environment, forks a grandchild, and passes the
+ * socket to the grandchild back to gatling over the Unix domain socket. */
+char fsbuf[8192];
+
+static const char *cgivars[] = {
+  "GATEWAY_INTERFACE=",
+  "SERVER_PROTOCOL=",
+  "SERVER_SOFTWARE=",
+  "SERVER_NAME=",
+  "SERVER_PORT=",
+  "REQUEST_METHOD=",
+  "REQUEST_URI=",
+  "SCRIPT_NAME=",
+  "REMOTE_ADDR=",
+  "REMOTE_PORT=",
+  "REMOTE_IDENT=",
+  "AUTH_TYPE=",
+  "CONTENT_TYPE=",
+  "CONTENT_LENGTH=",
+  "QUERY_STRING=",
+  "PATH_INFO=",
+  "PATH_TRANSLATED=",
+  "REMOTE_USER=",
+  0
+};
+
+int cgienvneeded(const char* httpreq,size_t reqlen) {
+  int i,j,envc;
+  for (i=envc=0; _envp[i]; ++i) {
+    int found=0;
+    if (str_start(_envp[i],"HTTP_"))
+      found=1;
+    else
+      for (j=0; cgivars[j]; ++j)
+	if (str_start(_envp[i],cgivars[j])) { found=1; break; }
+    if (!found) ++envc;
+  }
+
+  /* now collect all normal HTTP headers */
+
+  {
+    const char* x=httpreq;
+    const char* max=x+reqlen;
+    for (;x<max && *x!='\n';++x) ;	/* Skip GET */
+    for (;x<max;++x)
+      if (*x=='\n')
+	++envc;
+  }
+  return envc;
+}
+
+
+void forkslave(int fd,buffer* in) {
+  /* receive query, create socketpair, fork, set up environment,
+   * pass file descriptor of our side of socketpair */
+
+  /* protocol:
+   * in:
+   *   uint32 reqlen,dirlen,ralen
+   *   char httprequest[reqlen]
+   *   char dir[dirlen]		// "www.fefe.de:80"
+   *   char remoteaddr[ralen]
+   *   uint16 remoteport
+   *   uint16 myport
+   * out:
+   *   uint32 code,alen
+   *   char answer[alen]
+   */
+
+  uint32 i,reqlen,dirlen,code,ralen;
+  uint16 port,myport;
+  const char* msg="protocol error";
+  int res;
+
+  code=1;
+  if ((res=buffer_get(in,(char*)&reqlen,4))==4 &&
+      buffer_get(in,(char*)&dirlen,4)==4 &&
+      buffer_get(in,(char*)&ralen,4)==4) {
+    if (res<1) exit(0);
+    if (dirlen<PATH_MAX && reqlen<MAX_HEADER_SIZE) {
+      char* httpreq=alloca(reqlen+1);
+      char* path=alloca(dirlen+1);
+      char* remoteaddr=alloca(ralen+1);
+      char* servername,* httpversion,* authtype,* contenttype,* contentlength,* remoteuser;
+      char* path_translated;
+
+      if (buffer_get(in,httpreq,reqlen) == reqlen &&
+	  buffer_get(in,path,dirlen) == dirlen &&
+	  buffer_get(in,remoteaddr,ralen) == ralen &&
+	  buffer_get(in,(char*)&port,2) == 2 &&
+	  buffer_get(in,(char*)&myport,2) == 2) {
+
+	httpreq[reqlen]=0;
+	path[dirlen]=0;
+	remoteaddr[ralen]=0;
+
+	if (dirlen==0 || chdir(path)==0) {
+	  /* now find cgi */
+	  char* cginame,* origcginame;
+
+	  origcginame=cginame=httpreq+5+(httpreq[0]=='P');
+	  while (*cginame=='/') ++cginame;
+	  for (i=0; cginame+i<httpreq+reqlen; ++i)
+	    if (cginame[i]==' ' || cginame[i]=='\r' || cginame[i]=='\n') break;
+
+	  if (cginame[i]==' ') {
+	    char* args,* pathinfo;
+	    int j,k;
+	    struct stat ss;
+	    cginame[i]=0; args=0; pathinfo=0;
+
+	    httpversion=alloca(30+(j=str_chr(cginame+i+1,'\n')));
+	    k=fmt_str(httpversion,"SERVER_PROTOCOL=");
+	    byte_copy(httpversion+k,j,cginame+i+1);
+	    if (j && httpversion[k+j-1]=='\r') --j; httpversion[k+j]=0;
+
+	    /* now cginame is something like "test/t.cgi?foo=bar"
+	     * but it might also be "test/t.cgi/something/else" or even
+	     * "test/t.cgi/something/?uid=23" */
+
+	    /* extract ?foo=bar */
+	    j=str_chr(cginame,'?');
+	    if (cginame[j]=='?') {
+	      args=cginame+j+1;
+	      cginame[j]=0;
+	      i=j;
+	    }
+
+	    /* now cginame is test/t.cgi/something */
+	    if (stat(cginame,&ss)==0)
+	      /* no "/something" */
+	      pathinfo=0;
+	    else {
+	      /* try paths */
+	      for (j=0; j<i; ++j) {
+		if (cginame[j]=='/') {
+		  cginame[j]=0;
+		  if (stat(cginame,&ss)==0 && !S_ISDIR(ss.st_mode)) {
+		    pathinfo=cginame+j+1;
+		    break;
+		  }
+		  cginame[j]='/';
+		  if (errno==ENOENT || errno==ENOTDIR) {
+		    msg="404";
+		    goto error;
+		  }
+		}
+	      }
+	    }
+
+	    {
+	      char* x=http_header_blob(httpreq,reqlen,"Host");
+	      if (x) {
+		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+	      } else {
+		x=remoteaddr; j=str_len(x);
+	      }
+	      servername=alloca(30+j+1);
+	      i=fmt_str(servername,"SERVER_NAME=");
+	      byte_copy(servername+i,j,x);
+	      servername[i+j]=0;
+
+	      if (pathinfo) {
+		path_translated=alloca(PATH_MAX+30);
+		i=fmt_str(path_translated,"PATH_TRANSLATED=");
+		if (!realpath(pathinfo,path_translated+i))
+		  path_translated=0;
+	      } else
+		path_translated=0;
+
+	      x=http_header_blob(httpreq,reqlen,"Authorization");
+	      if (x) {
+		int k;
+		remoteuser=0;
+
+		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+		k=str_chr(x,' ');
+		if (k<j) {
+		  size_t dl;
+		  remoteuser=alloca(20+k-j);
+		  i=fmt_str(remoteuser,"REMOTE_USER=");
+		  scan_base64(x+k+1,remoteuser+i,&dl);
+		  remoteuser[i+dl]=0;
+		  dl=str_chr(remoteuser+i,':');
+		  if (remoteuser[i+dl]==':') remoteuser[i+dl]=0;
+		  j=k;
+		}
+		authtype=alloca(20+j+1);
+		i=fmt_str(authtype,"AUTH_TYPE=");
+		byte_copy(authtype+i,j,x);
+		authtype[i+j]=0;
+	      } else
+		authtype=remoteuser=0;
+
+	      x=http_header_blob(httpreq,reqlen,"Content-Type");
+	      if (x) {
+		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+		contenttype=alloca(30+j+1);
+		i=fmt_str(contenttype,"CONTENT_TYPE=");
+		byte_copy(contenttype+i,j,x);
+		contenttype[i+j]=0;
+	      } else
+		contenttype=0;
+
+	      x=http_header_blob(httpreq,reqlen,"Content-Length");
+	      if (x) {
+		j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+		contentlength=alloca(30+j+1);
+		i=fmt_str(contentlength,"CONTENT_LENGTH=");
+		byte_copy(contentlength+i,j,x);
+		contentlength[i+j]=0;
+	      } else
+		contentlength=0;
+	    }
+
+	    {
+	      int sock[2];
+	      if (socketpair(AF_UNIX,SOCK_STREAM,0,sock)==0) {
+#ifdef sgi
+		int r=fork();
+#else
+		int r=vfork();
+#endif
+		if (r==-1)
+		  msg="vfork failed!";
+		else if (r==0) {
+		  /* child */
+		  int plusx=0;
+		  pid_t pid;
+		  code=0;
+		  write(fd,&code,4);
+		  write(fd,&code,4);
+		  pid=getpid();
+		  write(fd,&pid,sizeof(pid));
+		  if (cginame[(j=strlen(cginame))-1]=='/') {	/* can happen in the -C+x case */
+		    char* temp=alloca(j+10);
+		    j=fmt_str(temp,cginame);
+		    j+=fmt_str(temp+j,"index.html");
+		    temp[j]=0;
+		    cginame=temp;
+		    plusx=1;
+		  }
+		  if (io_passfd(fd,sock[0])==0) {
+		    char* argv[]={cginame,0};
+		    char** envp;
+		    int envc;
+
+		    envc=cgienvneeded(httpreq,reqlen);
+
+		    envp=(char**)alloca(sizeof(char*)*(envc+20));
+		    envc=0;
+
+		    for (i=0; _envp[i]; ++i) {
+		      int found=0;
+		      if (str_start(_envp[i],"HTTP_"))
+			found=1;
+		      else
+			for (j=0; cgivars[j]; ++j)
+			  if (str_start(_envp[i],cgivars[j])) { found=1; break; }
+		      if (!found) envp[envc++]=_envp[i];
+		    }
+		    envp[envc++]="SERVER_SOFTWARE=" RELEASE;
+		    envp[envc++]=servername;
+		    envp[envc++]="GATEWAY_INTERFACE=CGI/1.1";
+		    envp[envc++]=httpversion;
+
+		    envp[envc]=alloca(30);
+		    i=fmt_str(envp[envc],"SERVER_PORT=");
+		    i+=fmt_ulong(envp[envc]+i,myport);
+		    envp[envc][i]=0;
+		    ++envc;
+
+		    envp[envc++]=httpreq[0]=='G'?"REQUEST_METHOD=GET":"REQUEST_METHOD=POST";
+		    if (pathinfo) envp[envc++]=pathinfo;
+		    if (path_translated) envp[envc++]=path_translated;
+
+		    envp[envc]=alloca(30+str_len(origcginame));
+		    i=fmt_str(envp[envc],"SCRIPT_NAME=");
+		    i+=fmt_str(envp[envc]+i,origcginame-1);
+		    envp[envc][i]=0;
+		    ++envc;
+
+		    if (args) {
+		      envp[envc]=alloca(30+str_len(args));
+		      i=fmt_str(envp[envc],"QUERY_STRING=");
+		      i+=fmt_str(envp[envc]+i,args);
+		      envp[envc][i]=0;
+		      ++envc;
+		    }
+
+		    envp[envc]=alloca(30+str_len(remoteaddr));
+		    i=fmt_str(envp[envc],"REMOTE_ADDR=");
+		    i+=fmt_str(envp[envc]+i,remoteaddr);
+		    envp[envc][i]=0;
+		    ++envc;
+
+		    envp[envc]=alloca(30);
+		    i=fmt_str(envp[envc],"REMOTE_PORT=");
+		    i+=fmt_ulong(envp[envc]+i,port);
+		    envp[envc][i]=0;
+		    ++envc;
+
+		    if (authtype) envp[envc++]=authtype;
+		    if (remoteuser) envp[envc++]=remoteuser;
+		    if (contenttype) envp[envc++]=contenttype;
+		    if (contentlength) envp[envc++]=contentlength;
+
+		    {
+		      char* x=httpreq;
+		      char* max=x+reqlen;
+		      char* y;
+
+		      for (;x<max && *x!='\n';++x) ;	/* Skip GET */
+
+		      for (y=++x;x<max;++x)
+			if (*x=='\n') {
+
+			  if (x>y && x[-1]=='\r') --x;
+
+			  if (x>y) {
+			    char* s=alloca(x-y+7);
+			    int i,j;
+
+			    byte_copy(s,5,"HTTP_");
+			    j=5;
+			    for (i=0; i<x-y; ++i) {
+			      if (y[i]==':') {
+				++i;
+				while (i<x-y && (y[i]==' ' || y[i]=='\t')) ++i;
+				s[j]='='; ++j;
+				for (; i<x-y; ++i) {
+				  s[j]=y[i];
+				  ++j;
+				}
+				s[j]=0;
+				envp[envc]=s;
+				++envc;
+				break;
+			      }
+			      if (y[i]=='-')
+				s[j]='_';
+			      else if (y[i]>='a' && y[i]<='z')
+				s[j]=y[i]-'a'+'A';
+			      else if (y[i]>='A' && y[i]<='Z')
+				s[j]=y[i];
+			      else {
+				s=0; break;
+			      }
+			      ++j;
+			    }
+			  }
+			  if (*x=='\r') ++x;
+			  y=x+1;
+			}
+		    }
+
+		    envp[envc]=0;
+
+		    dup2(sock[1],0);
+		    dup2(sock[1],1);
+		    dup2(sock[1],2);
+		    close(sock[0]); close(sock[1]); close(fd);
+
+		    {
+		      char* path,* file;
+		      path=cginame;
+		      file=strrchr(path,'/');
+		      if (file) {
+			*file=0;
+			++file;
+			chdir(path);
+			cginame=file;
+		      }
+		      execve(cginame,argv,envp);
+		    }
+		  }
+		  {
+		    static char e[]="HTTP/1.0 503 Gateway Broken\r\nServer: " RELEASE "\r\nContent-Length: 15\r\nContent-Type: text/html\r\n\r\nGateway Broken.";
+		    write(1,e,sizeof(e)-1);
+		  }
+		  exit(127);
+		} else {
+		  /* father */
+		  close(sock[0]);
+		  close(sock[1]);
+		  return;
+		}
+	      } else
+		msg="socketpair failed!";
+	    }
+
+	  }
+	}
+      }
+    }
+  }
+error:
+  if (write(fd,&code,4)!=4) exit(0);
+  code=strlen(msg);
+  write(fd,&code,4);
+  {
+    pid_t pid=0;
+    write(fd,&pid,sizeof(pid));
+  }
+  write(fd,msg,code);
+}
 #endif
 

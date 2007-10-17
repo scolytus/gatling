@@ -6,7 +6,7 @@
 // #define SUPPORT_BITTORRENT
 
 #define SUPPORT_SERVERSTATUS
-// #define SUPPORT_SMB
+#define SUPPORT_SMB
 #define SUPPORT_FTP
 #define SUPPORT_PROXY
 /* #define DEBUG to enable more verbose debug messages for tracking fd

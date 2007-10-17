@@ -28,31 +28,10 @@
 */
 
 static int ftp_vhost(struct http_data* h) {
-  char* y;
-  int i;
-
-  /* construct artificial Host header from IP */
-  y=alloca(IP6_FMT+7);
-  i=fmt_ip6c(y,h->myip);
-  i+=fmt_str(y+i,":");
-  i+=fmt_ulong(y+i,h->myport);
-  y[i]=0;
-
-#ifdef __MINGW32__
-//  printf("chdir(\"%s\") -> %d\n",origdir,chdir(origdir));
-  chdir(origdir);
-#else
-  fchdir(origdir);
-#endif
-  if (virtual_hosts>=0) {
-    if (chdir(y)==-1)
-      if (chdir("default")==-1)
-	if (virtual_hosts==1) {
-	  h->hdrbuf="425 no such virtual host.\r\n";
-	  return -1;
-	}
-  }
-  return 0;
+  int r=ip_vhost(h);
+  if (r==-1)
+    h->hdrbuf="425 no such virtual host.\r\n";
+  return r;
 }
 
 static int ftp_open(struct http_data* h,const char* s,int forreading,int sock,const char* what,struct stat* ss) {

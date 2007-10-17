@@ -1,6 +1,7 @@
 #ifndef _GATLING_H
 #define _GATLING_H
 
+#define _FILE_OFFSET_BITS 64
 #include "features.h"
 #include "iob.h"
 #include "array.h"
@@ -9,7 +10,6 @@
 #include "uint32.h"
 #include "uint64.h"
 
-#define _FILE_OFFSET_BITS 64
 #include <sys/stat.h>
 #include <regex.h>
 
@@ -89,6 +89,21 @@ extern int init_serverside_tls(SSL** ssl,int sock);
 extern int init_clientside_tls(SSL** ssl,int sock);
 #endif
 
+/* the tree id is always 1 (we export exactly one tree in TreeConnectAndX)
+ * the user id is always 1, too (we hand it out in SessionSetupAndX)
+ * we need to hand out file handles relative the the PID though */
+struct handle {
+  uint32_t pid,handle;
+  int fd;
+  off_t size,cur;
+  unsigned short* filename;
+};
+
+struct handles {
+  size_t u,a;	/* used, allocated */
+  struct handle* h;
+};
+
 struct http_data {
   enum conntype t;
 #ifdef SUPPORT_FTP
@@ -128,7 +143,7 @@ struct http_data {
 #endif
 #endif
 #ifdef SUPPORT_SMB
-  enum { PCNET10, LANMAN21, NTLM012 } smbdialect;
+  struct handles h;
 #endif
 #ifdef SUPPORT_THREADED_OPEN
   int try_encoding;
@@ -137,6 +152,13 @@ struct http_data {
   struct stat ss;
 #endif
 };
+
+extern size_t max_handles;
+
+extern struct handle* alloc_handle(struct handles* h);
+extern struct handle* deref_handle(struct handles* h,uint32_t pid,uint32_t handle);
+extern void close_handle(struct handle* h);
+extern void close_all_handles(struct handles* h);
 
 extern int virtual_hosts;
 extern int transproxy;
@@ -197,6 +219,7 @@ struct cgi_proxy {
   enum proxyprotocol proxyproto;
 };
 extern struct cgi_proxy* last,* cgis;
+extern char** _envp;
 #endif
 
 #ifdef SUPPORT_CGI
@@ -205,6 +228,8 @@ extern int forksock[2];
 
 extern void httpresponse(struct http_data* h,int64 s,long headerlen);
 extern char* http_header(struct http_data* r,char* h);
+
+extern int ip_vhost(struct http_data* h);
 
 #ifdef SUPPORT_FALLBACK_REDIR
 extern const char* redir;
@@ -230,10 +255,21 @@ extern void httperror(struct http_data* r,const char* title,const char* message,
 
 extern int buffer_putlogstr(buffer* b,const char* s);
 
+extern char fsbuf[8192];
+extern void forkslave(int fd,buffer* in);
+
 #ifdef USE_ZLIB
 #include <zlib.h>
 #endif
 
+#ifdef SUPPORT_SMB
+extern int smbresponse(struct http_data* h,int64 s);
+
+extern char workgroup[20];
+extern int wglen;
+extern char workgroup_utf16[100];
+extern int wglen16;
+#endif
 
 #include "version.h"
 #define RELEASE "Gatling/" VERSION
