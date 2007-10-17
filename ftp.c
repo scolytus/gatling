@@ -9,6 +9,8 @@
 #include "ip4.h"
 #include "scan.h"
 
+#include <sys/types.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <errno.h>

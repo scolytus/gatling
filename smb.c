@@ -6,6 +6,9 @@
 #include "rangecheck.h"
 #include "str.h"
 
+#include <sys/types.h>
+#include <string.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <time.h>

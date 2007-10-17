@@ -11,6 +11,8 @@
 #include "case.h"
 #include "ip4.h"
 
+#include <sys/types.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <dirent.h>
 #include <md5.h>
@@ -21,6 +23,7 @@
 #include <sys/mman.h>
 #include <ctype.h>
 #include <sys/socket.h>
+#include <limits.h>
 
 MD5_CTX md5_ctx;
 
