@@ -13,6 +13,9 @@
 #include <assert.h>
 #include <time.h>
 #include <iconv.h>
+#include <sys/statvfs.h>
+#include <fnmatch.h>
+#include <dirent.h>
 
 #include <stdio.h>
 
@@ -53,6 +56,10 @@ struct smbheader {
    */
 };
 #endif
+
+static int hasandx(unsigned char code) {
+  return !strchr("\x04\x72\x71\x2b\x32\x80",code);
+}
 
 static const size_t netbiosheadersize=4;
 static const size_t smbheadersize=32;
@@ -136,12 +143,9 @@ static int add_smb_response(struct smb_response* sr,char* buf,size_t size,unsign
 }
 
 static void set_smb_error(struct smb_response* sr,uint32_t error,unsigned char req) {
+  add_smb_response(sr,"\x00\x00",3,req);
   assert(sr->allocated>=0x20);
   uint32_pack(sr->buf+4+5,error);
-}
-
-static int hasandx(unsigned char code) {
-  return !strchr("\x04\x72\x71\x2b\x32",code);
 }
 
 static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
@@ -311,6 +315,34 @@ enum smb_open_todo {
   WANT_CHDIR,
 };
 
+/* ssize is the size in bytes, including L'\0' */
+/* returns number of converted chars in dest, including \0, or 0 on error */
+size_t utf16tolatin1(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
+  size_t i;
+  size_t max=dsize;
+  if (ssize/2<max) max=ssize/2;
+  for (i=0; i<max; ++i) {
+    uint16_t x=uint16_read((char*)&src[i]);
+    if (x>0xff) return 0;
+    dest[i]=x;
+  }
+  if (i==dsize) return 0;
+  dest[i]=0;
+  return i+1;
+}
+
+size_t utf16toutf8(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
+  size_t X,Y;
+  char* x,* y;
+  x=(char*)src;
+  y=dest;
+  X=ssize;
+  Y=dsize;
+  memset(dest,0,dsize);
+  if (iconv(wc2utf8,&x,&X,&y,&Y)) return 0;
+  return dsize-Y;
+}
+
 int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,struct stat* ss,enum smb_open_todo todo) {
   char localfilename[1024];
   int64 fd;
@@ -323,28 +355,15 @@ int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,str
   for (j=0; fd==-1 && j<2; ++j) {
     if (j==0) {
       /* first try latin1 */
-      for (i=0; i<fnlen/2; ++i) {
-	localfilename[i]=uint16_read((char*)&remotefilename[i]);
-	if (localfilename[i]=='\\')
-	  localfilename[i]='/';
-#if 0
-	if (localfilename[i]<' ') {
-	  set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0x2d);	// ERROR_FILE_NOT_FOUND
-	  close_handle(hdl);
-	  return 0;
-	}
-#endif
-      }
-      localfilename[i]=0;
+      if (utf16tolatin1(localfilename,sizeof(localfilename),remotefilename,fnlen)==0)
+	continue;
     } else {
-      size_t X,Y;
-      char* y;
-      X=fnlen/2;
-      Y=sizeof(localfilename)-1;
-      x=(char*)remotefilename;
-      y=(char*)localfilename;
-      memset(localfilename,0,sizeof(localfilename));
-      if (iconv(wc2utf8,&x,&X,&y,&Y)) break;
+      if (utf16toutf8(localfilename,sizeof(localfilename),remotefilename,fnlen)==0)
+	break;
+    }
+    for (i=0; localfilename[i]; ++i) {
+      if (localfilename[i]=='\\')
+	localfilename[i]='/';
     }
     x=(char*)localfilename;
     while ((x=strstr(x,"/.")))
@@ -651,7 +670,9 @@ filenotfound:
       return 0;
     }
   } else if (subcommand==1) {	// FIND_FIRST2
-    size_t i,l=(paramofs-smbheadersize-12)/2;
+    size_t i,l=dataofs-paramofs-12;
+    char* globlatin1,* globutf8;
+    DIR* d;
     if (paramcount<18)
       return -1;		// need at least six chars for "/*" in unicode
     filename=(uint16*)(c-smbheadersize+paramofs+12);
@@ -659,16 +680,47 @@ filenotfound:
       goto filenotfound;
     if (filename[l])
       return -1;		// want null terminated filename
-    if (uint16_read((char*)&(filename[0]))!='/')
+    if (uint16_read((char*)&filename[l-1])=='\\' || uint16_read((char*)&filename[l-1])=='/')
+      goto filenotfound;	// can't glob if filename ends in \ or /
+    if (uint16_read((char*)&(filename[0]))!='\\')
       goto filenotfound;
     for (i=l; i>0; --i)
-      if (uint16_read((char*)&filename[i])=='/') {
+      if (uint16_read((char*)&filename[i])=='\\') {
 	filename[i]=0;
 	break;
       }
     fnlen=i*2;
     if (smb_open(h,filename+1,fnlen,0,WANT_CHDIR)==-1)
       goto filenotfound;
+    filename+=i+1; l-=i;
+    globlatin1=alloca(l+1);
+    if (utf16tolatin1(globlatin1,l-i+1,filename,(l+1)*2)) {
+      globlatin1=0;
+      puts("could not convert glob expression to latin1!");
+    } else
+      printf("glob expression \"%s\"\n",globlatin1);
+    globutf8=alloca((l+1)*3);
+    if (utf16toutf8(globutf8,(l+1)*3,filename,(l+1)*3)) {
+      globutf8=0;
+      puts("could not convert glob expression to utf-8!");
+    }
+    if (globlatin1 && globutf8 && !strcmp(globutf8,globlatin1)) globutf8=0;
+    if (!globlatin1 && !globutf8)
+      goto filenotfound;
+
+    d=opendir(".");
+    if (d) {
+      struct dirent* de;
+      while ((de=readdir(d))) {
+	if (de->d_name[0]=='.') continue;
+	if (de->d_name[0]==':') de->d_name[0]='.';
+	if ((globlatin1 && !fnmatch(globlatin1,de->d_name,0)) ||
+	    (globutf8 && !fnmatch(globutf8,de->d_name,0))) {
+	  printf("globbed ok: %s\n",de->d_name);
+	}
+      }
+    }
+
   } else
     return -1;
 }
@@ -682,6 +734,46 @@ static int smb_handle_Close(struct http_data* h,unsigned char* c,size_t len,uint
   }
   close_handle(hdl);
   return add_smb_response(sr,"\x00\x00\x00",3,0x4);
+}
+
+static int smb_handle_QueryDiskInfo(unsigned char* c,size_t len,struct smb_response* sr) {
+  struct statvfs sv;
+  char buf[11];
+  unsigned long long l,k;
+  size_t i;
+  if (len<3 || c[0]!=0) return -1;
+  if (fstatvfs(origdir,&sv)==-1) {
+    set_smb_error(sr,ERROR_ACCESS_DENIED,0x80);
+    return 0;
+  }
+  l=(unsigned long long)sv.f_blocks*sv.f_bsize;
+  k=(unsigned long long)sv.f_bavail*sv.f_bsize;
+  for (i=0; l>0xffff; ++i) l>>=1;
+
+  buf[0]=5;
+  /* ok, this protocol sucks royally; it works in clusters, and you can
+   * only express total and free space in clusters, AND you only have 16
+   * bits. */
+  if (i>30) {
+    i=30;
+    uint16_pack(buf+1,0xffff);
+    if ((k>>i)>0xffff)
+      uint16_pack(buf+7,0xffff);
+    else
+      uint16_pack(buf+7,k>>i);
+  } else {
+    uint16_pack(buf+1,l);
+    uint16_pack(buf+7,k>>i);
+    if (i<9+15) {
+      uint16_pack(buf+5,1<<9);
+      uint16_pack(buf+3,1<<(i-9));
+    } else {
+      uint16_pack(buf+3,1<<15);
+      uint16_pack(buf+3,1<<(i-15));
+    }
+  }
+  uint16_pack(buf+9,0);
+  return add_smb_response(sr,buf,11,0x80);
 }
 
 int smbresponse(struct http_data* h,int64 s) {
@@ -719,8 +811,42 @@ int smbresponse(struct http_data* h,int64 s) {
 
     /* what kind of request is it? */
     switch (andxtype) {
+    case 0x04:
+      /* Close Request */
+      if (smb_handle_Close(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
+	goto kaputt;
+      break;
+
+    case 0x10:
+      /* Check Directory Request */
+      break;
+
     case 0x2b:
       if (smb_handle_echo(c+cur,len-cur,&sr)==-1)
+	goto kaputt;
+      break;
+
+    case 0x2d:
+      /* Open AndX Request */
+      if (smb_handle_OpenAndX(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
+	goto kaputt;
+      break;
+
+    case 0x2e:
+      /* Read AndX Request */
+      if (smb_handle_ReadAndX(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
+	goto kaputt;
+      goto added;
+
+    case 0x32:
+      /* Trans2 Request; hopefully QUERY_FILE_INFO */
+      if (smb_handle_Trans2(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
+	goto kaputt;
+      break;
+
+    case 0x71:
+      /* Tree Disconnect Request */
+      if (smb_handle_TreeDisconnect(c+cur,len-cur,&sr)==-1)
 	goto kaputt;
       break;
 
@@ -743,39 +869,11 @@ int smbresponse(struct http_data* h,int64 s) {
 	goto kaputt;
       break;
 
-    case 0x71:
-      /* Tree Disconnect Request */
-      if (smb_handle_TreeDisconnect(c+cur,len-cur,&sr)==-1)
+    case 0x80:
+      if (smb_handle_QueryDiskInfo(c+cur,len-cur,&sr)==-1)
 	goto kaputt;
       break;
 
-    case 0x10:
-      /* Check Directory Request */
-      break;
-
-    case 0x2d:
-      /* Open AndX Request */
-      if (smb_handle_OpenAndX(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
-	goto kaputt;
-      break;
-
-    case 0x2e:
-      /* Read AndX Request */
-      if (smb_handle_ReadAndX(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
-	goto kaputt;
-      goto added;
-
-    case 0x32:
-      /* Trans2 Request; hopefully QUERY_FILE_INFO */
-      if (smb_handle_Trans2(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
-	goto kaputt;
-      break;
-
-    case 0x04:
-      /* Close Request */
-      if (smb_handle_Close(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
-	goto kaputt;
-      break;
     }
     if (!hasandx(andxtype)) break;
     andxtype=c[cur+1];

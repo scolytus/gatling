@@ -271,6 +271,8 @@ extern char workgroup_utf16[100];
 extern int wglen16;
 #endif
 
+extern int64 origdir;
+
 #include "version.h"
 #define RELEASE "Gatling/" VERSION
 

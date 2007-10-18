@@ -8,11 +8,18 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-int fromhex(unsigned char x) {
+static int fromhex(unsigned char x) {
+  x-='0';
+  if( x<=9) return x;
+  x&=~0x20;
+  x-='A'-'0';
+  if( x<6 ) return x+10;
+  return -1;
+  /* more readable but leads to worse code:
   if (x>='a' && x<='z') return x-'a'+10;
   if (x>='A' && x<='Z') return x-'A'+10;
   if (x>='0' && x<='9') return x-'0';
-  return -1;
+  return -1; */
 }
 
 int compar(const void* a,const void* b) {
