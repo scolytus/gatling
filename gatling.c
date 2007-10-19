@@ -1499,7 +1499,9 @@ usage:
   }
   {
     extern iconv_t wc2utf8;
+    extern iconv_t utf82wc2;
     wc2utf8=iconv_open("UTF-8","UTF-16LE");
+    utf82wc2=iconv_open("UTF-16LE","UTF-8");
   }
 #endif
   if (!directory_index)

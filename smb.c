@@ -1,3 +1,5 @@
+#define _FILE_OFFSET_BITS 64
+#define _BSD_SOURCE
 #include "gatling.h"
 
 #ifdef SUPPORT_SMB
@@ -301,11 +303,14 @@ static int smb_handle_TreeDisconnect(unsigned char* c,size_t len,struct smb_resp
 }
 
 iconv_t wc2utf8;
+iconv_t utf82wc2;
 
 enum {
   STATUS_INVALID_HANDLE=0xC0000008,
+  ERROR_NO_MEMORY=0xc0000017,
   ERROR_ACCESS_DENIED=0xC0000022,
   ERROR_OBJECT_NAME_NOT_FOUND=0xc0000034,
+  ERROR_NOT_SUPPORTED=0xc00000bb,
   STATUS_TOO_MANY_OPENED_FILES=0xC000011F,
 };
 
@@ -342,6 +347,19 @@ size_t utf16toutf8(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
   if (iconv(wc2utf8,&x,&X,&y,&Y)) return 0;
   return dsize-Y;
 }
+
+size_t utf8toutf16(char* dest,size_t dsize,char* src,size_t ssize) {
+  size_t X,Y;
+  char* x,* y;
+  x=src;
+  y=dest;
+  X=ssize;
+  Y=dsize;
+  memset(dest,0,dsize);
+  if (iconv(utf82wc2,&x,&X,&y,&Y)) return 0;
+  return dsize-Y;
+}
+
 
 int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,struct stat* ss,enum smb_open_todo todo) {
   char localfilename[1024];
@@ -671,11 +689,36 @@ filenotfound:
     }
   } else if (subcommand==1) {	// FIND_FIRST2
     size_t i,l=dataofs-paramofs-12;
+    size_t maxdatacount;
     char* globlatin1,* globutf8;
+    uint16_t attr,flags;
     DIR* d;
+    if (sr->used>16*1024) {
+outofmemory:
+      set_smb_error(sr,ERROR_NO_MEMORY,0x32);
+      return 0;
+    }
     if (paramcount<18)
       return -1;		// need at least six chars for "/*" in unicode
+    maxdatacount=uint16_read((char*)c+7);
+    attr=uint16_read((char*)c-smbheadersize+paramofs);
+    flags=uint16_read((char*)c-smbheadersize+paramofs+4);
+    loi=uint16_read((char*)c-smbheadersize+paramofs+6);
+    if (loi!=0x104) {
+      set_smb_error(sr,ERROR_NOT_SUPPORTED,0x32);
+      return 0;
+    }
     filename=(uint16*)(c-smbheadersize+paramofs+12);
+
+    {
+      /* we want to minimize copies, so we realloc enough space into the
+       * smb buffer right from the start. */
+      char* tmp=realloc(sr->buf,sr->used+maxdatacount+100);
+      if (!tmp) goto outofmemory;
+      sr->buf=tmp;
+    }
+    sr->allocated=sr->used+maxdatacount+100;
+
     if ((uintptr_t)filename % 2)
       goto filenotfound;
     if (filename[l])
@@ -711,15 +754,99 @@ filenotfound:
     d=opendir(".");
     if (d) {
       struct dirent* de;
+      struct stat ss;
+      size_t actualnamelen;
+      size_t searchcount=0;
+      char* cur=0,* max=0,* base=0,* trans2=0,* smbhdr,* last=0;
+      smbhdr=sr->buf+4;
+
       while ((de=readdir(d))) {
+
+	if (de->d_type!=DT_DIR && de->d_type!=DT_REG) continue;
+	if (de->d_type==DT_DIR && !(attr&0x10)) continue;
+
 	if (de->d_name[0]=='.') continue;
 	if (de->d_name[0]==':') de->d_name[0]='.';
 	if ((globlatin1 && !fnmatch(globlatin1,de->d_name,0)) ||
 	    (globutf8 && !fnmatch(globutf8,de->d_name,0))) {
+	  if (stat(de->d_name,&ss)==-1) continue;
 	  printf("globbed ok: %s\n",de->d_name);
+	  if (!base) {
+	    trans2=sr->buf+sr->used;
+	    add_smb_response(sr,
+		"\x0a"	// word count
+		"\x0a\x00"	// total param count
+		"xx"	// total data count; ofs 3
+		"\x00\x00"	// reserved
+		"\x0a\x00"	// param count
+		"xx"	// param ofs; ofs 9
+		"\x00\x00"	// param displacement (?!)
+		"xx"	// data count; ofs 13
+		"xx"	// data offset; ofs 15
+		"\x00\x00"	// data displacement
+		"\x00"	// setup count
+		"\x00"	// reserved
+		"xx"	// byte count; ofs 21
+		"\x00"	// padding
+		// FIND_FIRST2 Parameters
+		"\x01\x00"	// search id 1
+		"xx"	// search count (?!?); ofs 26
+		"\x01\x00"	// end of search; ofs 28
+		"\x00\x00"	// ea error offset
+		"xx"	// last name offset; ofs 32
+		"\x00\x00"	// padding
+		// FIND_FIRST2 Data
+		,36,0x32);
+	    cur=base=sr->buf+sr->used;
+	    max=sr->buf+sr->allocated;
+	  }
+	  if (max-cur < 0x5e +strlen(de->d_name)*2 ||
+	      !(actualnamelen=utf8toutf16(cur+0x5e,max-cur-0x5e,de->d_name,strlen(de->d_name)))) {
+	    // not enough space!  abort!  abort!
+	    trans2[26]=0;
+	    break;
+	  }
+	  last=cur;
+	  if (loi==0x104) {
+	    size_t padlen=0x5e +actualnamelen;
+	    if (padlen%4) padlen+=2;
+	    uint32_pack(cur,padlen);
+	    cur+=4;
+	    uint32_pack(cur,0); cur+=4;	// "file index", samba sets this to 0
+	    uint64_pack_ntdate(cur,ss.st_ctime); cur+=8;
+	    uint64_pack_ntdate(cur,ss.st_atime); cur+=8;
+	    uint64_pack_ntdate(cur,ss.st_mtime); cur+=8;
+	    uint64_pack_ntdate(cur,ss.st_mtime); cur+=8;
+	    uint64_pack(cur,ss.st_size); cur+=8;
+	    uint64_pack(cur,ss.st_blksize*ss.st_blocks); cur+=8;
+	    uint32_pack(cur,S_ISDIR(ss.st_mode)?0x10:0x80); cur+=4;
+	    uint32_pack(cur,actualnamelen); cur+=4;
+	    uint32_pack(cur,0); cur+=4;	// ea list length
+	    cur[0]=0;	// short file name len
+	    cur[1]=0;	// reserved
+	    cur+=2;
+	    byte_zero(cur,24);	// the short name
+	    cur+=24+actualnamelen;
+	    if ((uintptr_t)cur%4) cur+=2;
+	    ++searchcount;
+	    sr->used=cur-sr->buf;
+	    assert(sr->used<sr->allocated);
+	  }
 	}
       }
+      closedir(d);
+      uint16_pack(trans2+3,cur-base);
+      uint16_pack(trans2+9,trans2+20-sr->buf);
+      uint16_pack(trans2+13,cur-base);
+      uint16_pack(trans2+15,base-smbhdr);
+      uint16_pack(trans2+21,base-smbhdr-12);
+      uint16_pack(trans2+26,searchcount);	// search count...!?
+      uint16_pack(trans2+32,last-base);
+      uint32_pack_big(sr->buf,sr->used-4);
+//      printf("sr->used = %u\n",sr->used);
+      return 0;
     }
+    goto filenotfound;
 
   } else
     return -1;
