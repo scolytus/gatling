@@ -135,10 +135,12 @@ static int add_smb_response(struct smb_response* sr,char* buf,size_t size,unsign
     sr->allocated=n;
   }
   sr->buf[sr->andxtypeofs]=type;
+  if (sr->andxtypeofs!=netbiosheadersize+4)
+    uint16_pack(sr->buf+sr->andxtypeofs+2,sr->used-netbiosheadersize);
   byte_copy(sr->buf+sr->used,size,buf);
   sr->andxtypeofs=sr->used+1;
   sr->used+=size;
-  if (sr->used&2)
+  if (sr->used%2)
     sr->buf[++sr->used]=0;
   uint32_pack_big(sr->buf,sr->used-4);	// update netbios size field
   return 0;
@@ -162,13 +164,17 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
     x=(unsigned char*)pkt+smbheadersize;
     for (;;) {
       int done;
-      if (!range_arrayinbuf(pkt,len,x,*x,2))
+      if (x[0]<2 || !range_arrayinbuf(pkt,len,x,*x,2))
 	return -1;
       done=(x[1]==0xff);	/* 0xff is the end marker for AndX */
-      x+=1+(unsigned char)*x*2+2;
-      if (!range_bufinbuf(pkt,len,(char*)x,uint16_read((char*)x-2)))
-	return -1;
+      {
+	uint16_t next=uint16_read((char*)x+3);
+	if (pkt+next < x+x[0]*2) return -1;
+	x=pkt+next;
+      }
       if (done) break;
+      if (!range_bufinbuf(pkt,len,(char*)x,5))
+	return -1;
     }
   } else
     return -1;
@@ -189,18 +195,18 @@ static int smb_handle_SessionSetupAndX(unsigned char* pkt,unsigned long len,stru
 
   size_t i,payloadlen;
 
-  payloadlen=sizeof("Unix_" RELEASE)*2 + wglen16;
+  payloadlen=sizeof("Unix_" RELEASE)*2 + wglen16 + 1;
 
   if (len<2*13 || pkt[0] != 13) return -1;	/* word count for this message is always 13 */
 
-  uint16_pack(nr+3,sr->used+2*3+1+payloadlen);
+  uint16_pack(nr+3,sr->used+2*3+payloadlen);
   uint16_pack(nr+7,payloadlen);
 
   /* should be zero filled already so we only write the even bytes */
   for (i=0; i<sizeof(RELEASE)-sizeof("Gatling "); ++i)
     nr[8+2+(sizeof("Unix_Gatling")+i)*2]=VERSION[i];
 
-  byte_copy(nr+8+2+(sizeof("Unix_Gatling")+i+1)*2,wglen16,workgroup_utf16);
+  byte_copy(nr+8+2+(sizeof("Unix_Gatling")+i+1)*2,wglen16+2,workgroup_utf16);
 
   return add_smb_response(sr,nr,8+uint16_read(nr+7),0x73);
 }
@@ -311,6 +317,7 @@ enum {
   ERROR_ACCESS_DENIED=0xC0000022,
   ERROR_OBJECT_NAME_NOT_FOUND=0xc0000034,
   ERROR_NOT_SUPPORTED=0xc00000bb,
+  ERROR_NETWORK_ACCESS_DENIED=0xc00000ca,
   STATUS_TOO_MANY_OPENED_FILES=0xC000011F,
 };
 
@@ -379,6 +386,7 @@ int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,str
       if (utf16toutf8(localfilename,sizeof(localfilename),remotefilename,fnlen)==0)
 	break;
     }
+//    printf("trying \"%s\"\n",localfilename);
     for (i=0; localfilename[i]; ++i) {
       if (localfilename[i]=='\\')
 	localfilename[i]='/';
@@ -407,6 +415,7 @@ int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,str
   return fd;
 }
 
+// TODO
 static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
   static char nr[34]=
     "\x0f"	// word count 15
@@ -429,7 +438,7 @@ static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,u
   /* see if it is an open for reading */
   if ((c[7]&7) || ((c[17]&3)!=1)) {
     /* we only support read access */
-    printf("non-read-access requested: %x %x!\n",c[7],c[17]);
+//    printf("non-read-access requested: %x %x!\n",c[7],c[17]);
     set_smb_error(sr,ERROR_ACCESS_DENIED,0x2d);
     return 0;
   }
@@ -444,7 +453,74 @@ static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,u
     if (fnlen>2046 || ((uintptr_t)remotefilename%2)) return -1;
     hdl=alloc_handle(&h->h);
     if (!hdl) {
-      printf("could not open file handle!");
+//      printf("could not open file handle!");
+      set_smb_error(sr,STATUS_TOO_MANY_OPENED_FILES,0x2d);
+      return 0;
+    }
+
+    fd=smb_open(h,remotefilename,fnlen,&ss,WANT_OPEN);
+    if (fd==-1) {
+      set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0x2d);
+      close_handle(hdl);
+      return 0;
+    }
+    hdl->fd=fd;
+    hdl->pid=pid;
+    hdl->size=ss.st_size;
+    hdl->cur=0;
+    hdl->filename=malloc(fnlen+2);
+    if (hdl->filename) {
+      memcpy(hdl->filename+1,remotefilename,fnlen);
+      hdl->filename[0]=fnlen;
+    }
+
+    uint16_pack(nr+3,sr->used+15*2+3);
+    uint16_pack(nr+5,hdl->handle);
+    uint32_pack(nr+9,ss.st_mtime);
+    uint32_pack(nr+13,ss.st_size);
+  }
+
+  return add_smb_response(sr,nr,15*2+3,0x2d);
+}
+
+static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
+  static char nr[34]=
+    "\x0f"	// word count 15
+    "\xff"	// AndXCommand
+    "\x00"	// Reserved
+    "xx"	// AndXOffset; ofs 3
+    "xx"	// FID; ofs 5
+    "\x00\x00"	// file attributes; normal file
+    "xxxx"	// ctime; ofs 9
+    "xxxx"	// file size; ofs 13
+    "\x00\x00"	// granted access: read, compatibility mode, caching permitted
+    "\x00\x00"	// file type: disk file or directory
+    "\x00\x00"	// ipc state
+    "\x01\x00"  // action: file existed and was opened
+    "\x00\x00\x00\x00"	// server FID (?!?)
+    "\x00\x00"	// reserved
+    "\x00\x00"	// byte count 0
+    ;
+  if (len<2*24 || c[0]!=24) return -1;
+  /* see if it is an open for reading */
+  if ((c[7]&7) || ((c[17]&3)!=1)) {
+    /* we only support read access */
+//    printf("non-read-access requested: %x %x!\n",c[7],c[17]);
+    set_smb_error(sr,ERROR_ACCESS_DENIED,0x2d);
+    return 0;
+  }
+  /* now look at file name */
+  {
+    size_t fnlen=uint16_read((char*)c+31);
+    uint16_t* remotefilename=(uint16_t*)(c+34);
+    struct stat ss;
+    struct handle* hdl;
+    int fd;
+    if (fnlen%2) --fnlen;
+    if (fnlen>2046 || ((uintptr_t)remotefilename%2)) return -1;
+    hdl=alloc_handle(&h->h);
+    if (!hdl) {
+//      printf("could not open file handle!");
       set_smb_error(sr,STATUS_TOO_MANY_OPENED_FILES,0x2d);
       return 0;
     }
@@ -741,11 +817,11 @@ outofmemory:
       globlatin1=0;
       puts("could not convert glob expression to latin1!");
     } else
-      printf("glob expression \"%s\"\n",globlatin1);
+//      printf("glob expression \"%s\"\n",globlatin1);
     globutf8=alloca((l+1)*3);
     if (utf16toutf8(globutf8,(l+1)*3,filename,(l+1)*3)) {
       globutf8=0;
-      puts("could not convert glob expression to utf-8!");
+//      puts("could not convert glob expression to utf-8!");
     }
     if (globlatin1 && globutf8 && !strcmp(globutf8,globlatin1)) globutf8=0;
     if (!globlatin1 && !globutf8)
@@ -770,7 +846,7 @@ outofmemory:
 	if ((globlatin1 && !fnmatch(globlatin1,de->d_name,0)) ||
 	    (globutf8 && !fnmatch(globutf8,de->d_name,0))) {
 	  if (stat(de->d_name,&ss)==-1) continue;
-	  printf("globbed ok: %s\n",de->d_name);
+//	  printf("globbed ok: %s\n",de->d_name);
 	  if (!base) {
 	    trans2=sr->buf+sr->used;
 	    add_smb_response(sr,
@@ -1001,10 +1077,21 @@ int smbresponse(struct http_data* h,int64 s) {
 	goto kaputt;
       break;
 
+    case 0xa2:
+      if (smb_handle_CreateAndX(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
+	goto kaputt;
+
     }
     if (!hasandx(andxtype)) break;
     andxtype=c[cur+1];
-    cur+=c[cur]*2;
+    if (cur+5>len)
+      goto kaputt;
+    else {
+      size_t next=uint16_read((char*)smbheader+cur+3);
+      if (next<=cur || next>len)
+	goto kaputt;
+      cur=next;
+    }
   }
 
 #ifdef DEBUG
