@@ -167,12 +167,12 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
       if (x[0]<2 || !range_arrayinbuf(pkt,len,x,*x,2))
 	return -1;
       done=(x[1]==0xff);	/* 0xff is the end marker for AndX */
+      if (done) return 0;
       {
 	uint16_t next=uint16_read((char*)x+3);
 	if (pkt+next < x+x[0]*2) return -1;
 	x=pkt+next;
       }
-      if (done) break;
       if (!range_bufinbuf(pkt,len,(char*)x,5))
 	return -1;
     }
@@ -1084,6 +1084,7 @@ int smbresponse(struct http_data* h,int64 s) {
     }
     if (!hasandx(andxtype)) break;
     andxtype=c[cur+1];
+    if (andxtype==0xff) break;
     if (cur+5>len)
       goto kaputt;
     else {
