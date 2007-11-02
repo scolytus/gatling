@@ -1598,10 +1598,7 @@ usage:
     close(s);
     s=-1;
   } else {
-#ifdef TCP_DEFER_ACCEPT
-    int i=1;
-    setsockopt(s,IPPROTO_TCP,TCP_DEFER_ACCEPT,&i,sizeof(i));
-#endif
+    socket_deferaccept(s,HTTPIN);
     if (socket_bind6_reuse(s,ip,port,0)==-1 || socket_listen(s,16)==-1)
       panic("socket_bind6_reuse");
   }
@@ -1619,10 +1616,7 @@ usage:
 #ifdef SUPPORT_SMB
   if (dosmb>=0) {
     smbs=socket_tcp6();
-#ifdef TCP_DEFER_ACCEPT
-    int i=1;
-    setsockopt(smbs,IPPROTO_TCP,TCP_DEFER_ACCEPT,&i,sizeof(i));
-#endif
+    socket_deferaccept(s,DATAIN);
     if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1 || socket_listen(smbs,16)) {
       if (dosmb==1)
 	panic("socket_bind6_reuse");
@@ -1634,10 +1628,7 @@ usage:
 #ifdef SUPPORT_HTTPS
   if (dohttps>=0) {
     httpss=socket_tcp6();
-#ifdef TCP_DEFER_ACCEPT
-    int i=1;
-    setsockopt(httpss,IPPROTO_TCP,TCP_DEFER_ACCEPT,&i,sizeof(i));
-#endif
+    socket_deferaccept(s,DATAIN);
     if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1 || socket_listen(httpss,16)) {
       if (dohttps==1)
 	panic("socket_bind6_reuse");
