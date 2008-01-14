@@ -918,7 +918,6 @@ skipdownload:
     char* readbuf;
     char domain[200];
     size_t dlen;
-    int r;
     size_t wanted;
     unsigned short uid,tid,fid;
     size_t readsize;
@@ -1106,7 +1105,6 @@ skipdownload:
     {
       char *x,*y;
       char req[200+(strlen(pathname))*2];
-      size_t i;
       byte_copy(req,8+80+2,
 		"\x00\x00\x00\x00"	// NetBIOS
 		"\xffSMB"		// SMB
@@ -1194,6 +1192,7 @@ skipdownload:
 	d=1;
 	dostats=!isatty(1);
       }
+      total=filesize-resumeofs;
       while (resumeofs<filesize) {
 	size_t dataofs;
 
@@ -1216,6 +1215,7 @@ skipdownload:
 	if (write(d,readbuf+dataofs,gotten)!=gotten) panic("short write.  disk full?\n");
 	if (gotten<rest) break;	// someone truncated the file while we read?
 	resumeofs+=rest;
+	if (dostats) printstats(gotten);
       }
 
       io_close(d);
