@@ -687,8 +687,8 @@ again:
     buffer_init(&ftpbuf,(void*)read,s,buf,sizeof buf);
     if (verbose) buffer_putsflush(buffer_1,"Waiting for FTP greeting...");
     if ((readftpresponse(&ftpbuf)/100)!=2) panic("no 2xx ftp greeting.\n");
-    if (verbose) buffer_putsflush(buffer_1,"\nUSER ftp...");
-    if ((i=(ftpcmd(s,&ftpbuf,"USER ftp\r\n")/100))>3) panic("ftp login failed.\n");
+    if (verbose) buffer_putsflush(buffer_1,"\nUSER anonymous...");
+    if ((i=(ftpcmd(s,&ftpbuf,"USER anonymous\r\n")/100))>3) panic("ftp login failed.\n");
     if (verbose) buffer_putsflush(buffer_1,"\nPASS luser@...");
     if ((i=(ftpcmd(s,&ftpbuf,"PASS luser@\r\n")/100))!=2) panic("ftp login failed.\n");
 
