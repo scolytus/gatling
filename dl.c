@@ -1181,6 +1181,7 @@ skipdownload:
 		"1__\x00\x00";
       size_t rest;
       size_t gotten;
+      int nextwritten=0;
       int64 d;
       uint16_pack(req+4+0x1c,uid);
       uint16_pack(req+4+24,tid);
@@ -1204,17 +1205,36 @@ skipdownload:
 	uint16_pack(req+8+33+2+6,rest);
 	uint16_pack(req+8+47,rest);
 
-	if (write(s,req,0x3b+4)!=0x3b+4) panic("ReadFile request short write");
+	if (!nextwritten) {
+	  if (write(s,req,0x3b+4)!=0x3b+4) panic("ReadFile request short write");
+	}
 	readnetbios(&ib,buf,&wanted);
 	if (wanted>readsize+300) panic("packet too large");
-	if (buffer_get(&ib,readbuf,wanted)!=wanted) panic("ReadFile response short read\n");
+	if (wanted<0x20+12*2+3) panic("Received invalid SMB response\n");
+	if (buffer_get(&ib,readbuf,0x20+12*2+3)!=0x20+12*2+3) panic("ReadFile response short read\n");
+
 	if (validatesmb(readbuf,wanted,0x2e,12,0,tid,mid)) panic("Received invalid SMB response\n");
 	gotten=uint16_read(readbuf+0x39);
 	dataofs=uint16_read(readbuf+0x2d);
 	if (dataofs+gotten>wanted) panic("invalid dataofs in ReadFile response");
-	if (write(d,readbuf+dataofs,gotten)!=gotten) panic("short write.  disk full?\n");
 	if (gotten<rest) break;	// someone truncated the file while we read?
-	resumeofs+=rest;
+
+	/* pipeline next read request */
+	resumeofs+=gotten;
+	if (resumeofs<filesize) {
+	  uint16_pack(req+30+4,mid+1);
+	  uint32_pack(req+8+33+2,resumeofs&0xffffffff);
+	  uint32_pack(req+8+49,resumeofs>>32);
+	  rest=(filesize-resumeofs>readsize)?readsize:filesize-resumeofs;
+	  uint16_pack(req+8+33+2+4,rest);
+	  uint16_pack(req+8+33+2+6,rest);
+	  uint16_pack(req+8+47,rest);
+	  if (write(s,req,0x3b+4)!=0x3b+4) panic("ReadFile request short write");
+	  nextwritten=1;
+	}
+
+	if (buffer_get(&ib,readbuf+0x20+12*2+3,wanted-(0x20+12*2+3))!=wanted-(0x20+12*2+3)) panic("ReadFile response short read\n");
+	if (write(d,readbuf+dataofs,gotten)!=gotten) panic("short write.  disk full?\n");
 	if (dostats) printstats(gotten);
       }
 
