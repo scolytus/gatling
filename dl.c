@@ -94,8 +94,12 @@ void printstats(unsigned long long nextchunk) {
       percent[j+3]=0;
     } else
       strcpy(percent,"100.00");
-    received[fmt_humank(received,resumeofs+finished)]=0;
-    totalsize[fmt_humank(totalsize,resumeofs+total)]=0;
+    j=fmt_humank(received,resumeofs+finished);
+    if (received[j-1]<='9') received[j++]='i';
+    received[j]=0;
+    j=fmt_humank(totalsize,resumeofs+total);
+    if (totalsize[j-1]<='9') totalsize[j++]='i';
+    totalsize[j]=0;
 
     if (now-start>=60) {
       j=fmt_ulong(timedone,(now-start)/60);
@@ -137,15 +141,22 @@ void printstats(unsigned long long nextchunk) {
 	lm[j]=0;
       }
 
-      buffer_putmflush(buffer_2,percent,"% done; got ",received,"iB of ",totalsize,"iB in ",timedone,speed,", ",lm," to go.    \r");
-    } else
-      buffer_putmflush(buffer_2,percent,"% done; got ",received,"iB of ",totalsize,"iB in ",timedone,speed,".    \r");
+      buffer_putm(buffer_2,"\r",percent,"% done; got ",received,"B ");
+      if (total)
+	buffer_putm(buffer_2,"of ",totalsize,"B ");
+      buffer_putmflush(buffer_2,"in ",timedone,speed,", ",lm," to go.    ");
+    } else {
+      buffer_putm(buffer_2,"\r",percent,"% done; got ",received,"B ");
+      if (total)
+	buffer_putm(buffer_2,"of ",totalsize,"B ");
+      buffer_putmflush(buffer_2,"in ",timedone,speed,".    ");
+    }
     statsprinted=1;
   }
 }
 
 static void clearstats() {
-  if (statsprinted) buffer_putsflush(buffer_2,"\e[K");
+  if (statsprinted) buffer_putsflush(buffer_2,"\r\e[K");
 }
 
 
