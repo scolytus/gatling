@@ -11,6 +11,7 @@
 #include "io.h"
 #include "stralloc.h"
 #include "textcode.h"
+#include "uint64.h"
 #include <sys/types.h>
 #include <unistd.h>
 #include <signal.h>
@@ -31,6 +32,8 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include "havealloca.h"
+#include <assert.h>
+#include <ctype.h>
 
 int dostats;
 
@@ -356,6 +359,28 @@ size_t fmt_urlencoded(char* dest,const char* src,size_t len) {
   return written;
 }
 
+static int validatesmb(char* buf,size_t wanted,unsigned char type,unsigned char wordcount,
+		unsigned short bytecount,unsigned short tid,unsigned short mid) {
+  if (wanted<wordcount*2+0x23+bytecount) return -1;	// too short?
+  if (!byte_equal(buf,4,"\xffSMB")) return -1;		// SMB magic?
+  if ((unsigned char)buf[4]!=type) return -1;				// wrong message type?
+  if (uint16_read(buf+12)!=0) return -1;		// process id high == 0?
+  if (uint16_read(buf+24)!=tid) return -1;		// right tree id?
+  if (uint16_read(buf+26)!=23) return -1;		// right process id?
+  if (uint16_read(buf+30)!=mid) return -1;		// right multiplex id?
+  if (buf[0x20]<wordcount) return -1;
+  if (uint16_read(buf+0x20+wordcount*2)<bytecount) return -1;
+  if (wanted<wordcount*2+0x22+uint16_read(buf+0x21+wordcount*2)) return -1;	// too short
+  return 0;
+}
+
+static void readnetbios(buffer* b,char* buf,size_t* wanted) {
+  if (buffer_get(b,buf,4)!=4) panic("short read\n");
+  *wanted=(unsigned char)buf[1] * 65535 +
+	  (unsigned char)buf[2] * 256 +
+	  (unsigned char)buf[3];
+}
+
 int main(int argc,char* argv[]) {
   time_t ims=0;
   int useport=0;
@@ -378,9 +403,10 @@ int main(int argc,char* argv[]) {
   char* output=0;
   char* useragent="dl/1.0";
   char* referer=0;
-  enum {HTTP, FTP} mode;
+  enum {HTTP, FTP, SMB} mode;
   int skip;
   buffer ftpbuf;
+  char* host;
 
   dostats=isatty(2);
 
@@ -470,15 +496,22 @@ again:
   }
   mode=HTTP;
   if (byte_diff(argv[optind],skip=7,"http://")) {
-    if (byte_diff(argv[optind],skip=6,"ftp://")) goto usage;
-    mode=FTP;
-    port=21;
+    if (byte_diff(argv[optind],skip=6,"ftp://")) {
+      if (byte_diff(argv[optind],skip=6,"smb://")) goto usage;
+      mode=SMB;
+      port=445;
+    } else {
+      mode=FTP;
+      port=21;
+    }
   }
   {
-    char* host=argv[optind]+skip;
-    int colon=str_chr(host,':');
-    int slash=str_chr(host,'/');
+    int colon;
+    int slash;
     char* c;
+    host=argv[optind]+skip;
+    colon=str_chr(host,':');
+    slash=str_chr(host,'/');
     if (host[0]=='[') {	/* ipv6 IP notation */
       int tmp;
       ++host;
@@ -645,7 +678,9 @@ again:
 	     location=0;
 	     goto again;
     }
+
   } else if (mode==FTP) {
+
     char buf[2048];
     int i;
     int dataconn;
@@ -874,6 +909,364 @@ again:
 skipdownload:
     if (verbose) buffer_putsflush(buffer_1,"\nQUIT\n");
     ftpcmd(s,&ftpbuf,"QUIT\r\n");
+
+  } else if (mode==SMB) {
+
+    unsigned int mid=4;
+    char inbuf[65*1024];
+    char buf[8192];
+    char* readbuf;
+    char domain[200];
+    size_t dlen;
+    int r;
+    size_t wanted;
+    unsigned short uid,tid,fid;
+    size_t readsize;
+    unsigned long long filesize;
+    buffer ib=BUFFER_INIT(read,s,inbuf,sizeof(inbuf));
+
+    /* Step 1: Negotiate dialect.  We only offer one */
+    if (verbose) buffer_putsflush(buffer_1,"Negotiating SMB dialect... ");
+    if (write(s,"\x00\x00\x00\x2f"	// NetBIOS
+	        "\xffSMB"		// SMB
+		"\x72\x00\x00\x00\x00\x00\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00\x17\x00\x00\x00\x01\x00\x00\x0c"
+		"\x00\x02NT LM 0.12",0x2f+4)!=0x2f+4) panic("Protocol negotiation request short write\n");
+
+    readnetbios(&ib,buf,&wanted);
+
+    if (wanted>sizeof(buf)) panic("packet too large");
+    if (buffer_get(&ib,buf,wanted)!=wanted) panic("Protocol negotiation response short read\n");
+    if (validatesmb(buf,wanted,0x72,17,0,0,1)) panic("Received invalid SMB response\n");
+    if (uint16_read(buf+0x21)!=0) panic("Server requested invalid dialect\n");
+
+    {
+      char* x=buf+0x20+2*17;
+      char* max=x+3+uint16_read(x+1);
+      x+=3+(unsigned char)x[0];
+      if (max>x && max-x<sizeof(domain)) {
+	dlen=max-x;			// we are opportunistic bastards
+	byte_copy(domain,dlen,x);	// in session setup we claim to come from the server's workgroup
+	if (verbose) {
+	  int i;
+	  buffer_puts(buffer_1,"ok, got domain \"");
+	  for (i=0; i<dlen; i+=2) {
+	    if (domain[i+1] || !isprint(domain[i])) {
+	      if (domain[i]==0) break;
+	      buffer_put(buffer_1,".",1);
+	    } else
+	      buffer_put(buffer_1,domain+i,1);
+	  }
+	  buffer_putsflush(buffer_1,"\".\nSession Setup... ");
+	}
+      } else
+	dlen=0;
+    }
+
+    if ((buf[0x33]&0x40)==0x40)
+      readsize=64000;
+    else {
+      readsize=uint32_read(buf+0x27);
+      if (readsize>64000) readsize=64000;
+    }
+    readbuf=malloc(readsize+300);
+    if (!readbuf) panic("out of memory");
+
+    /* Step 2: Session Setup. */
+    {
+      char *x;
+      static char req[300]=
+		"\x00\x00\x00\x00"	// NetBIOS
+		"\xffSMB"		// SMB
+		"\x73\x00\x00\x00\x00\x00\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00\x17\x00\x00\x00\x02\x00\x0d\xff"
+		"\x00\x00\x00\xff\xff\x02\x00\x17\x00\x17"
+		"\x00\x00\x00\x00\x00\x03\x00\x00\x00\x00"
+		"\x00\x5c\x00\x00\x00"
+		"\x00\x00"	// byte count
+		"\x00\x00\x00"
+		"G\x00U\x00""E\x00S\x00T\x00\x00\x00";	// "GUEST"
+      size_t i;
+      x=req+8+50+5+2+3+6*2;
+      if (dlen) {
+	byte_copy(x,dlen,domain);
+	x+=dlen;
+      }
+      byte_copy(x,11,"U\x00n\x00i\x00x\x00\x00\x00\x00");
+      x+=11;
+      for (i=0; useragent[i]; ++i) {
+	*x++=useragent[i];
+	*x++=0;
+      }
+      x[0]=x[1]=x[2]=0;
+      x+=3;
+      uint32_pack_big(req,x-req-4);
+      {
+	char* y=req+8+50+5;
+	uint16_pack(y,x-y-2);
+      }
+      if (write(s,req,x-req) != x-req) panic("Session Setup request short write");
+    }
+
+    readnetbios(&ib,buf,&wanted);
+    if (wanted>sizeof(buf)) panic("packet too large");
+    if (buffer_get(&ib,buf,wanted)!=wanted) panic("Session Setup response short read\n");
+    if (validatesmb(buf,wanted,0x73,3,0,0,2)) panic("Received invalid SMB response\n");
+    uid=uint16_read(buf+0x1c);
+
+    if (verbose) {
+      char* x,*y, * max;
+      x=buf+0x20;
+      x+=1+(unsigned char)x[0]*2;
+      max=x+2+uint16_read(x);
+      buffer_puts(buffer_1,"ok");
+      x+=2;
+      if ((uintptr_t)x&1) ++x;
+      y=x;
+      while (y<max && *y) y+=2;
+      y+=2;
+      if (y<max) {
+	buffer_puts(buffer_1,", server \"");
+	while (y<max) {
+	  if (y[1] || !isprint(y[0])) {
+	    if (!y[0]) break;
+	    buffer_put(buffer_1,".",1);
+	  } else
+	    buffer_put(buffer_1,y,1);
+	  y+=2;
+	}
+	buffer_puts(buffer_1,"\" on \"");
+	while (x<max) {
+	  if (x[1] || !isprint(x[0])) {
+	    if (!x[0]) break;
+	    buffer_put(buffer_1,".",1);
+	  } else
+	    buffer_put(buffer_1,x,1);
+	  x+=2;
+	}
+      }
+      buffer_putsflush(buffer_1,"\".\nTree Connect... ");
+    }
+
+    /* Step 3: Tree Connect */
+    {
+      char *x;
+      char req[200+(strlen(host)+strlen(pathname))*2];
+      size_t i;
+      byte_copy(req,8+30+7+2+1,
+		"\x00\x00\x00\x00"	// NetBIOS
+		"\xffSMB"		// SMB
+		"\x75\x00\x00\x00\x00\x00\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00\x17\x00\x00\x00\x03\x00\x04\xff"
+		"\x00\x00\x00\x00\x00\x01\x00"
+		"\x00\x00"	// byte count
+		"\x00");
+      x=req+8+30+7+2+1;
+      x[0]=x[2]='\\';
+      x[1]=x[3]=0;
+      x+=4;
+      for (i=0; host[i]; ++i) {
+	x[0]=host[i];
+	x[1]=0;
+	x+=2;
+      }
+      x[0]='\\'; x[1]=0; x+=2;
+      if (*pathname=='/' || *pathname=='\\') ++pathname;
+      for (i=0; pathname[i] && pathname[i]!='/' && pathname[i]!='\\'; ++i) {
+	x[0]=pathname[i];
+	x[1]=0;
+	x+=2;
+      }
+      byte_copy(x,8,"\x00\x00?????");
+      x+=8;
+      uint32_pack_big(req,x-req-4);
+      {
+	char* y=req+8+30+7;
+	uint16_pack(y,x-y-2);
+      }
+      uint16_pack(req+4+0x1c,uid);
+      if (write(s,req,x-req) != x-req) panic("Tree Connect request short write");
+    }
+
+    readnetbios(&ib,buf,&wanted);
+    if (wanted>sizeof(buf)) panic("packet too large");
+    if (buffer_get(&ib,buf,wanted)!=wanted) panic("Tree Connect response short read\n");
+    tid=uint16_read(buf+24);
+    if (validatesmb(buf,wanted,0x75,3,0,tid,3)) panic("Received invalid SMB response\n");
+    if (verbose) {
+      buffer_puts(buffer_1,"ok, tid=");
+      buffer_putulong(buffer_1,tid);
+      buffer_putsflush(buffer_1,".\nCreateFile... ");
+    }
+
+    /* Step 4: CreateFile */
+    {
+      char *x,*y;
+      char req[200+(strlen(pathname))*2];
+      size_t i;
+      byte_copy(req,8+80+2,
+		"\x00\x00\x00\x00"	// NetBIOS
+		"\xffSMB"		// SMB
+		"\xa2\x00\x00\x00\x00\x00\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00\x17\x00\x00\x00\x04\x00\x18\xff"
+		"\x00\x00\x00\x00\xFE\xFE\x10\x00\x00\x00"
+		"\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x07\x00\x00\x00\x01\x00\x00\x00\x40\x00"
+		"\x00\x00\x01\x00\x00\x00\x01"
+		"\x00\x00"	// byte count
+		"\x00\\\x00");
+      uint16_pack(req+4+24,tid);
+      uint16_pack(req+4+0x1c,uid);
+      x=req+8+80+2;
+      y=pathname;
+
+      while (*y=='/' || *y=='\\') ++y;
+      while (*y && *y!='/' && *y!='\\') ++y;
+      while (*y=='/' || *y=='\\') ++y;
+
+      uint16_pack(req+8+34,(strlen(y)+1)*2);
+      while (*y) {
+	x[0]=*y;
+	if (x[0]=='/') x[0]='\\';
+	x[1]=0;
+	x+=2;
+	++y;
+      }
+      uint32_pack_big(req,x-req-4);
+      {
+	char* y=req+8+77;
+	uint16_pack(y,x-y-2);
+      }
+      if (write(s,req,x-req) != x-req) panic("CreateFile request short write");
+    }
+    readnetbios(&ib,buf,&wanted);
+    if (wanted>sizeof(buf)) panic("packet too large");
+    if (buffer_get(&ib,buf,wanted)!=wanted) panic("CreateFile response short read\n");
+    if (validatesmb(buf,wanted,0xa2,34,0,tid,4)) panic("Received invalid SMB response\n");
+    fid=uint16_read(buf+0x20+6);
+    filesize=uint64_read(buf+0x58);
+    u.actime=(uint64_read(buf+0x44) / 10000000ll) - 11644473600ll;
+    if (verbose) {
+      char tbuf[30];
+      tbuf[fmt_httpdate(tbuf,u.actime)]=0;
+      buffer_puts(buffer_1,"ok, fid=");
+      buffer_putulong(buffer_1,fid);
+      buffer_puts(buffer_1,", size=");
+      buffer_putulonglong(buffer_1,filesize);
+      buffer_putmflush(buffer_1,", mtime=",tbuf,".\n");
+    }
+
+    if (filesize<=resumeofs) {
+      if (verbose) buffer_putsflush(buffer_1,"File already fully transmitted.\n");
+      goto closeanddone;
+    }
+    if (ims && u.actime<=ims) {
+      if (verbose) buffer_putsflush(buffer_1,"The local file is as new as the remote file.\n");
+      goto closeanddone;
+    }
+
+    /* Step 5: ReadFile */
+    {
+      static char req[]=
+		"\x00\x00\x00\x3b"	// NetBIOS
+		"\xffSMB"		// SMB
+		"\x2e\x00\x00\x00\x00\x00\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00\x17\x00\x00\x00\x05\x00\x0c\xff"
+		"\x00\x00\x00w0u0__\x00"
+		"\xf0\x00\xf0\x00\x00\x00\x00\x00\xf0u"
+		"1__\x00\x00";
+      size_t rest;
+      size_t gotten;
+      int64 d;
+      uint16_pack(req+4+0x1c,uid);
+      uint16_pack(req+4+24,tid);
+      uint16_pack(req+8+33,fid);
+      if (filename[0]) {
+	if ((resume?io_appendfile(&d,filename):io_createfile(&d,filename))==0)
+	  panic("creat");
+      } else {
+	d=1;
+	dostats=!isatty(1);
+      }
+      while (resumeofs<filesize) {
+	size_t dataofs;
+
+	uint16_pack(req+30+4,++mid);
+	uint32_pack(req+8+33+2,resumeofs&0xffffffff);
+	uint32_pack(req+8+49,resumeofs>>32);
+	rest=(filesize-resumeofs>readsize)?readsize:filesize-resumeofs;
+	uint16_pack(req+8+33+2+4,rest);
+	uint16_pack(req+8+33+2+6,rest);
+	uint16_pack(req+8+47,rest);
+
+	if (write(s,req,0x3b+4)!=0x3b+4) panic("ReadFile request short write");
+	readnetbios(&ib,buf,&wanted);
+	if (wanted>readsize+300) panic("packet too large");
+	if (buffer_get(&ib,readbuf,wanted)!=wanted) panic("ReadFile response short read\n");
+	if (validatesmb(readbuf,wanted,0x2e,12,0,tid,mid)) panic("Received invalid SMB response\n");
+	gotten=uint16_read(readbuf+0x39);
+	dataofs=uint16_read(readbuf+0x2d);
+	if (dataofs+gotten>wanted) panic("invalid dataofs in ReadFile response");
+	if (write(d,readbuf+dataofs,gotten)!=gotten) panic("short write.  disk full?\n");
+	if (gotten<rest) break;	// someone truncated the file while we read?
+	resumeofs+=rest;
+      }
+
+      io_close(d);
+    }
+
+closeanddone:
+
+    if (verbose) buffer_putsflush(buffer_1,"Close... ");
+
+    /* Step 6: Close */
+    {
+      static char req[]=
+		"\x00\x00\x00\x29"	// NetBIOS
+		"\xffSMB"		// SMB
+		"\x04\x00\x00\x00\x00\x00\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\xFE\xFE\x17\x00\x00\x00\x05\x00\x03\xFE"
+		"\xFE\xff\xff\xff\xff\x00\x00";
+      uint16_pack(req+30+4,++mid);
+      uint16_pack(req+8+29,fid);
+      uint16_pack(req+8+20,tid);
+      uint16_pack(req+4+0x1c,uid);
+      if (write(s,req,8+37)!=8+37) panic("Close request short write");
+      readnetbios(&ib,buf,&wanted);
+      if (wanted>sizeof(buf)) panic("packet too large");
+      if (buffer_get(&ib,buf,wanted)!=wanted) panic("Close response short read\n");
+      if (validatesmb(buf,wanted,0x04,0,0,tid,mid)) panic("Received invalid SMB response\n");
+    }
+
+    if (verbose) buffer_putsflush(buffer_1,"ok.\nTree Disconnect... ");
+
+    /* Step 7: Tree Disconnect */
+    {
+      static char req[]=
+		"\x00\x00\x00\x23"	// NetBIOS
+		"\xffSMB"		// SMB
+		"\x71\x00\x00\x00\x00\x00\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00\x17\x00\x00\x00\x05\x00\x00\x00";
+      uint16_pack(req+30+4,++mid);
+      uint16_pack(req+8+33,fid);
+      uint16_pack(req+28,tid);
+      uint16_pack(req+4+0x1c,uid);
+      if (write(s,req,0x23+4)!=0x23+4) panic("Tree Disconnect request short write");
+      readnetbios(&ib,buf,&wanted);
+      if (wanted>sizeof(buf)) panic("packet too large");
+      if (buffer_get(&ib,buf,wanted)!=wanted) panic("Tree Disconnect response short read\n");
+      if (validatesmb(buf,wanted,0x71,0,0,tid,mid)) panic("Received invalid SMB response\n");
+    }
+    if (verbose) buffer_putsflush(buffer_1,"ok.\n");
+
   } else
     panic("invalid mode\n");
   close(s);

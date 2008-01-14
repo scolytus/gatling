@@ -21,6 +21,95 @@
 
 #include <stdio.h>
 
+/* very offensive, I know.  The idea is that gcc evaluates this at
+ * compile time if buf and x are const char.  So I'm using this instead
+ * of counting the offsets manually, so you don't have to count anything
+ * if you want to follow the code and see what it does. */
+
+
+#define OFS16(buf,x) \
+  ((buf[0]==x[0] && buf[0+1]==x[1])?0: \
+  ((buf[1]==x[0] && buf[1+1]==x[1])?1: \
+  ((buf[2]==x[0] && buf[2+1]==x[1])?2: \
+  ((buf[3]==x[0] && buf[3+1]==x[1])?3: \
+  ((buf[4]==x[0] && buf[4+1]==x[1])?4: \
+  ((buf[5]==x[0] && buf[5+1]==x[1])?5: \
+  ((buf[6]==x[0] && buf[6+1]==x[1])?6: \
+  ((buf[7]==x[0] && buf[7+1]==x[1])?7: \
+  ((buf[8]==x[0] && buf[8+1]==x[1])?8: \
+  ((buf[9]==x[0] && buf[9+1]==x[1])?9: \
+  ((buf[10]==x[0] && buf[10+1]==x[1])?10: \
+  ((buf[11]==x[0] && buf[11+1]==x[1])?11: \
+  ((buf[12]==x[0] && buf[12+1]==x[1])?12: \
+  ((buf[13]==x[0] && buf[13+1]==x[1])?13: \
+  ((buf[14]==x[0] && buf[14+1]==x[1])?14: \
+  ((buf[15]==x[0] && buf[15+1]==x[1])?15: \
+  ((buf[16]==x[0] && buf[16+1]==x[1])?16: \
+  ((buf[17]==x[0] && buf[17+1]==x[1])?17: \
+  ((buf[18]==x[0] && buf[18+1]==x[1])?18: \
+  ((buf[19]==x[0] && buf[19+1]==x[1])?19: \
+  ((buf[20]==x[0] && buf[20+1]==x[1])?20: \
+  ((buf[21]==x[0] && buf[21+1]==x[1])?21: \
+  ((buf[22]==x[0] && buf[22+1]==x[1])?22: \
+  ((buf[23]==x[0] && buf[23+1]==x[1])?23: \
+  ((buf[24]==x[0] && buf[24+1]==x[1])?24: \
+  ((buf[25]==x[0] && buf[25+1]==x[1])?25: \
+  ((buf[26]==x[0] && buf[26+1]==x[1])?26: \
+  ((buf[27]==x[0] && buf[27+1]==x[1])?27: \
+  ((buf[28]==x[0] && buf[28+1]==x[1])?28: \
+  ((buf[29]==x[0] && buf[29+1]==x[1])?29: \
+  ((buf[30]==x[0] && buf[30+1]==x[1])?30: \
+  ((buf[31]==x[0] && buf[31+1]==x[1])?31: \
+  ((buf[32]==x[0] && buf[32+1]==x[1])?32: \
+  ((buf[33]==x[0] && buf[33+1]==x[1])?33: \
+  ((buf[34]==x[0] && buf[34+1]==x[1])?34: \
+  ((buf[35]==x[0] && buf[35+1]==x[1])?35: \
+  ((buf[36]==x[0] && buf[36+1]==x[1])?36: \
+  ((buf[37]==x[0] && buf[37+1]==x[1])?37: \
+  ((buf[38]==x[0] && buf[38+1]==x[1])?38: \
+  ((buf[39]==x[0] && buf[39+1]==x[1])?39: \
+  ((buf[40]==x[0] && buf[40+1]==x[1])?40: \
+  ((buf[41]==x[0] && buf[41+1]==x[1])?41: \
+  ((buf[42]==x[0] && buf[42+1]==x[1])?42: \
+  ((buf[43]==x[0] && buf[43+1]==x[1])?43: \
+  ((buf[44]==x[0] && buf[44+1]==x[1])?44: \
+  ((buf[45]==x[0] && buf[45+1]==x[1])?45: \
+  ((buf[46]==x[0] && buf[46+1]==x[1])?46: \
+  ((buf[47]==x[0] && buf[47+1]==x[1])?47: \
+  ((buf[48]==x[0] && buf[48+1]==x[1])?48: \
+  ((buf[49]==x[0] && buf[49+1]==x[1])?49: \
+  ((buf[50]==x[0] && buf[50+1]==x[1])?50: \
+  ((buf[51]==x[0] && buf[51+1]==x[1])?51: \
+  ((buf[52]==x[0] && buf[52+1]==x[1])?52: \
+  ((buf[53]==x[0] && buf[53+1]==x[1])?53: \
+  ((buf[54]==x[0] && buf[54+1]==x[1])?54: \
+  ((buf[55]==x[0] && buf[55+1]==x[1])?55: \
+  ((buf[56]==x[0] && buf[56+1]==x[1])?56: \
+  ((buf[57]==x[0] && buf[57+1]==x[1])?57: \
+  ((buf[58]==x[0] && buf[58+1]==x[1])?58: \
+  ((buf[59]==x[0] && buf[59+1]==x[1])?59: \
+  ((buf[60]==x[0] && buf[60+1]==x[1])?60: \
+  ((buf[61]==x[0] && buf[61+1]==x[1])?61: \
+  ((buf[62]==x[0] && buf[62+1]==x[1])?62: \
+  ((buf[63]==x[0] && buf[63+1]==x[1])?63: \
+  ((buf[64]==x[0] && buf[64+1]==x[1])?64: \
+  ((buf[65]==x[0] && buf[65+1]==x[1])?65: \
+  ((buf[66]==x[0] && buf[66+1]==x[1])?66: \
+  ((buf[67]==x[0] && buf[67+1]==x[1])?67: \
+  ((buf[68]==x[0] && buf[68+1]==x[1])?68: \
+  ((buf[69]==x[0] && buf[69+1]==x[1])?69: \
+  ((buf[70]==x[0] && buf[70+1]==x[1])?70: \
+  ((buf[71]==x[0] && buf[71+1]==x[1])?71: \
+  ((buf[72]==x[0] && buf[72+1]==x[1])?72: \
+  ((buf[73]==x[0] && buf[73+1]==x[1])?73: \
+  ((buf[74]==x[0] && buf[74+1]==x[1])?74: \
+  ((buf[75]==x[0] && buf[75+1]==x[1])?75: \
+  ((buf[76]==x[0] && buf[76+1]==x[1])?76: \
+  ((buf[77]==x[0] && buf[77+1]==x[1])?77: \
+  ((buf[78]==x[0] && buf[78+1]==x[1])?78: \
+  ((buf[79]==x[0] && buf[79+1]==x[1])?79: \
+  -1))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+
 #if 0
                _
  ___ _ __ ___ | |__
@@ -122,7 +211,7 @@ static int init_smb_response(struct smb_response* sr,unsigned char* in_response_
   return 0;
 }
 
-static int add_smb_response(struct smb_response* sr,char* buf,size_t size,unsigned char type) {
+static int add_smb_response(struct smb_response* sr,const char* buf,size_t size,unsigned char type) {
   if (sr->allocated+size<size) return -1;
   if (sr->used+size>sr->allocated) {
     size_t n=sr->allocated+size;
@@ -212,11 +301,6 @@ static int smb_handle_SessionSetupAndX(unsigned char* pkt,unsigned long len,stru
 }
 
 static struct timezone tz;
-
-static void uint64_pack(char* dest,unsigned long long l) {
-  uint32_pack(dest,l&0xffffffff);
-  uint32_pack(dest+4,l>>32);
-}
 
 static void uint64_pack_ntdate(char* dest,time_t date) {
   uint64_pack(dest,10000000ll * (date + 11644473600ll));
@@ -484,50 +568,53 @@ static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,u
 }
 
 static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
-  static char nr[34]=
-    "\x0f"	// word count 15
-    "\xff"	// AndXCommand
-    "\x00"	// Reserved
-    "xx"	// AndXOffset; ofs 3
-    "xx"	// FID; ofs 5
-    "\x00\x00"	// file attributes; normal file
-    "xxxx"	// ctime; ofs 9
-    "xxxx"	// file size; ofs 13
-    "\x00\x00"	// granted access: read, compatibility mode, caching permitted
-    "\x00\x00"	// file type: disk file or directory
-    "\x00\x00"	// ipc state
-    "\x01\x00"  // action: file existed and was opened
-    "\x00\x00\x00\x00"	// server FID (?!?)
-    "\x00\x00"	// reserved
-    "\x00\x00"	// byte count 0
-    ;
+  const char template[]=
+    "\x22"	// word count 34
+    "\xff\x00"	// AndX: no further commands, reserved
+    "w1"	// AndXOffset
+    "\x00"	// No oplock granted
+    "w2"	// FID
+    "\x01\x00\x00\x00"	// Create Action: 1 == The file existed and was opened
+    "q0______"	// ctime
+    "q1______"	// atime
+    "q2______"	// mtime
+    "q3______"	// mtime
+    "d1__"	// attributes; 0x10 == directory, 0x1 == read only
+    "q4______"	// allocation size
+    "q5______"	// end of file (0)
+    "w3"	// file type (0 = file or directory)
+    "w4"	// IPC state (lower 8 bits == link count?)
+    "\x00"	// 0 = file, 1 = directory
+    "\x00\x00";	// byte count 0
+
   if (len<2*24 || c[0]!=24) return -1;
   /* see if it is an open for reading */
-  if ((c[7]&7) || ((c[17]&3)!=1)) {
+  if ((c[16]&7)!=1) {
     /* we only support read access */
-//    printf("non-read-access requested: %x %x!\n",c[7],c[17]);
-    set_smb_error(sr,ERROR_ACCESS_DENIED,0x2d);
+//    printf("non-read-access requested: %x!\n",uint32_read(c+16));
+    set_smb_error(sr,ERROR_ACCESS_DENIED,0xa2);
     return 0;
   }
   /* now look at file name */
   {
-    size_t fnlen=uint16_read((char*)c+31);
-    uint16_t* remotefilename=(uint16_t*)(c+34);
+    size_t fnlen=uint16_read((char*)c+6);
+    uint16_t* remotefilename=(uint16_t*)(c+0x34);
     struct stat ss;
     struct handle* hdl;
     int fd;
+    if (uint16_read((char*)c+0x31)<fnlen) return -1;
     if (fnlen%2) --fnlen;
     if (fnlen>2046 || ((uintptr_t)remotefilename%2)) return -1;
     hdl=alloc_handle(&h->h);
     if (!hdl) {
 //      printf("could not open file handle!");
-      set_smb_error(sr,STATUS_TOO_MANY_OPENED_FILES,0x2d);
+      set_smb_error(sr,STATUS_TOO_MANY_OPENED_FILES,0xa2);
       return 0;
     }
 
     fd=smb_open(h,remotefilename,fnlen,&ss,WANT_OPEN);
     if (fd==-1) {
-      set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0x2d);
+      set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0xa2);
       close_handle(hdl);
       return 0;
     }
@@ -541,13 +628,31 @@ static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len
       hdl->filename[0]=fnlen;
     }
 
-    uint16_pack(nr+3,sr->used+15*2+3);
-    uint16_pack(nr+5,hdl->handle);
-    uint32_pack(nr+9,ss.st_mtime);
-    uint32_pack(nr+13,ss.st_size);
-  }
+    {
+      size_t oldlen=sr->used;
+      int r=add_smb_response(sr,template,1+2*34+2,0xa2);
+      char* c=sr->buf+oldlen;
+      struct stat ss;
+      fstat(hdl->fd,&ss);
+      uint16_pack(c+OFS16(c,"w1"),sr->used);
+      uint16_pack(c+OFS16(c,"w2"),hdl->handle);
+      {
+	char* x=c+OFS16(c,"q0");
+	uint64_pack_ntdate(x,ss.st_ctime);
+	uint64_pack_ntdate(x+8,ss.st_atime);
+	uint64_pack_ntdate(x+2*8,ss.st_mtime);
+	uint64_pack_ntdate(x+3*8,ss.st_mtime);
+      }
+      uint32_pack(c+OFS16(c,"d1"),S_ISDIR(ss.st_mode)?0x11:0x1);
+      uint64_pack(c+OFS16(c,"q4"),0x100000);	// that's what Samba says
+      uint64_pack(c+OFS16(c,"q5"),ss.st_size);	// end of file 
+      uint16_pack(c+OFS16(c,"w3"),0);
+      uint16_pack(c+OFS16(c,"w4"),ss.st_nlink);
 
-  return add_smb_response(sr,nr,15*2+3,0x2d);
+      if (r) return -1;
+    }
+    return 0;
+  }
 }
 
 static uint32_t mymax(uint32_t a,uint32_t b) {
