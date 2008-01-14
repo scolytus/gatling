@@ -65,6 +65,7 @@ static void panic(const char* routine) {
 }
 
 static unsigned long long int total;
+static unsigned long long resumeofs;
 
 static int statsprinted;
 
@@ -93,8 +94,8 @@ void printstats(unsigned long long nextchunk) {
       percent[j+3]=0;
     } else
       strcpy(percent,"100.00");
-    received[fmt_humank(received,finished)]=0;
-    totalsize[fmt_humank(totalsize,total)]=0;
+    received[fmt_humank(received,resumeofs+finished)]=0;
+    totalsize[fmt_humank(totalsize,resumeofs+total)]=0;
 
     if (now-start>=60) {
       j=fmt_ulong(timedone,(now-start)/60);
@@ -109,11 +110,11 @@ void printstats(unsigned long long nextchunk) {
       timedone[j]=0;
     }
 
-    if (now-start>1) {
+    if (now-start>1 && total) {
       i=finished/(now-start);
       j=fmt_str(speed," (");
       j+=fmt_humank(speed+j,i);
-      j+=fmt_str(speed+j,"iB/sec)");
+      j+=fmt_str(speed+j,"iB/sec)"+(i>1000));
       speed[j]=0;
     } else
       speed[0]=0;
@@ -170,7 +171,6 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
 }
 
 struct utimbuf u;
-unsigned long long resumeofs;
 
 char* location;
 
@@ -864,7 +864,12 @@ again:
 	buffer_puts(buffer_1,pathname);
 	buffer_putsflush(buffer_1,"... ");
       }
-      if (((i=ftpcmd2(s,&ftpbuf,"RETR ",pathname))!=150) && i!=125) panic("No 125/150 response to RETR\n");
+      if (((i=ftpcmd2(s,&ftpbuf,"RETR ",pathname))!=150) && i!=125) {
+	stralloc_0(&ftpresponse);
+	buffer_puts(buffer_2,"dl: RETR failed:");
+	buffer_putsaflush(buffer_2,&ftpresponse);
+	return 1;
+      }
       if (verbose) buffer_putsflush(buffer_1,"ok.  Downloading...\n");
       total=0;
       if (stralloc_0(&ftpresponse)) {
