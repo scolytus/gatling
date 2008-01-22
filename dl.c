@@ -624,8 +624,10 @@ again:
 	i+=fmt_urlencoded(request+i,c,str_len(c));
 	i+=fmt_str(request+i," HTTP/1.0\r\nHost: ");
 	i+=fmt_str(request+i,host);
-	i+=fmt_str(request+i,":");
-	i+=fmt_ulong(request+i,port);
+	if (port!=80) {
+	  i+=fmt_str(request+i,":");
+	  i+=fmt_ulong(request+i,port);
+	}
 	if (ims) {
 	  i+=fmt_str(request+i,"\r\nIf-Modified-Since: ");
 	  i+=fmt_httpdate(request+i,ims);
@@ -635,7 +637,7 @@ again:
 	  i+=fmt_ulonglong(request+i,resumeofs);
 	  i+=fmt_str(request+i,"-");
 	}
-	i+=fmt_str(request+i,"\r\nUser-Agent: ");
+	i+=fmt_str(request+i,"\r\nAccept: */*\r\nUser-Agent: ");
 	i+=fmt_str(request+i,useragent);
 	if (referer) {
 	  i+=fmt_str(request+i,"\r\nReferer: ");
