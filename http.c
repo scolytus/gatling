@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE 500
+
 #include "gatling.h"
 
 #include "buffer.h"
@@ -12,10 +14,18 @@
 #include "ip4.h"
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <dirent.h>
+#ifdef __dietlibc__
 #include <md5.h>
+#else
+#include <openssl/md5.h>
+#define MD5Init MD5_Init
+#define MD5Update MD5_Update
+#define MD5Final MD5_Final
+#endif
 #include <errno.h>
 #include <string.h>
 #include <time.h>
@@ -24,6 +34,10 @@
 #include <ctype.h>
 #include <sys/socket.h>
 #include <limits.h>
+
+#ifdef __GLIBC__
+#include <alloca.h>
+#endif
 
 MD5_CTX md5_ctx;
 

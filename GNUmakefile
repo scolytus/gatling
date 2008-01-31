@@ -75,7 +75,7 @@ gatling.o: havesetresuid.h
 
 OBJS=mime.o ftp.o http.o smb.o common.o
 
-$(OBJS) gatling.o: gatling.h version.h features.h
+$(OBJS) gatling.o: gatling.h version.h gatling_features.h
 
 tlsgatling: gatling.c ssl.o $(OBJS)
 	-$(CC) -o $@ gatling.c ssl.o $(OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)

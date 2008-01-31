@@ -1,4 +1,4 @@
-#include "features.h"
+#define _GNU_SOURCE
 #include "gatling.h"
 
 #include "socket.h"
@@ -50,7 +50,6 @@
 #include <string.h>
 #include <ctype.h>
 // #include <crypt.h>
-#include <md5.h>
 #include "havealloca.h"
 #include "havesetresuid.h"
 
@@ -336,6 +335,9 @@ void cleanup(int64 fd) {
 #ifdef SUPPORT_HTTPS
     if (h->ssl) SSL_free(h->ssl);
 #endif
+#ifdef SUPPORT_SMB
+    close_all_handles(&h->h);
+#endif
     free(h);
   }
   io_close(fd);
@@ -344,9 +346,6 @@ void cleanup(int64 fd) {
     if (h) h->buddy=-1;
     cleanup(buddyfd);
   }
-#ifdef SUPPORT_SMB
-  close_all_handles(&h->h);
-#endif
 }
 
 size_t header_complete(struct http_data* r) {

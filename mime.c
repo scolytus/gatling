@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE 500
+
 #include "gatling.h"
 
 #include "mmap.h"

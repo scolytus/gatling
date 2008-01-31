@@ -1,1 +1,1 @@
-set args -v smb://10.0.0.2/pub/update-crypto
+set args -i 127.0.0.1

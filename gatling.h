@@ -2,7 +2,7 @@
 #define _GATLING_H
 
 #define _FILE_OFFSET_BITS 64
-#include "features.h"
+#include "gatling_features.h"
 #include "iob.h"
 #include "array.h"
 #include "buffer.h"
