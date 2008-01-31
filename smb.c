@@ -482,6 +482,7 @@ int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,str
     x=(char*)localfilename;
     while (*x=='/') ++x;
     if (todo==WANT_STAT) {
+      if (*x==0) x=".";
       if (stat(x,ss)==0) {
 	fd=0;
 	break;
@@ -756,7 +757,7 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
   paramcount=uint16_read((char*)c+19);
   dataofs=uint16_read((char*)c+25);
   if (dataofs > len+smbheadersize) return -1;
-  if (paramofs+paramcount > dataofs) return -1;
+  if (uint16_read((char*)c+23) && paramofs+paramcount > dataofs) return -1;
   if (subcommand==7 || subcommand==5) {	// QUERY_FILE_INFO, QUERY_PATH_INFO
     if (subcommand==7) {
       // QUERY_FILE_INFO
@@ -795,7 +796,7 @@ filenotfound:
     case 0x101:		// SMB_QUERY_FILE_BASIC
       {
 	char* buf;
-	size_t datacount=5+0x24;	// 4x8 for dates, 4 for file attributes
+	size_t datacount=4*8+4;	// 4x8 for dates, 4 for file attributes
 	buf=alloca(20+100+datacount);
 	byte_copy(buf,21,
 	  "\x0a"		// word count
@@ -823,7 +824,7 @@ filenotfound:
 	uint64_pack_ntdate(buf+28+8+8,ss.st_mtime);
 	uint64_pack_ntdate(buf+28+8+8+8,ss.st_mtime);
 	uint32_pack(buf+60,attr);	// normal file
-	return add_smb_response(sr,buf,21+datacount,0x32);
+	return add_smb_response(sr,buf,60+datacount,0x32);
       }
     case 0x0107:	// SMB_QUERY_FILE_ALL_INFO
       {
