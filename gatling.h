@@ -156,7 +156,7 @@ struct http_data {
 extern size_t max_handles;
 
 extern struct handle* alloc_handle(struct handles* h);
-extern struct handle* deref_handle(struct handles* h,uint32_t pid,uint32_t handle);
+extern struct handle* deref_handle(struct handles* h,uint32_t handle);
 extern void close_handle(struct handle* h);
 extern void close_all_handles(struct handles* h);
 

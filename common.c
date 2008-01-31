@@ -99,10 +99,10 @@ struct handle* alloc_handle(struct handles* h) {
   return &h->h[h->u++];
 }
 
-struct handle* deref_handle(struct handles* h,uint32_t pid,uint32_t handle) {
+struct handle* deref_handle(struct handles* h,uint32_t handle) {
   size_t i;
   for (i=0; i<h->u; ++i)
-    if (h->h[i].pid==pid && h->h[i].handle==handle)
+    if (h->h[i].handle==handle)
       return &h->h[i];
   return 0;
 }

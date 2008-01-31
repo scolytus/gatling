@@ -686,7 +686,7 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
   if (len<2*10 || (c[0]!=10 && c[0]!=12)) return -1;
   
   handle=uint16_read((char*)c+5);
-  if (!(hdl=deref_handle(&h->h,pid,handle))) {
+  if (!(hdl=deref_handle(&h->h,handle))) {
     set_smb_error(sr,STATUS_INVALID_HANDLE,0x2e);
     return 0;
   }
@@ -762,7 +762,7 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
     if (subcommand==7) {
       // QUERY_FILE_INFO
       if (paramcount<4) return -1;
-      if (!(hdl=deref_handle(&h->h,pid,uint16_read((char*)c-smbheadersize+paramofs)))) {
+      if (!(hdl=deref_handle(&h->h,uint16_read((char*)c-smbheadersize+paramofs)))) {
 	set_smb_error(sr,STATUS_INVALID_HANDLE,0x32);
 	return 0;
       }
@@ -794,9 +794,10 @@ filenotfound:
       attr=0x80;	// plain file
     switch (loi) {
     case 0x101:		// SMB_QUERY_FILE_BASIC
+    case 0x102:		// SMB_QUERY_FILE_STANDARD
       {
 	char* buf;
-	size_t datacount=4*8+4;	// 4x8 for dates, 4 for file attributes
+	size_t datacount=(loi==0x101?4*8+4:2*8+4+2);	// 4x8 for dates, 4 for file attributes, 4 extra
 	buf=alloca(20+100+datacount);
 	byte_copy(buf,21,
 	  "\x0a"		// word count
@@ -819,11 +820,20 @@ filenotfound:
 	buf[23]=0;
 	uint16_pack(buf+24,0);	// ea error offset
 	uint16_pack(buf+26,0);	// padding
-	uint64_pack_ntdate(buf+28,ss.st_ctime);
-	uint64_pack_ntdate(buf+28+8,ss.st_atime);
-	uint64_pack_ntdate(buf+28+8+8,ss.st_mtime);
-	uint64_pack_ntdate(buf+28+8+8+8,ss.st_mtime);
-	uint32_pack(buf+60,attr);	// normal file
+	if (loi==0x101) {
+	  uint64_pack_ntdate(buf+28,ss.st_ctime);
+	  uint64_pack_ntdate(buf+28+8,ss.st_atime);
+	  uint64_pack_ntdate(buf+28+8+8,ss.st_mtime);
+	  uint64_pack_ntdate(buf+28+8+8+8,ss.st_mtime);
+	  uint32_pack(buf+60,attr);	// normal file
+	  uint32_pack(buf+64,0);
+	} else if (loi==0x102) {
+	  uint64_pack(buf+28,(unsigned long long)ss.st_blocks*ss.st_blksize);
+	  uint64_pack(buf+28+8,ss.st_size);
+	  uint32_pack(buf+28+8+8,ss.st_nlink);
+	  buf[28+8+8+4]=0;
+	  buf[28+8+8+4+1]=S_ISDIR(ss.st_mode)?1:0;
+	}
 	return add_smb_response(sr,buf,60+datacount,0x32);
       }
     case 0x0107:	// SMB_QUERY_FILE_ALL_INFO
@@ -871,7 +881,7 @@ filenotfound:
       return 0;
     }
   } else if (subcommand==1) {	// FIND_FIRST2
-    size_t i,l=dataofs-paramofs-12;
+    size_t i,l;
     size_t maxdatacount;
     char* globlatin1,* globutf8;
     uint16_t attr,flags;
@@ -892,6 +902,7 @@ outofmemory:
       return 0;
     }
     filename=(uint16*)(c-smbheadersize+paramofs+12);
+    l=paramcount-12;
 
     {
       /* we want to minimize copies, so we realloc enough space into the
@@ -1038,7 +1049,7 @@ outofmemory:
 static int smb_handle_Close(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
   struct handle* hdl;
   if (len<2*3 || c[0]!=3) return -1;
-  if (!(hdl=deref_handle(&h->h,pid,uint16_read((char*)c+1)))) {
+  if (!(hdl=deref_handle(&h->h,uint16_read((char*)c+1)))) {
     set_smb_error(sr,STATUS_INVALID_HANDLE,0x4);
     return 0;
   }
