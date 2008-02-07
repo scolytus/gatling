@@ -758,7 +758,9 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
   dataofs=uint16_read((char*)c+25);
   if (dataofs > len+smbheadersize) return -1;
   if (uint16_read((char*)c+23) && paramofs+paramcount > dataofs) return -1;
-  if (subcommand==7 || subcommand==5) {	// QUERY_FILE_INFO, QUERY_PATH_INFO
+  if (subcommand==7 ||	// QUERY_FILE_INFO
+      subcommand==5 ||	// QUERY_PATH_INFO
+      subcommand==3) {	// QUERY_FS_INFO
     if (subcommand==7) {
       // QUERY_FILE_INFO
       if (paramcount<4) return -1;
@@ -783,6 +785,17 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
       if (smb_open(h,filename,fnlen,&ss,WANT_STAT)==-1)
 	goto filenotfound;
       loi=uint16_read((char*)c-smbheadersize+paramofs);
+    } else if (subcommand==3) {
+      // QUERY_FS_INFO
+      loi=uint16_read((char*)c-smbheadersize+paramofs);
+      if (loi==0x102)
+	return add_smb_response(sr,
+	  "\x0a\x00\x00\x18\x00\x00\x00\x00\x00\x38"
+	  "\x00\x00\x00\x18\x00\x38\x00\x00\x00\x00"
+	  "\x00\x19\x00\x00\x00\x00\x00\x00\x00\x00"
+	  "\x00\x00\xde\xc0\xfe\xfe\x06\x00\x00\x00"
+	  "\x00\x00\x66\x00\x74\x00\x70\x00",48,0x32);
+      else goto filenotfound;
     } else {
 filenotfound:
       set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0x32);
@@ -795,9 +808,11 @@ filenotfound:
     switch (loi) {
     case 0x101:		// SMB_QUERY_FILE_BASIC
     case 0x102:		// SMB_QUERY_FILE_STANDARD
+    case 0x103:		// Query File EA Info
       {
 	char* buf;
 	size_t datacount=(loi==0x101?4*8+4:2*8+4+2);	// 4x8 for dates, 4 for file attributes, 4 extra
+	if (loi==0x103) datacount=4;
 	buf=alloca(20+100+datacount);
 	byte_copy(buf,21,
 	  "\x0a"		// word count
@@ -833,6 +848,8 @@ filenotfound:
 	  uint32_pack(buf+28+8+8,ss.st_nlink);
 	  buf[28+8+8+4]=0;
 	  buf[28+8+8+4+1]=S_ISDIR(ss.st_mode)?1:0;
+	} else if (loi==0x103) {
+	  uint32_pack(buf+28,0);	// EA List Length 0
 	}
 	return add_smb_response(sr,buf,60+datacount,0x32);
       }
@@ -1029,13 +1046,15 @@ outofmemory:
 	}
       }
       closedir(d);
-      uint16_pack(trans2+3,cur-base);
-      uint16_pack(trans2+9,trans2+20-sr->buf);
-      uint16_pack(trans2+13,cur-base);
-      uint16_pack(trans2+15,base-smbhdr);
-      uint16_pack(trans2+21,base-smbhdr-12);
-      uint16_pack(trans2+26,searchcount);	// search count...!?
-      uint16_pack(trans2+32,last-base);
+      if (trans2) {
+	uint16_pack(trans2+3,cur-base);
+	uint16_pack(trans2+9,trans2+20-sr->buf);
+	uint16_pack(trans2+13,cur-base);
+	uint16_pack(trans2+15,base-smbhdr);
+	uint16_pack(trans2+21,base-smbhdr-12);
+	uint16_pack(trans2+26,searchcount);	// search count...!?
+	uint16_pack(trans2+32,last-base);
+      }
       uint32_pack_big(sr->buf,sr->used-4);
 //      printf("sr->used = %u\n",sr->used);
       return 0;
