@@ -951,7 +951,7 @@ outofmemory:
     if (utf16tolatin1(globlatin1,l-i+1,filename,(l+1)*2)) {
       globlatin1=0;
       puts("could not convert glob expression to latin1!");
-    } else
+    } // else
 //      printf("glob expression \"%s\"\n",globlatin1);
     globutf8=alloca((l+1)*3);
     if (utf16toutf8(globutf8,(l+1)*3,filename,(l+1)*3)) {
