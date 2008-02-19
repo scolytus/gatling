@@ -467,7 +467,7 @@ int main(int argc,char* argv[]) {
 	  for (k=0; k<l; ++k) {
 	    if (str_start(buf+k,"\nContent-Length: ")) {
 	      k+=17;
-	      if (buf[k+scan_ulonglong(buf+k,expected+j)] != '\r')
+	      if (buf[k+scan_ulonglong(buf+k,(unsigned long long*)expected+j)] != '\r')
 		die(1,"parse error in HTTP header!");
 	    } else if (str_start(buf+k,"\r\n\r\n"))
 	      break;

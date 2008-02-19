@@ -15,8 +15,8 @@ LDFLAGS=-s -L../libowfat/ -lowfat
 
 OBJS=mime.o ftp.o http.o smb.o common.o
 
-gatling: gatling.o $(OBJS) libsocket libiconv libcrypt
-	$(CC) -o $@ gatling.o $(OBJS) $(LDFLAGS) `cat libsocket libiconv libcrypt`
+gatling: gatling.o $(OBJS) libsocket libiconv libcrypt md5lib
+	$(CC) -o $@ gatling.o $(OBJS) $(LDFLAGS) `cat libsocket libiconv libcrypt md5lib`
 
 httpbench: httpbench.o libsocket
 	$(CC) -o $@ httpbench.o $(LDFLAGS) `cat libsocket`
@@ -90,6 +90,12 @@ libcrypt: trycrypt.c
 	fi; fi > libcrypt
 	rm -f trycrypt
 
+md5lib: trymd5.c
+	if $(CC) $(CFLAGS) -o trymd5 trymd5.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o trymd5 trymd5.c -lcrypto >/dev/null 2>&1; then echo "-lcrypto"; \
+	fi; fi > md5lib
+	rm -f trymd5
+
 havesetresuid.h: trysetresuid.c
 	-rm -f $@
 	if $(CC) $(CFLAGS) -o tryresuid $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
@@ -105,7 +111,7 @@ uninstall:
 	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1 $(man1dir)/bench.1
 
 clean:
-	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h
+	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib
 
 cert: server.pem
 

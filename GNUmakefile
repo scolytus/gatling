@@ -80,8 +80,8 @@ $(OBJS) gatling.o: gatling.h version.h gatling_features.h
 tlsgatling: gatling.c ssl.o $(OBJS)
 	-$(CC) -o $@ gatling.c ssl.o $(OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
-gatling: gatling.o $(OBJS)
-	$(CC) $(LDFLAGS) $@.o $(OBJS) -o $@ $(LDLIBS)
+gatling: gatling.o $(OBJS) md5lib
+	$(CC) $(LDFLAGS) $@.o $(OBJS) -o $@ $(LDLIBS) `cat md5lib`
 
 httpbench: httpbench.o
 bindbench: bindbench.o
@@ -122,6 +122,12 @@ libcrypt: trycrypt.c
 	fi; fi > libcrypt
 	rm -f trycrypt
 
+md5lib: trymd5.c
+	if $(CC) $(CFLAGS) -o trymd5 trymd5.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o trymd5 trymd5.c -lcrypto >/dev/null 2>&1; then echo "-lcrypto"; \
+	fi; fi > md5lib
+	rm -f trymd5
+
 havesetresuid.h: trysetresuid.c
 	-rm -f $@
 	if $(CC) $(CFLAGS) -o tryresuid $^ >/dev/null 2>&1; then echo "#define LIBC_HAS_SETRESUID"; fi > $@
@@ -136,7 +142,7 @@ libsocketkludge.a: libsocket libiconv dummy.o
 
 LDLIBS+=`cat libsocket libiconv libcrypt`
 
-$(TARGETS): libsocketkludge.a libsocket libiconv libcrypt
+$(TARGETS): libsocketkludge.a libsocket libiconv libcrypt md5lib
 
 install: gatling dl getlinks
 	install -d $(DESTDIR)$(BINDIR) $(man1dir)
@@ -148,7 +154,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1 $(DESTDIR)$(man1dir)/bench.1
 
 clean:
-	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h
+	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib
 
 VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
 CURNAME=$(notdir $(shell pwd))
