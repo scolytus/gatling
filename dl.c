@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <netdb.h>
 #include "havealloca.h"
 #include <assert.h>
@@ -181,6 +182,12 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
       return -1;
     }
   }
+#ifdef TCP_NODELAY
+  {
+    int one=1;
+    setsockopt(s,IPPROTO_TCP,TCP_NODELAY,&one,sizeof(one));
+  }
+#endif
   return s;
 }
 
