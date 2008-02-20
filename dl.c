@@ -71,14 +71,14 @@ static int statsprinted;
 
 void printstats(unsigned long long nextchunk) {
   static unsigned long long int finished;
-  static time_t start,now,prev;
+  static struct timeval start,now,prev;
   finished+=nextchunk;
-  if (start==0) {
-    start=now=prev=time(0);
+  if (start.tv_sec==0) {
+    gettimeofday(&start,0); now=start; prev=start;
     return;
   }
-  prev=now; now=time(0);
-  if (prev!=now) {
+  prev=now; gettimeofday(&now,0);
+  if (prev.tv_sec!=now.tv_sec) {
     char received[FMT_ULONG], totalsize[FMT_ULONG], timedone[FMT_ULONG], percent[10];
     char speed[FMT_ULONG+20];
     size_t i,j;
@@ -101,21 +101,24 @@ void printstats(unsigned long long nextchunk) {
     if (totalsize[j-1]<='9') totalsize[j++]='i';
     totalsize[j]=0;
 
-    if (now-start>=60) {
-      j=fmt_ulong(timedone,(now-start)/60);
+    if (now.tv_sec-start.tv_sec>=60) {
+      j=fmt_ulong(timedone,(now.tv_sec-start.tv_sec)/60);
       timedone[j]=':';
-      i=(now-start)%60;
+      i=(now.tv_sec-start.tv_sec)%60;
       timedone[j+1]=(i/10)+'0';
       timedone[j+2]=(i%10)+'0';
       timedone[j+3]=0;
     } else {
-      j=fmt_ulong(timedone,now-start);
+      j=fmt_ulong(timedone,now.tv_sec-start.tv_sec);
       j+=fmt_str(timedone+j," sec");
       timedone[j]=0;
     }
 
-    if (now-start>1 && total) {
-      i=finished/(now-start);
+    if (now.tv_sec-start.tv_sec>1 && total) {
+      unsigned long timediff=(now.tv_sec-start.tv_sec)*100;
+      timediff += (now.tv_usec-start.tv_usec)/10000;
+
+      i=finished*100/timediff;
       j=fmt_str(speed," (");
       j+=fmt_humank(speed+j,i);
       j+=fmt_str(speed+j,"iB/sec)"+(i>1000));
@@ -123,8 +126,8 @@ void printstats(unsigned long long nextchunk) {
     } else
       speed[0]=0;
 
-    if (now > start+3 && now-start) {
-      unsigned long long int bps=finished/(now-start);
+    if (now.tv_sec > start.tv_sec+3 && now.tv_sec-start.tv_sec) {
+      unsigned long long int bps=finished/(now.tv_sec-start.tv_sec);
       size_t k=(total-finished)/bps;
       char lm[FMT_ULONG];
 
