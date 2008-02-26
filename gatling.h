@@ -23,7 +23,7 @@ enum ftpstate {
   UPLOADING,
 };
 
-int askforpassword;
+extern int askforpassword;
 #endif
 
 #ifdef SUPPORT_PROXY

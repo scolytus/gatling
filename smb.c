@@ -257,7 +257,7 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
   if (len>=smbheadersize+1 &&
       byte_equal(pkt,4,"\xffSMB")) {	/* signature needs to be there */
     x=(unsigned char*)pkt+smbheadersize;
-    if (pkt[4]!=0x72 && pkt[4]!=0x71 && x[0]<2)
+    if (x[0] > 100)
       return -1;
     /* see that x + sizeof(word_count) + word_count*2 +
      * sizeof(byte_count) is inside the packet */
@@ -275,7 +275,7 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
       size_t bytecount;
       /* see that x + sizeof(word_count) + word_count*2 +
       * sizeof(byte_count) is inside the packet */
-      if (x[0]<2 || !range_arrayinbuf(pkt,len,x+3,*x,2))
+      if (!range_arrayinbuf(pkt,len,x+3,*x,2))
 	return -1;
       /* we know that the byte count is within the packet */
       /* read it and check whether it's ok, too */
@@ -444,7 +444,7 @@ enum smb_open_todo {
 
 /* ssize is the size in bytes, including L'\0' */
 /* returns number of converted chars in dest, including \0, or 0 on error */
-size_t utf16tolatin1(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
+static size_t utf16tolatin1(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
   size_t i;
   size_t max=dsize;
   if (ssize/2<max) max=ssize/2;
@@ -458,19 +458,19 @@ size_t utf16tolatin1(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
   return i+1;
 }
 
-size_t utf16toutf8(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
+static size_t utf16toutf8(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
   size_t X,Y;
   char* x,* y;
   x=(char*)src;
   y=dest;
   X=ssize;
-  Y=dsize;
+  Y=dsize?dsize-1:dsize;	// the -1 makes sure we have a 0 byte at the end
   memset(dest,0,dsize);
   if (iconv(wc2utf8,&x,&X,&y,&Y)) return 0;
   return dsize-Y;
 }
 
-size_t utf8toutf16(char* dest,size_t dsize,char* src,size_t ssize) {
+static size_t utf8toutf16(char* dest,size_t dsize,char* src,size_t ssize) {
   size_t X,Y;
   char* x,* y;
   x=src;
@@ -483,7 +483,7 @@ size_t utf8toutf16(char* dest,size_t dsize,char* src,size_t ssize) {
 }
 
 
-int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,struct stat* ss,enum smb_open_todo todo) {
+static int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,struct stat* ss,enum smb_open_todo todo) {
   char localfilename[1024];
   int64 fd;
   size_t i,j;
@@ -603,7 +603,7 @@ static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,u
   return 0;
 }
 
-static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
+static int smb_handle_CreateAndX(struct http_data* h,const unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
   static const char template[]=
     "\x22"	// word count 34
     "\xff\x00"	// AndX: no further commands, reserved
@@ -638,6 +638,7 @@ static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len
     struct stat ss;
     struct handle* hdl;
     int fd;
+    // filename cannot be bigger than byte count says the total payload is
     if (uint16_read((char*)c+0x31)<fnlen) return -1;
     if (fnlen%2) --fnlen;
     if (fnlen>2046 || ((uintptr_t)remotefilename%2)) return -1;
@@ -748,11 +749,10 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
   oldused=sr->used;
   if (!(x=add_smb_response2(sr,nr,12*2+3,0x2e))) return -1;
   uint16_pack(x+OFS16(nr,"w0"),0);	// no andx for read
-  if (1) {
+  {
     off_t rem=hdl->size-hdl->cur-count;
     uint16_pack(x+OFS16(nr,"w1"),rem>0xffff?0xffff:rem);
-  } else
-    uint16_pack(x+OFS16(nr,"w1"),0xffff);
+  }
   uint16_pack(x+OFS16(nr,"w2"),count);
   uint16_pack(x+OFS16(nr,"w3"),oldused+12*2);
   uint16_pack(x+OFS16(nr,"w4"),count);
@@ -784,8 +784,16 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
   paramofs=uint16_read((char*)c+21);
   paramcount=uint16_read((char*)c+19);
   dataofs=uint16_read((char*)c+25);
-  if (dataofs > len+smbheadersize) return -1;
-  if (uint16_read((char*)c+23) && paramofs+paramcount > dataofs) return -1;
+  /* Do some general validation of the offsets and data counts */
+  /* Accept crap in the offsets if the counts are zero */
+  {
+    size_t datacount=uint16_read((char*)c+23);
+    if ((paramcount && !range_bufinbuf(c+c[0]*2,len-c[0]*2,c-smbheadersize+paramofs,paramcount)) ||
+	(datacount && !range_bufinbuf(c+c[0]*2,len-c[0]*2,c-smbheadersize+dataofs,datacount)))
+      return -1;
+    if (dataofs > len+smbheadersize) return -1;
+    if (datacount && paramofs+paramcount > dataofs) return -1;
+  }
   if (subcommand==7 ||	// QUERY_FILE_INFO
       subcommand==5 ||	// QUERY_PATH_INFO
       subcommand==3) {	// QUERY_FS_INFO
@@ -1136,7 +1144,7 @@ static int smb_handle_QueryDiskInfo(unsigned char* c,size_t len,struct smb_respo
       uint16_pack(buf+5,1<<9);
       uint16_pack(buf+3,1<<(i-9));
     } else {
-      uint16_pack(buf+3,1<<15);
+      uint16_pack(buf+5,1<<15);
       uint16_pack(buf+3,1<<(i-15));
     }
   }

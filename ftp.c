@@ -29,6 +29,8 @@
         |_|
 */
 
+int askforpassword;
+
 static int ftp_vhost(struct http_data* h) {
   int r=ip_vhost(h);
   if (r==-1)
