@@ -601,7 +601,7 @@ again:
     }
 
     if (output)
-      filename=output;
+      filename=strcmp(output,"-")?output:"";
     else
       filename=c+str_rchr(c,'/')+1;
     if (resume || newer) {

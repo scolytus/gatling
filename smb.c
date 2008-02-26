@@ -213,12 +213,12 @@ static int init_smb_response(struct smb_response* sr,unsigned char* in_response_
 }
 
 static int add_smb_response(struct smb_response* sr,const char* buf,size_t size,unsigned char type) {
-  if (sr->allocated+size<size) return -1;
+  if (sr->allocated+size<size) return -1;	// check int overflow
   if (sr->used+size>sr->allocated) {
     size_t n=sr->allocated+size;
     void* x;
-    n=((n-1)|0xfff)+1;
-    if (!n) return -1;
+    n=((n-1)|0xfff)+1;		// round up to multiple of 0x1000
+    if (!n) return -1;		// check int overflow
     x=realloc(sr->buf,n);
     if (!x) return -1;
     sr->buf=x;
@@ -250,17 +250,36 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
   /* demand that we have at least a full smbheader and wordcount */
   if (len>=smbheadersize+1 &&
       byte_equal(pkt,4,"\xffSMB")) {	/* signature needs to be there */
-    if (!hasandx(pkt[4])) return 0;
     x=(unsigned char*)pkt+smbheadersize;
+    if (pkt[4]!=0x72 && pkt[4]!=0x71 && x[0]<2)
+      return -1;
+    /* see that x + sizeof(word_count) + word_count*2 +
+     * sizeof(byte_count) is inside the packet */
+    if (!range_arrayinbuf(pkt,len,x+3,*x,2))
+      return -1;
+    /* now we know the word count is ok, but is the byte count? */
+    {
+      size_t bytecountofs=1+*x*2;
+      size_t bytecount;
+      bytecount=uint16_read(x+bytecountofs);
+      if (bytecount>len || x+bytecountofs+2+bytecount>pkt+len) return -1;
+    }
+    if (!hasandx(pkt[4])) return 0;
     for (;;) {
-      int done;
-      if (x[0]<2 || !range_arrayinbuf(pkt,len,x,*x,2))
+      size_t bytecount;
+      /* see that x + sizeof(word_count) + word_count*2 +
+      * sizeof(byte_count) is inside the packet */
+      if (x[0]<2 || !range_arrayinbuf(pkt,len,x+3,*x,2))
 	return -1;
-      done=(x[1]==0xff);	/* 0xff is the end marker for AndX */
-      if (done) return 0;
+      /* we know that the byte count is within the packet */
+      /* read it and check whether it's ok, too */
+      bytecount=uint16_read(x+1+*x*2);
+      if (!range_arrayinbuf(pkt,len,x+3+bytecount,*x,2))
+	return -1;
+      if (x[1]==0xff) return 0;
       {
 	uint16_t next=uint16_read((char*)x+3);
-	if (pkt+next < x+x[0]*2) return -1;
+	if (pkt+next < x+1+x[0]*2+2+bytecount) return -1;	/* can't point backwards */
 	x=pkt+next;
       }
       if (!range_bufinbuf(pkt,len,(char*)x,5))
@@ -272,7 +291,7 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
 }
 
 static int smb_handle_SessionSetupAndX(unsigned char* pkt,unsigned long len,struct smb_response* sr) {
-  static char nr[2*3+sizeof("Unix_" RELEASE)*2+100*2]=
+  static const char nr[]=
     "\x03"	// Word Count 3
     "\xff"	// AndXCommand
     "\x00"	// Reserved
@@ -284,21 +303,30 @@ static int smb_handle_SessionSetupAndX(unsigned char* pkt,unsigned long len,stru
     "G\x00""a\x00t\x00l\x00i\x00n\x00g\x00 \x00";
 
   size_t i,payloadlen;
-
-  payloadlen=sizeof("Unix_" RELEASE)*2 + wglen16 + 1;
+  int ret;
+  char* x;
 
   if (len<2*13 || pkt[0] != 13) return -1;	/* word count for this message is always 13 */
 
-  uint16_pack(nr+3,sr->used+2*3+payloadlen);
-  uint16_pack(nr+7,payloadlen);
+  payloadlen=sizeof("Unix_" RELEASE)*2 + wglen16 + 1;
+
+  i=sr->used;
+  ret=add_smb_response(sr,nr,8+payloadlen,0x73);
+  if (ret==-1) return -1;
+  x=sr->buf+i;
+
+  uint16_pack(x+3,sr->used+2*3+payloadlen);
+  uint16_pack(x+7,payloadlen);
 
   /* should be zero filled already so we only write the even bytes */
-  for (i=0; i<sizeof(RELEASE)-sizeof("Gatling "); ++i)
-    nr[8+2+(sizeof("Unix_Gatling")+i)*2]=VERSION[i];
+  for (i=0; i<sizeof(RELEASE)-sizeof("Gatling ")+1; ++i) {
+    x[8+2+(sizeof("Unix_Gatling")+i)*2]=VERSION[i];
+    x[8+2+(sizeof("Unix_Gatling")+i)*2+1]=0;
+  }
 
-  byte_copy(nr+8+2+(sizeof("Unix_Gatling")+i+1)*2,wglen16+2,workgroup_utf16);
+  byte_copy(x+8+2+(sizeof("Unix_Gatling")+i)*2,wglen16+2,workgroup_utf16);
 
-  return add_smb_response(sr,nr,8+uint16_read(nr+7),0x73);
+  return ret;
 }
 
 static struct timezone tz;
@@ -310,7 +338,7 @@ static void uint64_pack_ntdate(char* dest,time_t date) {
 static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_response* sr) {
   size_t i,j,k;
   int ack;
-  static char nr[2*17+100*2]=
+  static const char nr[2*17+100*2]=
     "\x11"	// word count 17
     "xx"	// dialect index; ofs 1
     "\x02"	// security mode, for NT: plaintext passwords XOR unicode
@@ -325,6 +353,8 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
     "\x00"	// key len
     "xx"	// byte count; ofs 35
     ;		// workgroup name; ofs 37
+  char* x;
+  int ret;
 
   if (len<3) return -1;
   j=uint16_read((char*)c+1);
@@ -336,40 +366,42 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
     i+=2+str_len((char*)c+i+1);
   }
   if (ack==-1) return -1;	// wrong dialect
-  uint16_pack(nr+1,ack);
+
+  i=sr->used;
+  ret=add_smb_response(sr,nr,38+wglen16,0x72);
+  if (ret==-1) return -1;
+  x=sr->buf+i;
+  uint16_pack(x+1,ack);
 
   {
     struct timeval t;
     unsigned long long ntdate;
     gettimeofday(&t,&tz);
     ntdate=10000000ll * ( t.tv_sec + 11644473600ll ) + t.tv_usec * 10ll;
-    uint32_pack(nr+24,ntdate&0xffffffff);
-    uint32_pack(nr+24+4,ntdate>>32);
-    uint16_pack(nr+32,tz.tz_minuteswest);
+    uint32_pack(x+24,ntdate&0xffffffff);
+    uint32_pack(x+24+4,ntdate>>32);
+    uint16_pack(x+32,tz.tz_minuteswest);
   }
 
-  uint16_pack(nr+35,wglen16);
-  byte_copy(nr+37,wglen16,workgroup_utf16);
+  uint16_pack(x+35,wglen16);
+  byte_copy(x+37,wglen16,workgroup_utf16);
 
-  return add_smb_response(sr,nr,38+wglen16,0x72);
+  return ret;
 }
 
 static int smb_handle_TreeConnectAndX(unsigned char* c,size_t len,struct smb_response* sr) {
-  static char nr[2*3+100]=
+  static const char nr[]=
     "\x03"	// Word Count 3
     "\xff"	// AndXCommand
     "\x00"	// Reserved
-    "xx"	// AndXOffset; ofs 3
+    "\x38\x00"	// AndXOffset; ofs 3
     "\x00\x00"	// Optional Support: none
-    "xx"	// Byte Count; ofs 7
+    "\x0d\x00"	// Byte Count; ofs 7
     "A:\x00"	// "Service", this is what Samba puts there
     "e\x00x\x00t\x00""3\x00\x00\x00";	// "Native Filesystem"
-
   if (len<2*4 || c[0] != 4) return -1;	/* word count for this message is always 4 */
 
-  uint16_pack(nr+3,sr->used+2*3+1+sizeof("A: e x t 3  "));
-  uint16_pack(nr+7,sizeof("A: e_x_t_3_ "));
-  return add_smb_response(sr,nr,9+uint16_read(nr+7),0x75);
+  return add_smb_response(sr,nr,9+13,0x75);
 }
 
 static int smb_handle_echo(unsigned char* c,size_t len,struct smb_response* sr) {
@@ -501,17 +533,16 @@ int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fnlen,str
   return fd;
 }
 
-// TODO
 static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
-  static char nr[34]=
+  static const char nr[34]=
     "\x0f"	// word count 15
     "\xff"	// AndXCommand
     "\x00"	// Reserved
-    "xx"	// AndXOffset; ofs 3
-    "xx"	// FID; ofs 5
+    "w1"	// AndXOffset; ofs 3
+    "w2"	// FID; ofs 5
     "\x00\x00"	// file attributes; normal file
-    "xxxx"	// ctime; ofs 9
-    "xxxx"	// file size; ofs 13
+    "u1__"	// ctime; ofs 9
+    "u2__"	// file size; ofs 13
     "\x00\x00"	// granted access: read, compatibility mode, caching permitted
     "\x00\x00"	// file type: disk file or directory
     "\x00\x00"	// ipc state
@@ -560,13 +591,20 @@ static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,u
       hdl->filename[0]=fnlen;
     }
 
-    uint16_pack(nr+3,sr->used+15*2+3);
-    uint16_pack(nr+5,hdl->handle);
-    uint32_pack(nr+9,ss.st_mtime);
-    uint32_pack(nr+13,ss.st_size);
-  }
+    {
+      size_t oldlen=sr->used;
+      int ret=add_smb_response(sr,nr,15*2+3,0x2d);
+      char* x=sr->buf+oldlen;
 
-  return add_smb_response(sr,nr,15*2+3,0x2d);
+      if (ret==-1) return -1;
+
+      uint16_pack(x+OFS16(x,"w1"),oldlen+15*2+3);
+      uint16_pack(x+OFS16(x,"w2"),hdl->handle);
+      uint32_pack(x+OFS16(x,"u1"),ss.st_mtime);
+      uint32_pack(x+OFS16(x,"u2"),ss.st_size);
+      return ret;
+    }
+  }
 }
 
 static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
@@ -635,6 +673,7 @@ static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len
       int r=add_smb_response(sr,template,1+2*34+2,0xa2);
       char* c=sr->buf+oldlen;
       struct stat ss;
+      if (r==-1) return -1;
       fstat(hdl->fd,&ss);
       uint16_pack(c+OFS16(c,"w1"),sr->used);
       uint16_pack(c+OFS16(c,"w2"),hdl->handle);
