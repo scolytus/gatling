@@ -236,6 +236,12 @@ static int add_smb_response(struct smb_response* sr,const char* buf,size_t size,
   return 0;
 }
 
+static char* add_smb_response2(struct smb_response* sr,const char* buf,size_t size,unsigned char type) {
+  size_t i=sr->used;
+  if (add_smb_response(sr,buf,size,type)==-1) return 0;
+  return sr->buf+i;
+}
+
 static void set_smb_error(struct smb_response* sr,uint32_t error,unsigned char req) {
   add_smb_response(sr,"\x00\x00",3,req);
   assert(sr->allocated>=0x20);
@@ -291,7 +297,7 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
 }
 
 static int smb_handle_SessionSetupAndX(unsigned char* pkt,unsigned long len,struct smb_response* sr) {
-  static const char nr[]=
+  const char nr[]=
     "\x03"	// Word Count 3
     "\xff"	// AndXCommand
     "\x00"	// Reserved
@@ -303,17 +309,13 @@ static int smb_handle_SessionSetupAndX(unsigned char* pkt,unsigned long len,stru
     "G\x00""a\x00t\x00l\x00i\x00n\x00g\x00 \x00";
 
   size_t i,payloadlen;
-  int ret;
   char* x;
 
   if (len<2*13 || pkt[0] != 13) return -1;	/* word count for this message is always 13 */
 
   payloadlen=sizeof("Unix_" RELEASE)*2 + wglen16 + 1;
 
-  i=sr->used;
-  ret=add_smb_response(sr,nr,8+payloadlen,0x73);
-  if (ret==-1) return -1;
-  x=sr->buf+i;
+  if (!(x=add_smb_response2(sr,nr,8+payloadlen,0x73))) return -1;
 
   uint16_pack(x+3,sr->used+2*3+payloadlen);
   uint16_pack(x+7,payloadlen);
@@ -326,7 +328,7 @@ static int smb_handle_SessionSetupAndX(unsigned char* pkt,unsigned long len,stru
 
   byte_copy(x+8+2+(sizeof("Unix_Gatling")+i)*2,wglen16+2,workgroup_utf16);
 
-  return ret;
+  return 0;
 }
 
 static struct timezone tz;
@@ -338,7 +340,7 @@ static void uint64_pack_ntdate(char* dest,time_t date) {
 static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_response* sr) {
   size_t i,j,k;
   int ack;
-  static const char nr[2*17+100*2]=
+  const char nr[2*17+100*2]=
     "\x11"	// word count 17
     "xx"	// dialect index; ofs 1
     "\x02"	// security mode, for NT: plaintext passwords XOR unicode
@@ -354,7 +356,6 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
     "xx"	// byte count; ofs 35
     ;		// workgroup name; ofs 37
   char* x;
-  int ret;
 
   if (len<3) return -1;
   j=uint16_read((char*)c+1);
@@ -367,10 +368,7 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
   }
   if (ack==-1) return -1;	// wrong dialect
 
-  i=sr->used;
-  ret=add_smb_response(sr,nr,38+wglen16,0x72);
-  if (ret==-1) return -1;
-  x=sr->buf+i;
+  if (!(x=add_smb_response2(sr,nr,38+wglen16,0x72))) return -1;
   uint16_pack(x+1,ack);
 
   {
@@ -386,11 +384,11 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
   uint16_pack(x+35,wglen16);
   byte_copy(x+37,wglen16,workgroup_utf16);
 
-  return ret;
+  return 0;
 }
 
 static int smb_handle_TreeConnectAndX(unsigned char* c,size_t len,struct smb_response* sr) {
-  static const char nr[]=
+  const char nr[]=
     "\x03"	// Word Count 3
     "\xff"	// AndXCommand
     "\x00"	// Reserved
@@ -566,6 +564,7 @@ static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,u
     struct stat ss;
     struct handle* hdl;
     int fd;
+    char* x;
     if (fnlen%2) --fnlen;
     if (fnlen>2046 || ((uintptr_t)remotefilename%2)) return -1;
     hdl=alloc_handle(&h->h);
@@ -593,22 +592,19 @@ static int smb_handle_OpenAndX(struct http_data* h,unsigned char* c,size_t len,u
 
     {
       size_t oldlen=sr->used;
-      int ret=add_smb_response(sr,nr,15*2+3,0x2d);
-      char* x=sr->buf+oldlen;
-
-      if (ret==-1) return -1;
-
-      uint16_pack(x+OFS16(x,"w1"),oldlen+15*2+3);
-      uint16_pack(x+OFS16(x,"w2"),hdl->handle);
-      uint32_pack(x+OFS16(x,"u1"),ss.st_mtime);
-      uint32_pack(x+OFS16(x,"u2"),ss.st_size);
-      return ret;
+      if (!(x=add_smb_response2(sr,nr,15*2+3,0x2d))) return -1;
+      uint16_pack(x+OFS16(nr,"w1"),oldlen+15*2+3);
     }
+
+    uint16_pack(x+OFS16(nr,"w2"),hdl->handle);
+    uint32_pack(x+OFS16(nr,"u1"),ss.st_mtime);
+    uint32_pack(x+OFS16(nr,"u2"),ss.st_size);
   }
+  return 0;
 }
 
 static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
-  const char template[]=
+  static const char template[]=
     "\x22"	// word count 34
     "\xff\x00"	// AndX: no further commands, reserved
     "w1"	// AndXOffset
@@ -669,28 +665,21 @@ static int smb_handle_CreateAndX(struct http_data* h,unsigned char* c,size_t len
     }
 
     {
-      size_t oldlen=sr->used;
-      int r=add_smb_response(sr,template,1+2*34+2,0xa2);
-      char* c=sr->buf+oldlen;
+      char* c=add_smb_response2(sr,template,1+2*34+2,0xa2);
       struct stat ss;
-      if (r==-1) return -1;
+      if (!c) return -1;
       fstat(hdl->fd,&ss);
-      uint16_pack(c+OFS16(c,"w1"),sr->used);
-      uint16_pack(c+OFS16(c,"w2"),hdl->handle);
-      {
-	char* x=c+OFS16(c,"q0");
-	uint64_pack_ntdate(x,ss.st_ctime);
-	uint64_pack_ntdate(x+8,ss.st_atime);
-	uint64_pack_ntdate(x+2*8,ss.st_mtime);
-	uint64_pack_ntdate(x+3*8,ss.st_mtime);
-      }
-      uint32_pack(c+OFS16(c,"d1"),S_ISDIR(ss.st_mode)?0x11:0x1);
-      uint64_pack(c+OFS16(c,"q4"),0x100000);	// that's what Samba says
-      uint64_pack(c+OFS16(c,"q5"),ss.st_size);	// end of file 
-      uint16_pack(c+OFS16(c,"w3"),0);
-      uint16_pack(c+OFS16(c,"w4"),ss.st_nlink);
-
-      if (r) return -1;
+      uint16_pack(c+OFS16(template,"w1"),sr->used);
+      uint16_pack(c+OFS16(template,"w2"),hdl->handle);
+      uint64_pack_ntdate(c+OFS16(template,"q0"),ss.st_ctime);
+      uint64_pack_ntdate(c+OFS16(template,"q1"),ss.st_atime);
+      uint64_pack_ntdate(c+OFS16(template,"q2"),ss.st_mtime);
+      uint64_pack_ntdate(c+OFS16(template,"q3"),ss.st_mtime);
+      uint32_pack(c+OFS16(template,"d1"),S_ISDIR(ss.st_mode)?0x11:0x1);
+      uint64_pack(c+OFS16(template,"q4"),0x100000);	// that's what Samba says
+      uint64_pack(c+OFS16(template,"q5"),ss.st_size);	// end of file 
+      uint16_pack(c+OFS16(template,"w3"),0);
+      uint16_pack(c+OFS16(template,"w4"),ss.st_nlink);
     }
     return 0;
   }
@@ -701,19 +690,19 @@ static uint32_t mymax(uint32_t a,uint32_t b) {
 }
 
 static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
-  static char nr[24+4]=
+  static const char nr[]=
     "\x0c"	// word count 12
     "\xff"	// AndXCommand
     "\x00"	// Reserved
-    "xx"	// AndXOffset; ofs 3
-    "xx"	// Remaining; ofs 5
+    "w0"	// AndXOffset; ofs 3
+    "w1"	// Remaining; ofs 5
     "\x00\x00"	// data compaction mode
     "\x00\x00"	// reserved
-    "xx"	// data length low; ofs 11
-    "xx"	// data offset; ofs 13
+    "w2"	// data length low; ofs 11
+    "w3"	// data offset; ofs 13
     "\x00\x00\x00\x00"	// data length high (*64k)
     "\x00\x00\x00\x00\x00\x00"	// reserved
-    "xx"	// byte count; ofs 24
+    "w4"	// byte count; ofs 24
     ;
   uint16_t handle;
   uint16_t count;
@@ -721,9 +710,10 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
   uint32_t relofs;
 #endif
   struct handle* hdl;
-  int r;
+  char* x;
+  size_t oldused;
   if (len<2*10 || (c[0]!=10 && c[0]!=12)) return -1;
-  
+
   handle=uint16_read((char*)c+5);
   if (!(hdl=deref_handle(&h->h,handle))) {
     set_smb_error(sr,STATUS_INVALID_HANDLE,0x2e);
@@ -755,27 +745,26 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
 
   if (count>hdl->size-hdl->cur) count=hdl->size-hdl->cur;
 
-  uint16_pack(nr+3,0);	// no andx for read
+  oldused=sr->used;
+  if (!(x=add_smb_response2(sr,nr,12*2+3,0x2e))) return -1;
+  uint16_pack(x+OFS16(nr,"w0"),0);	// no andx for read
   if (1) {
     off_t rem=hdl->size-hdl->cur-count;
-    uint16_pack(nr+5,rem>0xffff?0xffff:rem);
+    uint16_pack(x+OFS16(nr,"w1"),rem>0xffff?0xffff:rem);
   } else
-    uint16_pack(nr+5,0xffff);
-  uint16_pack(nr+11,count);
-  uint16_pack(nr+13,sr->used+12*2);
-  uint16_pack(nr+25,count);
+    uint16_pack(x+OFS16(nr,"w1"),0xffff);
+  uint16_pack(x+OFS16(nr,"w2"),count);
+  uint16_pack(x+OFS16(nr,"w3"),oldused+12*2);
+  uint16_pack(x+OFS16(nr,"w4"),count);
 
-  r=add_smb_response(sr,nr,12*2+3,0x2e);
-  if (r==0) {
 #ifdef DEBUG
-    hexdump(sr->buf,sr->used);
+  hexdump(sr->buf,sr->used);
 #endif
-    uint32_pack_big(sr->buf,sr->used-4+count);	// update netbios size field
-    iob_addbuf_free(&h->iob,sr->buf,sr->used);
-    iob_addfile(&h->iob,hdl->fd,hdl->cur,count);
-    hdl->cur+=count;
-  }
-  return r;
+  uint32_pack_big(sr->buf,sr->used-4+count);	// update netbios size field
+  iob_addbuf_free(&h->iob,sr->buf,sr->used);
+  iob_addfile(&h->iob,hdl->fd,hdl->cur,count);
+  hdl->cur+=count;
+  return 0;
 }
 
 static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
