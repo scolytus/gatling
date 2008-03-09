@@ -588,6 +588,7 @@ again:
 	return 1;
       }
       ai=aitop;
+      ips.len=0;
       while (ai) {
 	if (ai->ai_family==AF_INET6)
 	  stralloc_catb(&ips,(char*)&(((struct sockaddr_in6*)ai->ai_addr)->sin6_addr),16);
