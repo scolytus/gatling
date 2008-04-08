@@ -2,6 +2,7 @@
   add multi-ranges (only used by the Acrobat Reader plugin AFAIK)
   abstract out accept() deferment to libowfat (socket_deferaccept)
   add read-only SMB support
+  add lame anti-DOS support (see README.antidos)
 
 0.9:
   add /server-status

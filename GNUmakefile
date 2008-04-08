@@ -73,7 +73,7 @@ forksbench: forkbench.o
 
 gatling.o: havesetresuid.h
 
-OBJS=mime.o ftp.o http.o smb.o common.o
+OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
 
 $(OBJS) gatling.o: gatling.h version.h gatling_features.h
 

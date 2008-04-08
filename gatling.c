@@ -52,6 +52,7 @@
 // #include <crypt.h>
 #include "havealloca.h"
 #include "havesetresuid.h"
+#include "connstat.h"
 
 unsigned long instances=1;
 unsigned long timeout_secs=23;
@@ -558,6 +559,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
   uint32 scope_id;
   int n;
   while (1) {
+    int punk;
 #ifdef __broken_itojun_v6__
     if (H->t==HTTPSERVER4 || H->t==FTPSERVER4
 #ifdef SUPPORT_SMB
@@ -574,6 +576,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #endif
       n=socket_accept6(i,ip,&port,&scope_id);
     if (n==-1) break;
+    punk=new_request_from_ip(ip,now.sec.x-4611686018427387914ULL)==1;
 #ifdef SUPPORT_SERVERSTATUS
     if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) ++http_connections;
 #ifdef SUPPORT_HTTPS
@@ -588,20 +591,22 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #endif
     ++cps1;
     ++connections;
-    {
+    if (logging) {
       char buf[IP6_FMT];
 
-      if (logging) {
-	buffer_puts(buffer_1,"accept ");
-	buffer_putulong(buffer_1,n);
-	buffer_puts(buffer_1," ");
-	buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
-	buffer_puts(buffer_1," ");
-	buffer_putulong(buffer_1,port);
-	buffer_puts(buffer_1," ");
-	buffer_putulong(buffer_1,connections-1);
-	buffer_putnlflush(buffer_1);
-      }
+      buffer_puts(buffer_1,punk?(timeout_secs?"dos_tarpit ":"dos_drop "):"accept ");
+      buffer_putulong(buffer_1,n);
+      buffer_puts(buffer_1," ");
+      buffer_put(buffer_1,buf,fmt_ip6c(buf,ip));
+      buffer_puts(buffer_1," ");
+      buffer_putulong(buffer_1,port);
+      buffer_puts(buffer_1," ");
+      buffer_putulong(buffer_1,connections-1);
+      buffer_putnlflush(buffer_1);
+    }
+    if (punk && !timeout_secs) {
+      io_close(n);
+      continue;
     }
 
 #ifdef TCP_NODELAY
@@ -614,21 +619,24 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #endif
 
     if (io_fd(n)) {
-      struct http_data* h=(struct http_data*)malloc(sizeof(struct http_data));
+      struct http_data* h;
+      h=(struct http_data*)malloc(sizeof(struct http_data));
       if (h) {
 	io_nonblock(n);
 	H->sent=H->received=0;
-	if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
+	if (!punk) {
+	  if (H->t==HTTPSERVER6 || H->t==HTTPSERVER4
 #ifdef SUPPORT_SMB
-	  || H->t==SMBSERVER6 || H->t==SMBSERVER4
+	    || H->t==SMBSERVER6 || H->t==SMBSERVER4
 #endif
 #ifdef SUPPORT_HTTPS
-	  || H->t==HTTPSSERVER6 || H->t==HTTPSSERVER4
+	    || H->t==HTTPSSERVER6 || H->t==HTTPSSERVER4
 #endif
-	  )
-	  io_wantread(n);
-	else
-	  io_wantwrite(n);
+	    )
+	    io_wantread(n);
+	  else
+	    io_wantwrite(n);
+	}
 	byte_zero(h,sizeof(struct http_data));
 #ifdef __broken_itojun_v6__
 	if (i==s4 || i==f4) {
@@ -642,7 +650,10 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	byte_copy(h->peerip,16,ip);
 	h->peerport=port;
 	h->myscope_id=scope_id;
-	if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
+	if (punk) {
+	  h->t=PUNISHMENT;
+	  io_timeout(n,next);
+	} else if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
 	  h->t=HTTPREQUEST;
 	  if (timeout_secs)
 	    io_timeout(n,next);
@@ -874,6 +885,27 @@ emerge:
       } else if ((l=header_complete(H))) {
 	long alen;
 pipeline:
+	/* The H->mimetype reference is here so that we don't count both the HTTP
+	 * connection and the first request on it as a dos attack. */
+	if (H->mimetype && new_request_from_ip(H->peerip,now.sec.x-4611686018427387914ULL)==1) {
+	  H->t=PUNISHMENT;
+	  if (logging) {
+	    char buf[IP6_FMT];
+	    char n[FMT_LONG];
+	    n[fmt_ulong(n,i)]=0;
+	    buf[fmt_ip6c(buf,H->peerip)]=0;
+
+	    buffer_putmflush(buffer_1,"dos_tarpit2 ",n," ",buf,"\n");
+	  }
+	  if (timeout_secs) {
+	    io_dontwantread(i);
+	    io_dontwantwrite(i);
+	  } else
+	    /* if we don't have timeouts enabled, just drop the
+	     * connection */
+	    cleanup(i);
+	  return;
+	}
 #ifdef SUPPORT_HTTPS
 	if (H->t==HTTPREQUEST || H->t==HTTPSREQUEST) {
 	  httpresponse(H,i,l);
@@ -1146,7 +1178,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
     found=0;
     for (;;) {
-      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:");
+      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:");
       if (c==-1) break;
       switch (c) {
       case 'c':
@@ -1293,7 +1325,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:");
+    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -1424,6 +1456,15 @@ int main(int argc,char* argv[],char* envp[]) {
       }
       break;
 #endif
+    case 'A':
+      i=scan_uint(optarg,&max_requests_per_minute);
+      if (i==0) {
+	buffer_puts(buffer_2,"gatling: warning: could not parse max_requests_per_minute at ");
+	buffer_puts(buffer_2,optarg+i+1);
+	buffer_putsflush(buffer_2,".\n");
+      }
+      break;
+
 #ifdef SUPPORT_THREADED_OPEN
     case 'o':
 #endif
@@ -1454,6 +1495,8 @@ usage:
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
 		  "\t-P n\tenable experimental prefetching code (may actually be slower)\n"
 		  "\t-l\task for password (FTP server; work around buggy proxies)\n"
+		  "\t-m fn\tparse fn as mime.types style mime type database\n"
+		  "\t-A rpm\ttarpit clients if they have more than rpm request per minute\n"
 #ifdef SUPPORT_MULTIPROC
 		  "\t-N n\tfork n instances of gatling\n"
 #endif
@@ -1811,10 +1854,15 @@ usage:
 	byte_copy(&tick,sizeof(next),&now);
 	++tick.sec.x;
 	while ((i=io_timeouted())!=-1) {
+	  struct http_data* x;
 	  if (logging) {
-	    char numbuf[FMT_ULONG];
-	    numbuf[fmt_ulong(numbuf,i)]=0;
-	    buffer_putmflush(buffer_1,"timeout ",numbuf,"\nclose/timeout ",numbuf,"\n");
+	    /* shut up in the tarpit case, don't give them the
+	     * satisfaction of spamming our logs too much */
+	    if ((x=io_getcookie(i)) && x->t != PUNISHMENT) {
+	      char numbuf[FMT_ULONG];
+	      numbuf[fmt_ulong(numbuf,i)]=0;
+	      buffer_putmflush(buffer_1,"timeout ",numbuf,"\nclose/timeout ",numbuf,"\n");
+	    }
 	  }
 	  cleanup(i);
 	}

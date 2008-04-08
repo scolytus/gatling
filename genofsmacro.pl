@@ -9,7 +9,7 @@ $max=80;
 
 print "#define OFS16(buf,x) \\\n";
 for ($i=0; $i<$max; ++$i) {
-  print "  ((buf[$i]==x[0] && buf[$i+1]==x[1])?$i: \\\n";
+  print "  ((sizeof(buf)>$i+1 && buf[$i]==x[0] && buf[$i+1]==x[1])?$i: \\\n";
 }
 print "  -1",")" x $max,"\n\n";
 

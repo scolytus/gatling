@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <regex.h>
 
+#include <time.h>
+
 #ifdef SUPPORT_FTP
 enum ftpstate {
   GREETING,
@@ -77,6 +79,8 @@ enum conntype {
   HTTPSREQUEST,	/* read and handle https request */
   HTTPSRESPONSE,	/* write response to https request */
 #endif
+
+  PUNISHMENT,	/* if we detected a DoS and tarpit someone */
 
   LAST_UNUNSED
 };
@@ -275,5 +279,15 @@ extern int64 origdir;
 
 #include "version.h"
 #define RELEASE "Gatling/" VERSION
+
+extern unsigned int max_requests_per_minute;
+
+/* call this function when a request comes in, with the peer's IP
+ * address as argument */
+int new_request_from_ip(const char ip[16],time_t now);
+/* returns 0 if the request was added and should be serviced.
+ * returns 1 if a denial of service attack from this IP was detected and
+ *           the request should not be serviced
+ * returns -1 if we ran out of memory trying to add the request */
 
 #endif
