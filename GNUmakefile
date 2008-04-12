@@ -124,8 +124,9 @@ libcrypt: trycrypt.c
 
 md5lib: trymd5.c
 	if $(CC) $(CFLAGS) -o trymd5 trymd5.c >/dev/null 2>&1; then echo ""; else \
+	if $(CC) $(CFLAGS) -o trymd5 trymd5.c -lmd >/dev/null 2>&1; then echo "-lmd"; \
 	if $(CC) $(CFLAGS) -o trymd5 trymd5.c -lcrypto >/dev/null 2>&1; then echo "-lcrypto"; \
-	fi; fi > md5lib
+	fi; fi; fi > md5lib
 	rm -f trymd5
 
 havesetresuid.h: trysetresuid.c
