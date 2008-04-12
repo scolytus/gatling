@@ -13,7 +13,7 @@ CC=gcc
 CFLAGS=-pipe -Wall -O -I../libowfat/
 LDFLAGS=-s -L../libowfat/ -lowfat
 
-OBJS=mime.o ftp.o http.o smb.o common.o
+OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
 
 gatling: gatling.o $(OBJS) libsocket libiconv libcrypt md5lib
 	$(CC) -o $@ gatling.o $(OBJS) $(LDFLAGS) `cat libsocket libiconv libcrypt md5lib`
