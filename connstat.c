@@ -1,5 +1,6 @@
 #include <byte.h>
 #include <stdlib.h>
+#include <time.h>
 
 unsigned int max_requests_per_minute;
 
