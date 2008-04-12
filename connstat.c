@@ -1,4 +1,3 @@
-#include "connstat.h"
 #include <byte.h>
 #include <stdlib.h>
 

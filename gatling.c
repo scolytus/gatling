@@ -52,7 +52,6 @@
 // #include <crypt.h>
 #include "havealloca.h"
 #include "havesetresuid.h"
-#include "connstat.h"
 
 unsigned long instances=1;
 unsigned long timeout_secs=23;
