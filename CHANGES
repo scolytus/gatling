@@ -3,6 +3,8 @@
   abstract out accept() deferment to libowfat (socket_deferaccept)
   add read-only SMB support
   add lame anti-DOS support (see README.antidos)
+  sort the other way around in referer
+  dl in http mode now supports cookies and sets the referer
 
 0.9:
   add /server-status

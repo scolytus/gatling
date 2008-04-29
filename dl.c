@@ -9,6 +9,7 @@
 #include "fmt.h"
 #include "ip4.h"
 #include "io.h"
+#include "case.h"
 #include "stralloc.h"
 #include "textcode.h"
 #include "uint64.h"
@@ -191,11 +192,120 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   return s;
 }
 
+struct cookie {
+  const char* domain, * path, * name, * value;
+  struct cookie* next;
+}* cookies;
+
+void addcookie(const char* s,const char* curdomain) {
+  struct cookie* n;
+  char* x;
+  char* t=strchr(s,'\n');
+  if (!t) t=strchr(s,0);
+  if (t>s && t[-1]=='\r') --t;
+  if (case_starts(s,"set-cookie:")) {
+    s += sizeof("set-cookie");
+    while (*s==' ' || *s=='\t') ++s;
+  }
+  if (s==t) return;
+  if (!(x=strndup(s,t-s))) return;
+  if (!(n=malloc(sizeof(*n)))) goto kaputt2;
+  n->name=x;
+  while (*x && *x!='=') ++x;
+  if (*x!='=') {
+kaputt:
+    free(n);
+kaputt2:
+    free(x);
+    return;
+  }
+  *x=0;
+  n->value=++x;
+  while (*x && *x!=';' && *x!=' ' && *x!='\t') ++x;
+  n->domain=curdomain; n->path="/";
+  if (*x) {
+    if (*x!=';') goto kaputt;
+    *x=0;
+    ++x;
+    while (*x) {
+      char next;
+      while (*x==' ' || *x=='\t') ++x;
+      if (!(t=strchr(x,';'))) t=strchr(x,0);
+      next=*t; *t=0;
+      if (case_starts(x,"path=")) {
+	x+=sizeof("path");
+	n->path=x;
+      } else if (case_starts(x,"domain=")) {
+	x+=sizeof("domain");
+	n->domain=x;
+      }
+      if (!next) break;
+      x=t+1;
+    }
+  }
+  /* check if the domain is valid */
+  if (n->domain != curdomain) {
+    size_t i,a;
+    /* n->domain must be a suffic of curdomain or the other way around */
+    i=strlen(n->domain);
+    a=strlen(curdomain);
+    if (i<=a && case_diffs(n->domain,curdomain+a-i)) goto kaputt;
+    if (a<i && case_diffs(n->domain+i-a,curdomain)) goto kaputt;
+    /* can't set cookie for TLD */
+    for (i=a=0; n->domain[i]; ++i)
+      if (n->domain[i]=='.') ++a;
+    if (a<2) goto kaputt;
+    /* here we would have to check for cases like ".co.uk", but since
+     * this is just a trivial downloader without persistent cookies,
+     * I'll pass, knowingly breaking ".x.org" */
+    if (strlen(n->domain)<sizeof(".co.uk")) goto kaputt;
+  }
+//  printf("Cookie: \"%s\" = \"%s\", domain=\"%s\", path=\"%s\"\n",n->name,n->value,n->domain,n->path);
+  /* now see if the same cookie is already there */
+  {
+    struct cookie** c;
+    for (c=&cookies; *c; c=&((*c)->next)) {
+      if (!strcmp((*c)->name,n->name) && !strcmp((*c)->domain,n->domain)) {
+	(*c)->name=n->name;
+	(*c)->value=n->value;
+	(*c)->path=n->path;
+	(*c)->domain=n->domain;
+	free(n);
+	return;
+      }
+    }
+    *c=n;
+    n->next=0;
+  }
+}
+
+size_t fmt_cookies(char* dest,const char* domain,const char* path) {
+  struct cookie* c;
+  size_t sum=0;
+  size_t l=strlen(domain);
+  sum+=fmt_str(dest,"Cookie: ");
+  for (c=cookies; c; c=c->next) {
+    size_t k=strlen(c->domain);
+    if (l<k) continue;
+    if (case_equals(domain+l-k,c->domain) && case_starts(path,c->path))
+      sum+=fmt_strm(dest?dest+sum:0,c->name,"=",c->value,"; ");
+  }
+  if (sum>8) {
+    if (dest) {
+      dest[sum-2]='\r';
+      dest[sum-1]='\n';
+    }
+    return sum;
+  } else
+    return 0;
+}
+
+
 struct utimbuf u;
 
 char* location;
 
-static int readanswer(int s,const char* filename,int onlyprintlocation) {
+static int readanswer(int s,const char* filename,const char* curdomain,int onlyprintlocation) {
   char buf[8192];
   int i,j,body=-1,r;
   int64 d;
@@ -219,8 +329,15 @@ static int readanswer(int s,const char* filename,int onlyprintlocation) {
 	  panic("creat");
 	if (d==-1) {
 	  if (httpcode==301 || httpcode==302 || httpcode==303) {
-	    char* l;
+	    char* l=buf;
 	    buf[r]=0;
+	    /* extract cookies */
+	    while ((l=strchr(l,'\n'))) {
+	      ++l;
+	      if (case_starts(l,"set-cookie:"))
+		addcookie(l,curdomain);
+	    }
+	    /* extract and go to location */
 	    if ((l=strstr(buf,"\nLocation:"))) {
 	      l+=10;
 	      while (*l == ' ' || *l == '\t') ++l;
@@ -429,6 +546,22 @@ int main(int argc,char* argv[]) {
   buffer ftpbuf;
   char* host;
 
+#if 0
+  addcookie("Set-cookie: RMID=0478b6d1254f4816a29724b0; expires=Wednesday, 29-Apr-2009 04:22:47 GMT; path=/; domain=.nytimes.com\r\n","www.nytimes.com");
+  addcookie("Set-cookie: NYT_GR=4816a747-xr4Bk90ylLV96+EIoKqc+A; path=/; domain=.nytimes.com","www.nytimes.com");
+  addcookie("Set-cookie: NYT-S=0MOZ7vC0h8ZsDDXrmvxADeHCpDcwlNkC5FdeFz9JchiAI6GpR90PNu0YV.Ynx4rkFI; path=/; domain=.nytimes.com","www.nytimes.com");
+  {
+    char buf[1024];
+    size_t l;
+    l=fmt_cookies(0,"www.nytimes.com","/2008/04/29/washington/29scotus.html?partner=rssnyt&emc=rss");
+    printf("l=%zu\n",l);
+    if (l<1024) {
+      buf[fmt_cookies(buf,"www.nytimes.com","/2008/04/29/washington/29scotus.html?partner=rssnyt&emc=rss")]=0;
+      printf("buf=\"%s\" (%zu)\n",buf,strlen(buf));
+    }
+  }
+#endif
+
   dostats=isatty(2);
 
 #ifndef __MINGW32__
@@ -548,7 +681,7 @@ again:
       if (c[scan_ushort(c,&port)]!='/') goto usage;
       *c=0;
     }
-    host[colon]=0;
+//    host[colon]=0;
     c=host+slash;
     pathname=c;
     *c=0;
@@ -624,7 +757,10 @@ again:
     }
 
     if (mode==HTTP) {
-      request=malloc(300+str_len(host)+3*str_len(c)+str_len(useragent)+(referer?str_len(referer)+20:0));
+      size_t cookielen=fmt_cookies(0,host,c);
+      size_t referlen=referer?str_len(referer)+20:0;
+      request=malloc(300+str_len(host)+3*str_len(c)+str_len(useragent)+referlen+cookielen);
+
       if (!request) panic("malloc");
       {
 	int i;
@@ -656,7 +792,9 @@ again:
 	}
 	i+=fmt_str(request+i,"\r\nConnection: ");
 	i+=fmt_str(request+i,keepalive?"keep-alive":"close");
-	i+=fmt_str(request+i,"\r\n\r\n");
+	i+=fmt_str(request+i,"\r\n");
+	i+=fmt_cookies(request+i,host,c);
+	i+=fmt_str(request+i,"\r\n");
 	rlen=i; request[rlen]=0;
       }
     }
@@ -686,9 +824,11 @@ again:
   }
   if (mode==HTTP) {
     if (write(s,request,rlen)!=rlen) panic("write");
-    switch (readanswer(s,filename,onlyprintlocation)) {
+    switch (readanswer(s,filename,host,onlyprintlocation)) {
     case -1: exit(1);
-    case -2: argv[optind]=location;
+    case -2: free(referer);
+	     referer=strdup(argv[optind]);
+	     argv[optind]=location;
 	     if (onlyprintlocation) {
 	       buffer_puts(buffer_1,location);
 	       buffer_putnlflush(buffer_1);
@@ -728,8 +868,8 @@ again:
       char* c=ftpresponse.s+1;
       struct tm t;
       int ok=1;
-      int i;
       if (ftpresponse.len>15) {
+	int i=0;
 	if (c[0]=='1' && c[1]=='9' && c[15]>='0') {
 	  /* y2k bug; "19100" instead of "2000" */
 	  if (scan_int2digit(c+3,&i)!=2) ok=0;

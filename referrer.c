@@ -52,7 +52,7 @@ void addlist(struct node** N,char* word) {
 }
 
 int compar(const void* a,const void* b) {
-  int i = (*(struct node**)a)->count - (*(struct node**)b)->count;
+  int i = (*(struct node**)b)->count - (*(struct node**)a)->count;
   return (i?i:strcmp((*(struct node**)a)->word,(*(struct node**)b)->word));
 }
 
