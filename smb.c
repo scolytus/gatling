@@ -502,7 +502,12 @@ static int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fn
       if (utf16toutf8(localfilename,sizeof(localfilename),remotefilename,fnlen)==0)
 	break;
     }
-//    printf("trying \"%s\"\n",localfilename);
+#if 0
+    {
+      const char* what[] = {"OPEN","STAT","CHDIR"};
+      printf("trying \"%s\" for %s\n",localfilename,what[todo]);
+    }
+#endif
     for (i=0; localfilename[i]; ++i) {
       if (localfilename[i]=='\\')
 	localfilename[i]='/';
@@ -519,6 +524,7 @@ static int smb_open(struct http_data* h,unsigned short* remotefilename,size_t fn
 	break;
       }
     } else if (todo==WANT_OPEN) {
+      if (*x==0) x=".";
       if (open_for_reading(&fd,x,ss))
 	break;
     } else if (todo==WANT_CHDIR) {
@@ -832,7 +838,30 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
 	  "\x00\x19\x00\x00\x00\x00\x00\x00\x00\x00"
 	  "\x00\x00\xde\xc0\xfe\xfe\x06\x00\x00\x00"
 	  "\x00\x00\x66\x00\x74\x00\x70\x00",48,0x32);
-      else if (loi==0x105)
+      else if (loi==0x103) {
+	/* UINT64 TotalAllocationUnits
+	 * UINT64 AvailableAllocationUnits
+	 * UINT32 SectorsPerAllocationUnit
+	 * UINT32 BytesPerSector */
+	static const char tmpl[]=
+	  "\x0a\x00\x00\x18\x00\x00\x00\x00\x00\x38"
+	  "\x00\x00\x00\x18\x00\x38\x00\x00\x00\x00"
+	  "\x00\x19\x00";
+	size_t len=sizeof(tmpl)+8+8+4+4;
+	char* buf=alloca(len);
+	char* x=buf+sizeof(tmpl);
+	struct statvfs sv;
+	memcpy(buf,tmpl,sizeof(tmpl));
+	if (fstatvfs(origdir,&sv)==-1) {
+	  set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0x32);
+	  return 0;
+	}
+	uint64_pack(x,sv.f_blocks);
+	uint64_pack(x+8,sv.f_bavail);
+	uint32_pack(x+8+8,sv.f_frsize);
+	uint32_pack(x+8+8+4,512);
+	return add_smb_response(sr,buf,len,0x32);
+      } else if (loi==0x105)
 	return add_smb_response(sr,
 	  "\x0a\x00\x00\x12\x00\x00\x00\x00\x00\x38"
 	  "\x00\x00\x00\x12\x00\x38\x00\x00\x00\x00"
@@ -887,6 +916,7 @@ filenotfound:
 	  uint32_pack(buf+60,attr);	// normal file
 	  uint32_pack(buf+64,0);
 	} else if (loi==0x102) {
+	  uint16_pack(buf+21,datacount+5);
 	  uint64_pack(buf+28,(unsigned long long)ss.st_blocks*ss.st_blksize);
 	  uint64_pack(buf+28+8,ss.st_size);
 	  uint32_pack(buf+28+8+8,ss.st_nlink);

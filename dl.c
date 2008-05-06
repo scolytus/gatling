@@ -975,6 +975,7 @@ again:
       }
     } else {
       int srv;
+tryv4:
       if (usev4) {
 	int i;
 	if (verbose) buffer_putsflush(buffer_1,"PASV... ");
@@ -994,7 +995,11 @@ again:
 	dataconn=srv;
       } else {
 	if (verbose) buffer_putsflush(buffer_1,"EPSV... ");
-	if (ftpcmd(s,&ftpbuf,"EPSV\r\n")!=229) panic("EPSV reply is not 229\n");
+	if (ftpcmd(s,&ftpbuf,"EPSV\r\n")!=229) {
+	  usev4=1;
+	  goto tryv4;
+	  panic("EPSV reply is not 229\n");
+	}
 	/* Passive Mode OK (|||52470|) */
 	for (i=0; i<ftpresponse.len-1; ++i) {
 	  if (ftpresponse.s[i]>='0' && ftpresponse.s[i]<='9') {
