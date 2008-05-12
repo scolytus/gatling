@@ -5,7 +5,7 @@ man1dir=$(MANDIR)/man1
 
 TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
 mktestdata manymapbench ioerr bench tlsgatling forksbench cgi getlinks \
-acc hcat
+acc hcat referrer hitprofile
 
 all: $(TARGET)
 
@@ -67,6 +67,9 @@ version.h: CHANGES
 
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
+
+hitprofile.o: referrer.c
+	$(CC) -c $< -I. $(CFLAGS) -DALL
 
 tlsgatling: gatling.c ssl.o version.h gatling.h libsocket libiconv libcrypt $(OBJS)
 	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o $(OBJS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`

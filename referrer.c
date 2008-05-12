@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 size_t hash(const char* word) {
   size_t x;
@@ -130,7 +131,9 @@ int main() {
 	struct node** N;
 //	printf("%s => %s\n",referrer,url);
 	/* not interested in access without referrer */
+#ifndef ALL
 	if (!strcmp(referrer,"[no_referrer]")) continue;
+#endif
 	/* not interested in empty referrer (early versions of gatling) */
 	if (!referrer[0]) continue;
 	/* skip method and http://host/ */
@@ -180,11 +183,12 @@ int main() {
     qsort(x,count,sizeof(*x),compar);
     for (i=0; i<count; ++i) {
       struct node* n;
-      printf("[%d] %s\n",x[i]->count,x[i]->word);
+      printf("[%zu] %s\n",x[i]->count,x[i]->word);
       sortbycount(&x[i]->pl);
       for (n=x[i]->pl; n; n=n->next)
-	printf("  %4d => %s\n",n->count,n->word);
+	printf("  %4zu => %s\n",n->count,n->word);
       printf("\n");
     }
   }
+  return 0;
 }

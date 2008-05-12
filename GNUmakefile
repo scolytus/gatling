@@ -6,7 +6,7 @@ MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
 TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling \
-pthreadbench cgi getlinks rellink acc hcat
+pthreadbench cgi getlinks rellink acc hcat referrer hitprofile
 TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
 
 all: $(TARGETS) $(TARGETS2)
@@ -101,6 +101,9 @@ version.h: CHANGES
 
 %: %.o
 	$(CC) $(LDFLAGS) $@.o -o $@ $(LDLIBS)
+
+hitprofile.o: referrer.c
+	$(CC) -c $< -o $@ -I. $(CFLAGS) -DALL
 
 libsocket: trysocket.c
 	if $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \
