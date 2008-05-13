@@ -751,7 +751,10 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
     count=mymax(uint16_read((char*)c+13),uint16_read((char*)c+11));
   if (count>65500) count=65500;
 
-  if (count>hdl->size-hdl->cur) count=hdl->size-hdl->cur;
+  if (hdl->cur>hdl->size)
+    count=0;
+  else
+    if (count>hdl->size-hdl->cur) count=hdl->size-hdl->cur;
 
   oldused=sr->used;
   if (!(x=add_smb_response2(sr,nr,12*2+3,0x2e))) return -1;
