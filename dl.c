@@ -853,8 +853,10 @@ again:
     if ((readftpresponse(&ftpbuf)/100)!=2) panic("no 2xx ftp greeting.\n");
     if (verbose) buffer_putsflush(buffer_1,"\nUSER anonymous...");
     if ((i=(ftpcmd(s,&ftpbuf,"USER anonymous\r\n")/100))>3) panic("ftp login failed.\n");
-    if (verbose) buffer_putsflush(buffer_1,"\nPASS luser@...");
-    if ((i=(ftpcmd(s,&ftpbuf,"PASS luser@\r\n")/100))!=2) panic("ftp login failed.\n");
+    if (i!=2) {
+      if (verbose) buffer_putsflush(buffer_1,"\nPASS luser@...");
+      if ((i=(ftpcmd(s,&ftpbuf,"PASS luser@\r\n")/100))!=2) panic("ftp login failed.\n");
+    }
 
     if (verbose) buffer_putsflush(buffer_1,"\nTYPE I");
     if ((i=(ftpcmd(s,&ftpbuf,"TYPE I\r\n")/100))!=2) panic("Switching to binary mode failed.\n");
