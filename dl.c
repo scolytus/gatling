@@ -325,7 +325,7 @@ static int readanswer(int s,const char* filename,const char* curdomain,int onlyp
 	  goto kaputt;
 	if (onlyprintlocation && (code/10 != 30)) return 0;
 	if ((resumeofs && code==206 && io_appendfile(&d,filename)==0) ||
-	    (!resumeofs && code==200 && ((strcmp(filename,"-"))?io_createfile(&d,filename)==0:((d=1)-1))))
+	    (!resumeofs && code==200 && ((strcmp(filename,""))?io_createfile(&d,filename)==0:((d=1)-1))))
 	  panic("creat");
 	if (d==-1) {
 	  if (httpcode==301 || httpcode==302 || httpcode==303) {
