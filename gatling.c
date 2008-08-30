@@ -1507,6 +1507,8 @@ usage:
 		  "\t\tflags: F - FastCGI mode, J - JSP mode\n"
 #endif
 #ifdef SUPPORT_SMB
+		  "\t-s\tprovide SMB service\n"
+		  "\t-S\tdo not provide SMB service\n"
 		  "\t-w name\tset SMB workgroup\n"
 #endif
 #ifdef SUPPORT_HTTPS
