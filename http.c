@@ -954,10 +954,11 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     }
   } else {
 #ifdef SUPPORT_HTACCESS
-    char* x=alloca(strlen(Filename)+30);
-    int lso=str_rchr(x,'/');
-    if (x[lso]=='/') {
-      byte_copy(x,lso+1,Filename);
+    char* fn=Filename+1;
+    char* x=alloca(strlen(fn)+30);
+    int lso=str_rchr(fn,'/');
+    if (fn[lso]=='/') {
+      byte_copy(x,lso+1,fn);
       str_copy(x+lso+1,".htaccess");
       if (http_dohtaccess(h,x,nobody)==0) return -5;
     } else
