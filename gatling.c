@@ -375,7 +375,7 @@ size_t header_complete(struct http_data* r) {
     uint32 len;
     if (c[0]!=0) return 1;
     len=uint32_read_big(c) & 0x00ffffff;
-    if (l==len+4) return len+4;
+    if (l>=len+4) return len+4;
 #endif
   } else {
     /* FTP */

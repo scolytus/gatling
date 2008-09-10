@@ -345,12 +345,12 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
     "\x11"	// word count 17
     "xx"	// dialect index; ofs 1
     "\x02"	// security mode, for NT: plaintext passwords XOR unicode
-    "\x01\x00"	// Max Mpx Count 1
+    "\x02\x00"	// Max Mpx Count 2
     "\x01\x00"	// Max VCs 1
     "\x04\x41\x00\x00"	// Max Buffer Size (16644, like XP)
     "\x00\x00\x01\x00"	// Max Raw Buffer (65536, like XP)
     "\x01\x02\x03\x04"	// Session Key
-    "\x5c\x40\x00\x00"	// Capabilities, the bare minimum
+    "\x5e\x40\x00\x00"	// Capabilities, the bare minimum
     "xxxxxxxx"	// system time; ofs 24
     "xx"	// server time zone; ofs 32
     "\x00"	// key len
