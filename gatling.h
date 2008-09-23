@@ -297,6 +297,7 @@ int new_request_from_ip(const char ip[16],time_t now);
 
 #ifdef SUPPORT_HTTPS
 extern int64 https_write_callback(int64 sock,const void* buf,uint64 n);
+extern int handle_ssl_error_code(int sock,int code,int reading);
 #endif
 
 #endif
