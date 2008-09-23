@@ -1153,7 +1153,7 @@ int main(int argc,char* argv[],char* envp[]) {
   char ip[16];
   uint16 port,fport,sport;
 #ifdef SUPPORT_HTTPS
-  uint16 httpsport;
+  uint16 httpsport=0;
   tai6464 nexthttps;
 #endif
   tai6464 last,tick,nextftp;
@@ -1702,7 +1702,8 @@ usage:
 #ifdef SUPPORT_HTTPS
   if (dohttps>=0) {
     httpss=socket_tcp6();
-    socket_deferaccept(s,DATAIN);
+    if (ssh_timeout==0)
+      socket_deferaccept(s,DATAIN);
     if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1 || socket_listen(httpss,16)) {
       if (dohttps==1)
 	panic("socket_bind6_reuse");
