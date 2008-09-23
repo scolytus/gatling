@@ -547,6 +547,11 @@ static int is_server_connection(enum conntype t) {
 #endif
 #endif
 
+#ifdef SUPPORT_HTTPS
+char* sshd;
+unsigned long ssh_timeout;
+#endif
+
 static void accept_server_connection(int64 i,struct http_data* H,unsigned long ftptimeout_secs,tai6464 nextftp) {
   /* This is an FTP or HTTP(S) or SMB server connection.
     * This read event means that someone connected to us.
@@ -675,7 +680,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	  }
 	  h->t=HTTPSACCEPT;
 	  if (timeout_secs)
-	    io_timeout(n,next);
+	    io_timeout(n,nextftp);
 #endif
 #ifdef SUPPORT_SMB
 	} else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
@@ -1149,6 +1154,7 @@ int main(int argc,char* argv[],char* envp[]) {
   uint16 port,fport,sport;
 #ifdef SUPPORT_HTTPS
   uint16 httpsport;
+  tai6464 nexthttps;
 #endif
   tai6464 last,tick,nextftp;
   unsigned long ftptimeout_secs=600;
@@ -1177,12 +1183,21 @@ int main(int argc,char* argv[],char* envp[]) {
 
     found=0;
     for (;;) {
-      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:");
+      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:");
       if (c==-1) break;
       switch (c) {
       case 'c':
 	chroot_to=optarg;
 	break;
+#ifdef SUPPORT_HTTPS
+      case 'X':
+	sshd=optarg;
+	if (isdigit(*sshd)) {
+	  while (isdigit(*sshd)) ++sshd;
+	  ++sshd;
+	}
+	/* fall through */
+#endif
       case 'C':
 	found=1;
 	break;
@@ -1219,7 +1234,7 @@ int main(int argc,char* argv[],char* envp[]) {
 	    do {
 	      r=waitpid(-1,0,WNOHANG);
 	    } while (r!=0 && r!=-1);
-	    forkslave(forksock[1],&fsb);
+	    forkslave(forksock[1],&fsb,savedir);
 	    fchdir(savedir);
 	  }
 	}
@@ -1324,7 +1339,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:");
+    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -1395,6 +1410,13 @@ int main(int argc,char* argv[],char* envp[]) {
 #ifdef SUPPORT_HTTPS
     case 'e': dohttps=1; lastopt=HTTPS; break;
     case 'E': dohttps=-1; break;
+    case 'X': sshd=optarg;
+	      if (isdigit(sshd[0])) {
+		i=scan_ulong(optarg,&ssh_timeout);
+		if (sshd[i]!=',' && sshd[i]!=' ') goto usage;
+		sshd+=i+1;
+	      } else ssh_timeout=2;
+	      break;
 #endif
     case 'H': dohttp=-1; break;
     case 's': dosmb=1; lastopt=SMB; break;
@@ -1514,6 +1536,8 @@ usage:
 #ifdef SUPPORT_HTTPS
 		  "\t-e\tprovide encryption (https://...)\n"
 		  "\t-E\tdo not provide encryption\n"
+		  "\t-X timeout,sshd (\"2,/opt/diet/sbin/sshd -u0\")\n"
+		  "\t\tforward TLS socket to sshd if no activity after connect\n"
 #endif
 #ifdef SUPPORT_FALLBACK_REDIR
 		  "\t-r url\tinstead of a 404, generate a redirect to url+localpart\n"
@@ -1558,6 +1582,13 @@ usage:
     next.sec.x += timeout_secs;
     byte_copy(&nextftp,sizeof(next),&last);
     nextftp.sec.x += ftptimeout_secs;
+#ifdef SUPPORT_HTTPS
+    if (ssh_timeout) {
+      byte_copy(&nexthttps,sizeof(now),&now);
+      nexthttps.sec.x += ssh_timeout;
+    } else
+      byte_copy(&nexthttps,sizeof(next),&next);
+#endif
     byte_copy(&tick,sizeof(next),&last);
     ++tick.sec.x;
   }
@@ -1852,10 +1883,31 @@ usage:
 	next.sec.x += timeout_secs;
 	byte_copy(&nextftp,sizeof(now),&now);
 	nextftp.sec.x += ftptimeout_secs;
+#ifdef SUPPORT_HTTPS
+	if (ssh_timeout) {
+	  byte_copy(&nexthttps,sizeof(now),&now);
+	  nexthttps.sec.x += ssh_timeout;
+	} else
+	  byte_copy(&nexthttps,sizeof(next),&next);
+#endif
 	byte_copy(&tick,sizeof(next),&now);
 	++tick.sec.x;
 	while ((i=io_timeouted())!=-1) {
 	  struct http_data* x;
+#ifdef SUPPORT_HTTPS
+	  if (ssh_timeout && (x=io_getcookie(i)) && x->t == HTTPSACCEPT) {
+	    if (logging) {
+	      char numbuf[FMT_ULONG];
+	      numbuf[fmt_ulong(numbuf,i)]=0;
+	      buffer_putmflush(buffer_1,"timeout/sshd ",numbuf,"\n");
+	    }
+	    {
+	      uint32 a=0;
+	      write(forksock[0],&a,4);
+	      io_passfd(forksock[0],i);
+	    }
+	  }
+#endif
 	  if (logging) {
 	    /* shut up in the tarpit case, don't give them the
 	     * satisfaction of spamming our logs too much */
@@ -1901,7 +1953,12 @@ usage:
 	if (f!=-1) accept_server_connection(f,(struct http_data*)&fct,ftptimeout_secs,nextftp);
 #endif
 #ifdef SUPPORT_HTTPS
-	if (httpss!=-1) accept_server_connection(httpss,(struct http_data*)&httpsct,ftptimeout_secs,nextftp);
+	if (httpss!=-1) {
+	  if (ssh_timeout)
+	    accept_server_connection(httpss,(struct http_data*)&httpsct,ssh_timeout,nexthttps);
+	  else
+	    accept_server_connection(httpss,(struct http_data*)&httpsct,ftptimeout_secs,nextftp);
+	}
 #endif
 #ifdef __broken_itojun_v6__
 	if (s4!=-1) accept_server_connection(s4,(struct http_data*)&ct4,ftptimeout_secs,nextftp);
@@ -1909,7 +1966,12 @@ usage:
 	if (f4!=-1) accept_server_connection(f4,(struct http_data*)&fct4,ftptimeout_secs,nextftp);
 #endif
 #ifdef SUPPORT_HTTPS
-	if (httpss4!=-1) accept_server_connection(httpss4,(struct http_data*)&httpsct4,ftptimeout_secs,nextftp);
+	if (httpss4!=-1) {
+	  if (ssh_timeout)
+	    accept_server_connection(httpss4,(struct http_data*)&httpsct4,ssh_timeout,nexthttps);
+	  else
+	    accept_server_connection(httpss4,(struct http_data*)&httpsct4,ftptimeout_secs,nextftp);
+	}
 #endif
 #endif
       }
@@ -1944,8 +2006,14 @@ usage:
 	do_sslaccept(i,H,1);
       else
 #endif
-      if (is_server_connection(H->t))
+      if (is_server_connection(H->t)) {
+#ifdef SUPPORT_HTTPS
+	if (ssh_timeout && (H->t == HTTPSSERVER6 || H->t == HTTPSSERVER4))
+	  accept_server_connection(i,H,ssh_timeout,nexthttps);
+	else
+#endif
 	accept_server_connection(i,H,ftptimeout_secs,nextftp);
+      }
       else {
 #ifdef SUPPORT_HTTPS
 	if (H->t == HTTPSRESPONSE)
@@ -1986,7 +2054,12 @@ usage:
 	if (f!=-1) accept_server_connection(f,(struct http_data*)&fct,ftptimeout_secs,nextftp);
 #endif
 #ifdef SUPPORT_HTTPS
-	if (httpss!=-1) accept_server_connection(httpss,(struct http_data*)&httpsct,ftptimeout_secs,nextftp);
+	if (httpss!=-1) {
+	  if (ssh_timeout)
+	    accept_server_connection(httpss,(struct http_data*)&httpsct,ssh_timeout,nexthttps);
+	  else
+	    accept_server_connection(httpss,(struct http_data*)&httpsct,ftptimeout_secs,nextftp);
+	}
 #endif
 #ifdef __broken_itojun_v6__
 	if (s4!=-1) accept_server_connection(s4,(struct http_data*)&ct4,ftptimeout_secs,nextftp);
@@ -1994,7 +2067,12 @@ usage:
 	if (f4!=-1) accept_server_connection(f4,(struct http_data*)&fct4,ftptimeout_secs,nextftp);
 #endif
 #ifdef SUPPORT_HTTPS
-	if (httpss4!=-1) accept_server_connection(httpss4,(struct http_data*)&httpsct4,ftptimeout_secs,nextftp);
+	if (httpss4!=-1) {
+	  if (ssh_timeout)
+	    accept_server_connection(httpss4,(struct http_data*)&httpsct4,ssh_timeout,nexthttps);
+	  else
+	    accept_server_connection(httpss4,(struct http_data*)&httpsct4,ftptimeout_secs,nextftp);
+	}
 #endif
 #endif
       }

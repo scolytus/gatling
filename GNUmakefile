@@ -74,11 +74,12 @@ forksbench: forkbench.o
 gatling.o: havesetresuid.h
 
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
+HTTPS_OBJS=mime.o ftp.o https.o smb.o common.o connstat.o
 
 $(OBJS) gatling.o: gatling.h version.h gatling_features.h
 
-tlsgatling: gatling.c ssl.o $(OBJS)
-	-$(CC) -o $@ gatling.c ssl.o $(OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+tlsgatling: gatling.c ssl.o $(HTTPS_OBJS)
+	-$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 gatling: gatling.o $(OBJS) md5lib
 	$(CC) $(LDFLAGS) $@.o $(OBJS) -o $@ $(LDLIBS) `cat md5lib`
@@ -98,6 +99,9 @@ version.h: CHANGES
 
 %.o: %.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS)
+
+https.o: http.c
+	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
 
 %: %.o
 	$(CC) $(LDFLAGS) $@.o -o $@ $(LDLIBS)

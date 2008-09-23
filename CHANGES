@@ -5,6 +5,7 @@
   add lame anti-DOS support (see README.antidos)
   sort the other way around in referer
   dl in http mode now supports cookies and sets the referer
+  add SSH forwarding to SSL support (see README.tls)
 
 0.9:
   add /server-status

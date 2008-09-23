@@ -14,6 +14,7 @@ CFLAGS=-pipe -Wall -O -I../libowfat/
 LDFLAGS=-s -L../libowfat/ -lowfat
 
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
+HTTPS_OBJS=mime.o ftp.o https.o smb.o common.o connstat.o
 
 gatling: gatling.o $(OBJS) libsocket libiconv libcrypt md5lib
 	$(CC) -o $@ gatling.o $(OBJS) $(LDFLAGS) `cat libsocket libiconv libcrypt md5lib`
@@ -68,11 +69,14 @@ version.h: CHANGES
 %.o: %.c
 	$(CC) -c $< -I. $(CFLAGS)
 
+https.o: http.c
+	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
+
 hitprofile.o: referrer.c
 	$(CC) -c $< -I. $(CFLAGS) -DALL
 
-tlsgatling: gatling.c ssl.o version.h gatling.h libsocket libiconv libcrypt $(OBJS)
-	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o $(OBJS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
+tlsgatling: gatling.c ssl.o version.h gatling.h libsocket libiconv libcrypt $(HTTPS_OBJS)
+	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o $(HTTPS_OBJS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
 
 libsocket: trysocket.c
 	if $(CC) $(CFLAGS) -o trysocket trysocket.c >/dev/null 2>&1; then echo ""; else \

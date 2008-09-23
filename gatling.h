@@ -157,6 +157,10 @@ struct http_data {
 #endif
 };
 
+#ifdef SUPPORT_HTTPS
+extern char* sshd;
+#endif
+
 extern size_t max_handles;
 
 extern struct handle* alloc_handle(struct handles* h);
@@ -260,7 +264,7 @@ extern void httperror(struct http_data* r,const char* title,const char* message,
 extern int buffer_putlogstr(buffer* b,const char* s);
 
 extern char fsbuf[8192];
-extern void forkslave(int fd,buffer* in);
+extern void forkslave(int fd,buffer* in,int savedir);
 
 #ifdef USE_ZLIB
 #include <zlib.h>

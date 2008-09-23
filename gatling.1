@@ -4,7 +4,7 @@ gatling \- high performance file server
 .SH SYNOPSIS
 .B gatling [-hnvVtdDfFUlaEe] [-i bind-to-ip] [-p bind-to-port] [-T seconds]
         \fB[-u uid] [-c dir] [-w workgroup] [-P bytes] [-O ip/port/regex]\fR
-        \fB[-r redir-url]
+        \fB[-r redir-url] [-X timeout,sshd]
 .SH DESCRIPTION
 gatling is a HTTP and FTP server.  It will export the current working
 directory to the world.
@@ -79,6 +79,13 @@ set the timeout for FTP control connections (default is 600 seconds).
 If you use \fB-r http://master.example.com/\fR on mirror.example.com,
 and someone asks for a file that does not exist, gatling will not create
 a 404 error but a redirect to the same file on master.example.com.
+
+Use \fB-X timeout,sshd\fR to enable SSH passthrough mode.  If someone
+connects on the SSL socket, but does not say anything for \fBtimeout\fR
+(sane value: 2-10) seconds, then gatling will run an sshd in inetd mode
+with that socket.  \fBsshd\fR is the full path name to sshd, plus the
+command line you want to give it, if any.  gatling automatically appends
+-i, so use this for example for -u0 to disable DNS lookups.
 
 .SH "SIGNALS"
 Sending gatling SIGHUP will make it close all the server sockets (so you

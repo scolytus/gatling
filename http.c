@@ -1847,7 +1847,7 @@ int cgienvneeded(const char* httpreq,size_t reqlen) {
 }
 
 
-void forkslave(int fd,buffer* in) {
+void forkslave(int fd,buffer* in,int savedir) {
   /* receive query, create socketpair, fork, set up environment,
    * pass file descriptor of our side of socketpair */
 
@@ -1862,18 +1862,66 @@ void forkslave(int fd,buffer* in) {
    * out:
    *   uint32 code,alen
    *   char answer[alen]
+
+   * reqlen==0 means sshd mode.  In this case a connection on port 443
+   * came in, ssh forwarding is activated, and the timeout expired
+   * before the client sent anything.  Fork an sshd, and pass the
+   * descriptor.
    */
 
   uint32 i,reqlen,dirlen,code,ralen;
   uint16 port,myport;
   const char* msg="protocol error";
-  int res;
 
   code=1;
-  if ((res=buffer_get(in,(char*)&reqlen,4))==4 &&
-      buffer_get(in,(char*)&dirlen,4)==4 &&
+  if (read(fd,(char*)&reqlen,4)!=4) goto error;
+
+#ifdef SUPPORT_HTTPS
+  if (reqlen==0) { /* SSH MODE */
+    int s,r;
+    if ((s=io_receivefd(fd))==-1) goto error;
+#ifdef sgi
+    r=fork();
+#else
+    r=vfork();
+#endif
+    if (r==-1) { close(s); msg="vfork failed"; goto error; }
+    if (r==0) { /* child */
+      /* sshd might be something like /opt/diet/bin/sshd -u0 */
+      /* so tokenize and add -i (inetd mode) */
+      size_t args,i;
+      char** argv;
+      close(savedir);
+      for (i=0,args=3; sshd[i]; ++i)
+	if (sshd[i]==' ') ++args;
+      argv=malloc(args*sizeof(argv[0]));
+      argv[0]=sshd; args=1;
+      for (i=0; sshd[i]; ++i) {
+	if (sshd[i]==' ') {
+	  do {
+	    sshd[i]=0;
+	    ++i;
+	  } while (sshd[i]==' ');
+	  argv[args]=sshd+i;
+	  ++args;
+	}
+      }
+      argv[args]="-i";
+      argv[args+1]=0;
+      dup2(s,0);
+      dup2(s,1);
+      close(s);
+      close(fd);
+      execvp(argv[0],argv);
+      exit(127);
+    }
+    close(s);
+    return;
+  }
+#endif
+
+  if (buffer_get(in,(char*)&dirlen,4)==4 &&
       buffer_get(in,(char*)&ralen,4)==4) {
-    if (res<1) exit(0);
     if (dirlen<PATH_MAX && reqlen<MAX_HEADER_SIZE) {
       char* httpreq=alloca(reqlen+1);
       char* path=alloca(dirlen+1);
@@ -2024,6 +2072,7 @@ void forkslave(int fd,buffer* in) {
 		  /* child */
 		  int plusx=0;
 		  pid_t pid;
+		  close(savedir);
 		  code=0;
 		  write(fd,&code,4);
 		  write(fd,&code,4);
