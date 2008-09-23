@@ -78,6 +78,7 @@ enum conntype {
   HTTPSACCEPT,	/* call SSL_accept() */
   HTTPSREQUEST,	/* read and handle https request */
   HTTPSRESPONSE,	/* write response to https request */
+  HTTPSPOST,	/* like HTTPPOST but using SSL */
 #endif
 
   PUNISHMENT,	/* if we detected a DoS and tarpit someone */
@@ -293,5 +294,9 @@ int new_request_from_ip(const char ip[16],time_t now);
  * returns 1 if a denial of service attack from this IP was detected and
  *           the request should not be serviced
  * returns -1 if we ran out of memory trying to add the request */
+
+#ifdef SUPPORT_HTTPS
+extern int64 https_write_callback(int64 sock,const void* buf,uint64 n);
+#endif
 
 #endif

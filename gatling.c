@@ -200,6 +200,7 @@ void setup_smdebug_strings() {
   conntypestring[HTTPSACCEPT]="HTTPSACCEPT";
   conntypestring[HTTPSREQUEST]="HTTPSREQUEST";
   conntypestring[HTTPSRESPONSE]="HTTPSRESPONSE";
+  conntypestring[HTTPSPOST]="HTTPSPOST";
 #endif
 }
 #endif
@@ -354,7 +355,7 @@ size_t header_complete(struct http_data* r) {
   const char* c=array_start(&r->r);
   if (r->t==HTTPREQUEST || r->t==HTTPPOST
 #ifdef SUPPORT_HTTPS
-      || r->t==HTTPSREQUEST
+      || r->t==HTTPSREQUEST || r->t==HTTPSPOST
 #endif
      )
   {
@@ -919,8 +920,6 @@ pipeline:
 	if (H->t==HTTPREQUEST)
 	  httpresponse(H,i,l);
 #endif
-#ifdef SUPPORT_HTTPS
-#endif
 #ifdef SUPPORT_SMB
 	else if (H->t==SMBREQUEST) {
 	  if (smbresponse(H,i)==-1) {
@@ -934,7 +933,11 @@ pipeline:
 	  ftpresponse(H,i);
 #endif
 #ifdef SUPPORT_PROXY
-	if (H->t != HTTPPOST) {
+	if (H->t != HTTPPOST
+#ifdef SUPPORT_HTTPS
+	 && H->t != HTTPSPOST
+#endif
+	                     ) {
 #endif
 	  if (l < (alen=array_bytes(&H->r))) {
 	    char* c=array_start(&H->r);
@@ -1993,7 +1996,11 @@ usage:
 #ifdef SUPPORT_PROXY
       if (H->t==PROXYPOST)
 	handle_read_proxypost(i,H);
-      else if (H->t==HTTPPOST)
+      else if (H->t==HTTPPOST
+#ifdef SUPPORT_HTTPS
+	    || H->t==HTTPSPOST
+#endif
+			      )
 	handle_read_httppost(i,H);
       else
 #endif
@@ -2098,24 +2105,25 @@ usage:
 	handle_write_proxyslave(i,h);
       else if (h->t==PROXYPOST)
 	handle_write_proxypost(i,h);
-      else if (h->t==HTTPPOST)
+      else if (h->t==HTTPPOST
+#ifdef SUPPORT_HTTPS
+	    || h->t==HTTPSPOST
+#endif
+			      )
 	handle_write_httppost(i,h);
       else
 #endif
 #ifdef SUPPORT_HTTPS
       if (h->t==HTTPSACCEPT)
 	do_sslaccept(i,h,0);
+      else if (h->t == HTTPSREQUEST)
+	handle_read_misc(i,h,ftptimeout_secs,nextftp);
       else
 #endif
 #ifdef SUPPORT_FTP
       if (h->t==FTPACTIVE)
 	handle_write_ftpactive(i,h);
       else
-#endif
-#ifdef SUPPORT_HTTPS
-	if (h->t == HTTPSREQUEST)
-	  handle_read_misc(i,h,ftptimeout_secs,nextftp);
-	else
 #endif
 	handle_write_misc(i,h,prefetchquantum);
     }

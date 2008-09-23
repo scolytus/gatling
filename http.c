@@ -378,6 +378,11 @@ punt2:
 	    return -1;
 	  }
 	}
+#ifdef SUPPORT_HTTPS
+	if (ctx_for_sockfd->t==HTTPSREQUEST)
+	  ctx_for_sockfd->t=HTTPSPOST;
+	else
+#endif
 	ctx_for_sockfd->t=HTTPPOST;
 	if (logging) {
 	  char bufsfd[FMT_ULONG];
@@ -625,7 +630,21 @@ int read_http_post(int sockfd,struct http_data* H) {
   int i;
   unsigned long long l=H->still_to_copy;
   if (l>sizeof(buf)) l=sizeof(buf);
-  i=read(sockfd,buf,sizeof(buf));
+#ifdef SUPPORT_HTTPS
+  if (H->t==HTTPSPOST) {
+    i=SSL_read(H->ssl,buf,l);
+    if (i<0) {
+      i=SSL_get_error(H->ssl,i);
+      if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+	io_eagain(sockfd);
+	if (handle_ssl_error_code(sockfd,i,1)==-1)
+	  return -1;
+      }
+      return 0;
+    }
+  } else
+#endif
+  i=read(sockfd,buf,l);
 //  printf("read_http_post: want to read %ld bytes from %d; got %d\n",l,sockfd,i);
   if (i<1) return -1;
   H->received+=i;
@@ -1714,6 +1733,11 @@ nothingmoretocopy:
 
 void handle_write_httppost(int64 i,struct http_data* h) {
   int64 r;
+#ifdef SUPPORT_HTTPS
+  if (h->t==HTTPSPOST)
+    r=iob_write(i,&h->iob,https_write_callback);
+  else 
+#endif
   r=iob_send(i,&h->iob);
   if (r==-1)
     io_eagain(i);
