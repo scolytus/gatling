@@ -31,9 +31,17 @@ int init_serverside_tls(SSL** ssl,int sock) {
     SSL_library_init();
   }
   /* a new SSL context with the bare minimum of options */
-  if (!(ctx=SSL_CTX_new(SSLv23_server_method()))) return -1;
+  if (!(ctx=SSL_CTX_new(SSLv23_server_method()))) {
+#if 0
+    printf("SSL_CTX_new failed\n");
+#endif
+    return -1;
+  }
   if (!SSL_CTX_use_certificate_chain_file(ctx, ssl_server_cert)) {
     SSL_CTX_free(ctx);
+#if 0
+    printf("SSL_CTX_use_certificate_chain_file failed\n");
+#endif
     return -1;
   }
   SSL_CTX_load_verify_locations(ctx, ssl_client_ca, NULL);
@@ -52,11 +60,21 @@ int init_serverside_tls(SSL** ssl,int sock) {
   /* a new SSL object, with the rest added to it directly to avoid copying */
   myssl = SSL_new(ctx);
   SSL_CTX_free(ctx);
-  if (!myssl) return -1;
+  if (!myssl) {
+#if 0
+    printf("SSL_new failed\n");
+#endif
+    return -1;
+  }
 
   /* this will also check whether public and private keys match */
-  if (!SSL_use_RSAPrivateKey_file(myssl, ssl_server_cert, SSL_FILETYPE_PEM))
-    { SSL_free(myssl); return -1; }
+  if (!SSL_use_RSAPrivateKey_file(myssl, ssl_server_cert, SSL_FILETYPE_PEM)) {
+    SSL_free(myssl);
+#if 0
+    printf("SSL_use_RSAPrivateKey_file failed\n");
+#endif
+    return -1;
+  }
 
   SSL_set_cipher_list(myssl, ssl_ciphers);
 

@@ -6,6 +6,7 @@
   sort the other way around in referer
   dl in http mode now supports cookies and sets the referer
   add SSH forwarding to SSL support (see README.tls)
+  add matchiprange (see comment at top of matchiprange.c)
 
 0.9:
   add /server-status

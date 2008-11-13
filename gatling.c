@@ -296,7 +296,7 @@ void cleanup(int64 fd) {
 	|| h->t==SMBREQUEST
 #endif
 #ifdef SUPPORT_HTTPS
-	|| h->t==HTTPSREQUEST || h->t==HTTPSACCEPT
+	|| h->t==HTTPSREQUEST || h->t==HTTPSACCEPT || h->t==HTTPSPOST
 #endif
 	  ) --connections;
     if (h->t==HTTPREQUEST) --http_connections;
@@ -307,7 +307,7 @@ void cleanup(int64 fd) {
     if (h->t==SMBREQUEST) --smb_connections;
 #endif
 #ifdef SUPPORT_HTTPS
-    if (h->t==HTTPSREQUEST) --https_connections;
+    if (h->t==HTTPSREQUEST || h->t==HTTPSPOST) --https_connections;
 #endif
 
 #if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)

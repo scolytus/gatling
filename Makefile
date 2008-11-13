@@ -5,7 +5,7 @@ man1dir=$(MANDIR)/man1
 
 TARGET=gatling httpbench dl bindbench mmapbench forkbench pthreadbench \
 mktestdata manymapbench ioerr bench tlsgatling forksbench cgi getlinks \
-acc hcat referrer hitprofile
+acc hcat referrer hitprofile matchiprange
 
 all: $(TARGET)
 
@@ -60,6 +60,9 @@ cgi: cgi.o
 
 getlinks: getlinks.o
 	$(CC) -o $@ getlinks.o $(LDFLAGS)
+
+matchiprange: matchiprange.o
+	$(CC) -o $@ matchiprange.o $(LDFLAGS)
 
 gatling.o: version.h gatling.h havesetresuid.h
 
