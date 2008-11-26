@@ -1915,6 +1915,7 @@ usage:
 	      write(forksock[0],&a,4);
 	      io_passfd(forksock[0],i);
 	    }
+	    --https_connections;
 	  }
 #endif
 	  if (logging) {

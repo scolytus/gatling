@@ -6,11 +6,11 @@ MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
 TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling \
-pthreadbench cgi getlinks rellink acc hcat referrer hitprofile \
-matchiprange
+pthreadbench cgi
 TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
 
-all: $(TARGETS) $(TARGETS2)
+all: $(TARGETS) acc hcat referrer hitprofile matchiprange getlinks \
+rellink $(TARGETS2)
 
 CROSS=
 #CROSS=i686-mingw32-
@@ -72,7 +72,7 @@ pthreadbench: pthreadbench.o
 forksbench: forkbench.o
 	$(CC) -static -o $@ forkbench.o $(LDFLAGS) $(LDLIBS)
 
-gatling.o: havesetresuid.h
+gatling.o tlsgatling: havesetresuid.h
 
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
 HTTPS_OBJS=mime.o ftp.o https.o smb.o common.o connstat.o
