@@ -301,7 +301,7 @@ void cleanup(int64 fd) {
 	  ) --connections;
     if (h->t==HTTPREQUEST
 #ifdef SUPPORT_PROXY
-	|| h->t==PROXYSLAVE || h->t==PROXYPOST || h->t==HTTPPOST
+	|| h->t==HTTPPOST
 #endif
 	) --http_connections;
 #ifdef SUPPORT_FTP
@@ -587,18 +587,6 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
       n=socket_accept6(i,ip,&port,&scope_id);
     if (n==-1) break;
     punk=new_request_from_ip(ip,now.sec.x-4611686018427387914ULL)==1;
-#ifdef SUPPORT_SERVERSTATUS
-    if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) ++http_connections;
-#ifdef SUPPORT_HTTPS
-    if (H->t==HTTPSSERVER4 || H->t==HTTPSSERVER6) ++https_connections;
-#endif
-#ifdef SUPPORT_FTP
-    if (H->t==FTPSERVER4 || H->t==FTPSERVER6) ++ftp_connections;
-#endif
-#ifdef SUPPORT_SMB
-    if (H->t==SMBSERVER4 || H->t==SMBSERVER6) ++smb_connections;
-#endif
-#endif
     ++cps1;
     ++connections;
     if (logging) {
@@ -618,6 +606,18 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
       io_close(n);
       continue;
     }
+#ifdef SUPPORT_SERVERSTATUS
+    if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) ++http_connections;
+#ifdef SUPPORT_HTTPS
+    if (H->t==HTTPSSERVER4 || H->t==HTTPSSERVER6) ++https_connections;
+#endif
+#ifdef SUPPORT_FTP
+    if (H->t==FTPSERVER4 || H->t==FTPSERVER6) ++ftp_connections;
+#endif
+#ifdef SUPPORT_SMB
+    if (H->t==SMBSERVER4 || H->t==SMBSERVER6) ++smb_connections;
+#endif
+#endif
 
 #ifdef TCP_NODELAY
     {
