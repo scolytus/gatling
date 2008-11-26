@@ -299,7 +299,11 @@ void cleanup(int64 fd) {
 	|| h->t==HTTPSREQUEST || h->t==HTTPSACCEPT || h->t==HTTPSPOST
 #endif
 	  ) --connections;
-    if (h->t==HTTPREQUEST) --http_connections;
+    if (h->t==HTTPREQUEST
+#ifdef SUPPORT_PROXY
+	|| h->t==PROXYSLAVE || h->t==PROXYPOST || h->t==HTTPPOST
+#endif
+	) --http_connections;
 #ifdef SUPPORT_FTP
     if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) --ftp_connections;
 #endif
@@ -307,7 +311,8 @@ void cleanup(int64 fd) {
     if (h->t==SMBREQUEST) --smb_connections;
 #endif
 #ifdef SUPPORT_HTTPS
-    if (h->t==HTTPSREQUEST || h->t==HTTPSPOST) --https_connections;
+    if (h->t==HTTPSREQUEST || h->t==HTTPSPOST || h->t==HTTPSACCEPT ||
+	h->t==HTTPSRESPONSE) --https_connections;
 #endif
 
 #if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)

@@ -50,6 +50,7 @@ parseiprange:
 	char* d=strstr(c," - ");
 	if (d) {
 	  d+=3;
+	  while (*d==' ' || *d=='\t') ++d;
 	  *next=malloc(sizeof(struct net));
 	  if (!*next) die(1,"out of memory");
 	  cur=*next;
