@@ -373,14 +373,14 @@ kaputt:
   rest=-1; nocl=1;
   buf[r]=0;
   for (j=0; j<r; j+=str_chr(buf+j,'\n')) {
-    if (j+17<r && byte_equal(buf+j,17,"\nContent-Length: ")) {
+    if (j+17<r && case_equalb(buf+j,17,"\nContent-Length: ")) {
       char* c=buf+j+17;
       if (c[scan_ulonglong(c,&rest)]!='\r') {
 	buffer_putsflush(buffer_2,"invalid Content-Length header!\n");
 	return -1;
       }
       nocl=0;
-    } else if (j+16<r && byte_equal(buf+j,16,"\nLast-Modified: ")) {
+    } else if (j+16<r && case_equalb(buf+j,16,"\nLast-Modified: ")) {
       char* c=buf+j+16;
       if (c[scan_httpdate(c,&u.actime)]!='\r') {
 	buffer_putsflush(buffer_2,"invalid Last-Modified header!\n");
