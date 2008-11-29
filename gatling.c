@@ -1680,7 +1680,9 @@ usage:
     close(s);
     s=-1;
   } else {
+#ifndef __linux__
     socket_deferaccept(s,HTTPIN);
+#endif
     if (socket_bind6_reuse(s,ip,port,0)==-1 || socket_listen(s,16)==-1)
       panic("socket_bind6_reuse");
   }
@@ -1698,7 +1700,9 @@ usage:
 #ifdef SUPPORT_SMB
   if (dosmb>=0) {
     smbs=socket_tcp6();
+#ifndef __linux__
     socket_deferaccept(smbs,DATAIN);
+#endif
     if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1 || socket_listen(smbs,16)) {
       if (dosmb==1)
 	panic("socket_bind6_reuse");
@@ -1710,8 +1714,10 @@ usage:
 #ifdef SUPPORT_HTTPS
   if (dohttps>=0) {
     httpss=socket_tcp6();
+#ifndef __linux__
     if (ssh_timeout==0)
       socket_deferaccept(httpss,DATAIN);
+#endif
     if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1 || socket_listen(httpss,16)) {
       if (dohttps==1)
 	panic("socket_bind6_reuse");
