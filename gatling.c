@@ -1698,7 +1698,7 @@ usage:
 #ifdef SUPPORT_SMB
   if (dosmb>=0) {
     smbs=socket_tcp6();
-    socket_deferaccept(s,DATAIN);
+    socket_deferaccept(smbs,DATAIN);
     if (socket_bind6_reuse(smbs,ip,sport,scope_id)==-1 || socket_listen(smbs,16)) {
       if (dosmb==1)
 	panic("socket_bind6_reuse");
@@ -1711,7 +1711,7 @@ usage:
   if (dohttps>=0) {
     httpss=socket_tcp6();
     if (ssh_timeout==0)
-      socket_deferaccept(s,DATAIN);
+      socket_deferaccept(httpss,DATAIN);
     if (socket_bind6_reuse(httpss,ip,httpsport,scope_id)==-1 || socket_listen(httpss,16)) {
       if (dohttps==1)
 	panic("socket_bind6_reuse");
