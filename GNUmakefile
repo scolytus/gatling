@@ -8,9 +8,10 @@ man1dir=$(MANDIR)/man1
 TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling \
 pthreadbench cgi
 TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
-
-all: $(TARGETS) acc hcat referrer hitprofile matchiprange getlinks \
+ALLTARGETS=$(TARGETS) acc hcat referrer hitprofile matchiprange getlinks \
 rellink $(TARGETS2)
+
+all: $(ALLTARGETS)
 
 CROSS=
 #CROSS=i686-mingw32-
@@ -133,7 +134,7 @@ libcrypt: trycrypt.c
 
 md5lib: trymd5.c
 	if $(CC) $(CFLAGS) -o trymd5 trymd5.c >/dev/null 2>&1; then echo ""; else \
-	if $(CC) $(CFLAGS) -o trymd5 trymd5.c -lmd >/dev/null 2>&1; then echo "-lmd"; \
+	if $(CC) $(CFLAGS) -o trymd5 trymd5.c -lmd >/dev/null 2>&1; then echo "-lmd"; else \
 	if $(CC) $(CFLAGS) -o trymd5 trymd5.c -lcrypto >/dev/null 2>&1; then echo "-lcrypto"; \
 	fi; fi; fi > md5lib
 	rm -f trymd5
@@ -164,7 +165,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1 $(DESTDIR)$(man1dir)/bench.1
 
 clean:
-	rm -f $(TARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib
+	rm -f $(ALLTARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib
 
 VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
 CURNAME=$(notdir $(shell pwd))
