@@ -62,7 +62,7 @@ CFLAGS+="-DREDIRECT=\"$(REDIRECT)\""
 endif
 
 acc: acc.c
-	$(CC) -o $@ $< $(CFLAGS) $(LDFLAGS)
+	$(CC) -o $@ $< $(CFLAGS) $(LDFLAGS) -lowfat
 
 CC:=$(DIET) $(CC)
 
