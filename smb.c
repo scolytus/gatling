@@ -1027,13 +1027,13 @@ outofmemory:
     globlatin1=alloca(l+1);
     if (utf16tolatin1(globlatin1,l-i+1,filename,(l+1)*2)) {
       globlatin1=0;
-      puts("could not convert glob expression to latin1!");
+//      puts("could not convert glob expression to latin1!");
     } // else
 //      printf("glob expression \"%s\"\n",globlatin1);
     globutf8=alloca((l+1)*3);
     if (utf16toutf8(globutf8,(l+1)*3,filename,(l+1)*3)) {
       globutf8=0;
-//      puts("could not convert glob expression to utf-8!");
+ //     puts("could not convert glob expression to utf-8!");
     }
     if (globlatin1 && globutf8 && !strcmp(globutf8,globlatin1)) globutf8=0;
     if (!globlatin1 && !globutf8)
@@ -1050,11 +1050,15 @@ outofmemory:
 
       while ((de=readdir(d))) {
 
-	if (de->d_type!=DT_DIR && de->d_type!=DT_REG) continue;
+	if (de->d_type!=DT_DIR && de->d_type!=DT_REG && de->d_type!=DT_LNK) continue;
 	if (de->d_type==DT_DIR && !(attr&0x10)) continue;
 
 	if (de->d_name[0]=='.') continue;
 	if (de->d_name[0]==':') de->d_name[0]='.';
+//	if (globlatin1)
+//	  printf("matching %s vs %s\n",globlatin1,de->d_name);
+//	if (globutf8)
+//	  printf("matching %s vs %s\n",globutf8,de->d_name);
 	if ((globlatin1 && !fnmatch(globlatin1,de->d_name,0)) ||
 	    (globutf8 && !fnmatch(globutf8,de->d_name,0))) {
 	  if (stat(de->d_name,&ss)==-1) continue;
@@ -1123,6 +1127,7 @@ outofmemory:
 	}
       }
       closedir(d);
+      if (!searchcount) goto filenotfound;
       if (trans2) {
 	uint16_pack(trans2+3,cur-base);
 	uint16_pack(trans2+9,trans2+20-sr->buf);
