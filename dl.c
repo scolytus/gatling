@@ -1357,6 +1357,7 @@ skipdownload:
 		"1__\x00\x00";
       size_t rest;
       size_t gotten;
+      unsigned long long curofs=resumeofs;
       int nextwritten=0;
       int64 d;
       uint16_pack(req+4+0x1c,uid);
@@ -1370,13 +1371,13 @@ skipdownload:
 	dostats=!isatty(1);
       }
       total=filesize-resumeofs;
-      while (resumeofs<filesize) {
+      while (curofs<filesize) {
 	size_t dataofs;
 
 	uint16_pack(req+30+4,++mid);
 	uint32_pack(req+8+33+2,resumeofs&0xffffffff);
 	uint32_pack(req+8+49,resumeofs>>32);
-	rest=(filesize-resumeofs>readsize)?readsize:filesize-resumeofs;
+	rest=(filesize-curofs>readsize)?readsize:filesize-curofs;
 	uint16_pack(req+8+33+2+4,rest);
 	uint16_pack(req+8+33+2+6,rest);
 	uint16_pack(req+8+47,rest);
@@ -1396,12 +1397,12 @@ skipdownload:
 	if (gotten<rest) break;	// someone truncated the file while we read?
 
 	/* pipeline next read request */
-	resumeofs+=gotten;
-	if (resumeofs<filesize) {
+	curofs+=gotten;
+	if (curofs<filesize) {
 	  uint16_pack(req+30+4,mid+1);
-	  uint32_pack(req+8+33+2,resumeofs&0xffffffff);
-	  uint32_pack(req+8+49,resumeofs>>32);
-	  rest=(filesize-resumeofs>readsize)?readsize:filesize-resumeofs;
+	  uint32_pack(req+8+33+2,curofs&0xffffffff);
+	  uint32_pack(req+8+49,curofs>>32);
+	  rest=(filesize-curofs>readsize)?readsize:filesize-curofs;
 	  uint16_pack(req+8+33+2+4,rest);
 	  uint16_pack(req+8+33+2+6,rest);
 	  uint16_pack(req+8+47,rest);
