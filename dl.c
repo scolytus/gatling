@@ -305,7 +305,7 @@ struct utimbuf u;
 
 char* location;
 
-static int readanswer(int s,const char* filename,const char* curdomain,int onlyprintlocation) {
+static int readanswer(int s,const char* filename,const char* curdomain,int onlyprintlocation,uint16_t port) {
   char buf[8192];
   int i,j,body=-1,r;
   int64 d;
@@ -344,7 +344,17 @@ static int readanswer(int s,const char* filename,const char* curdomain,int onlyp
 	      location=l;
 	      while (*l && *l != '\r' && *l != '\n') ++l;
 	      *l=0;
-	      location=strndup(location,l-location);
+	      if (*location=='/') {
+		char portbuf[FMT_ULONG];
+		l=location;
+		/* *sigh* relative redirect, take parts from old url */
+		location=malloc(l-location+strlen(curdomain)+100);
+		if (location) {
+		  portbuf[fmt_ulong(portbuf,port)]=0;
+		  location[fmt_strm(location,"http://",curdomain,":",portbuf,l)]=0;
+		}
+	      } else
+		location=strndup(location,l-location);
 	      return -2;
 	    }
 	    return -1;
@@ -824,7 +834,7 @@ again:
   }
   if (mode==HTTP) {
     if (write(s,request,rlen)!=rlen) panic("write");
-    switch (readanswer(s,filename,host,onlyprintlocation)) {
+    switch (readanswer(s,filename,host,onlyprintlocation,port)) {
     case -1: exit(1);
     case -2: free(referer);
 	     referer=strdup(argv[optind]);
