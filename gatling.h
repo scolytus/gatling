@@ -300,4 +300,6 @@ extern int64 https_write_callback(int64 sock,const void* buf,uint64 n);
 extern int handle_ssl_error_code(int sock,int code,int reading);
 #endif
 
+extern char* magicelfvalue;
+
 #endif

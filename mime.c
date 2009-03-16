@@ -210,6 +210,8 @@ const char* find_mime_type(const char* extension,const char* filename,time_t now
   return 0;
 }
 
+char* magicelfvalue=(char*)0x23;
+
 struct mimeentry mimetab[] = {
   { "html",	"text/html" },
   { "ico",	"image/x-icon" },
@@ -315,6 +317,8 @@ const char* mimetype(const char* filename,int fd) {
       return "video/mp4";
     else if (r>=4 && byte_equal(buf,4,"\x30\x26\xb2\x75"))
       return "video/x-ms-asf";
+    else if (r>=4 && (byte_equal(buf,4,"\177ELF") || byte_equal(buf,2,"#!")))
+      return magicelfvalue;
   }
 #else
   else

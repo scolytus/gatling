@@ -7,6 +7,7 @@
   dl in http mode now supports cookies and sets the referer
   add SSH forwarding to SSL support (see README.tls)
   add matchiprange (see comment at top of matchiprange.c)
+  fix a few CGI problems report by Andreas Stuehrk
 
 0.9:
   add /server-status

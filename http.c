@@ -854,11 +854,14 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 
   if (virtual_hosts>=0)
     if (chdir(dir=s)==-1)
-      if (chdir(dir="default")==-1)
+      if (chdir(dir="default")==-1) {
 	if (virtual_hosts==1) {
 	  buffer_putsflush(buffer_2,"chdir FAILED and virtual_hosts is 1\n");
 	  return -1;
-	}
+	} else
+	  dir=".";
+      }
+  if (!dir) dir=".";
   while (Filename[1]=='/') ++Filename;
 
 #ifdef SUPPORT_HTACCESS
@@ -983,32 +986,65 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     } else
       if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
 #endif
+
+    /* For /test/t.cgi/fnord open_for_reading fails with ENOTDIR. */
     if (!open_for_reading(&fd,Filename+1,ss)) {
       if (errno==ENOENT)
 	if (http_redirect(h,Filename+1)) return -4;
+      if (errno==ENOTDIR) {
+	/* we have no choice: we need to test /test, then /test/t.cgi,
+	 * to find the actual file name.  Fortunately, the CGI code
+	 * already does that in forkslave(). */
+	/* We could take it on faith here and let the CGI code handle the
+	 * error, but that is very inefficient (one fork per 404). */
+	char* fn=alloca(strlen(Filename));
+	size_t i;
+	strcpy(fn,Filename+1);
+	for (i=0; fn[i]; ++i) {
+	  if (fn[i]=='/') {
+	    char c=fn[i];
+	    fn[i]=0;
+	    if (stat(fn,ss))
+	      break;	/* genuine 404, can't happen (should have been ENOENT and not ENOTDIR) */
+	    if (!S_ISDIR(ss->st_mode)) {	/* found first non-dir entry, hopefully our CGI */
+	      if (!(ss->st_mode&S_IROTH) || !io_readfile(&fd,fn))
+		return -1;
+	      h->mimetype=mimetype(fn,fd);
+	      fn[i]=c;
+	      goto foundcgi;
+	    }
+	    fn[i]=c;
+	  }
+	}
+      }
       return -1;
     }
     h->mimetype=mimetype(Filename,fd);
+foundcgi:
 #ifdef SUPPORT_PROXY
     if (!noproxy && (ss->st_mode&S_IXOTH)) {
       char temp[5];
-      if (pread(fd,temp,4,0)==4) {
-	if (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")) {
-	  int res;
-	  switch ((res=proxy_connection(sockfd,Filename,dir,h,1,args))) {
-	  case -2: break;
-	  case -1: return -1;
-	  default:
-	    if (res>=0) {
-	      close(fd);
-	      h->buddy=res;
-	      return -3;
-	    }
+      if (
+#ifdef SUPPORT_MIMEMAGIC
+	  /* no need to call pread twice */
+          h->mimetype==magicelfvalue ||
+#endif
+         ((pread(fd,temp,4,0)==4) && (byte_equal(temp,2,"#!") || byte_equal(temp,4,"\177ELF")))) {
+	int res;
+	switch ((res=proxy_connection(sockfd,Filename,dir,h,1,args))) {
+	case -2: break;
+	case -1: return -1;
+	default:
+	  if (res>=0) {
+	    close(fd);
+	    h->buddy=res;
+	    return -3;
 	  }
 	}
       }
     }
 #endif
+    if (h->mimetype==magicelfvalue) h->mimetype="application/octet-stream";
 #ifdef DEBUG
     if (logging) {
       buffer_puts(buffer_1,"open_file ");
@@ -2000,6 +2036,7 @@ void forkslave(int fd,buffer* in,int savedir) {
 	      /* no "/something" */
 	      pathinfo=0;
 	    else {
+	      errno=0;
 	      /* try paths */
 	      for (j=0; j<i; ++j) {
 		if (cginame[j]=='/') {
@@ -2141,7 +2178,7 @@ void forkslave(int fd,buffer* in,int savedir) {
 		    ++envc;
 
 		    envp[envc++]=httpreq[0]=='G'?"REQUEST_METHOD=GET":"REQUEST_METHOD=POST";
-		    if (pathinfo) envp[envc++]=pathinfo;
+		    if (pathinfo) envp[envc++]=fmt_strm_alloca("PATH_INFO=",pathinfo);
 		    if (path_translated) envp[envc++]=path_translated;
 
 		    envp[envc]=alloca(30+str_len(origcginame));
