@@ -76,7 +76,9 @@ https.o: http.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
 
 hitprofile.o: referrer.c
-	$(CC) -c $< -I. $(CFLAGS) -DALL
+	$(CC) -c $< -o $@ -I. $(CFLAGS) -DALL
+
+hitprofile: hitprofile.o
 
 tlsgatling: gatling.c ssl.o version.h gatling.h libsocket libiconv libcrypt $(HTTPS_OBJS)
 	-$(CC) -o $@ $(CFLAGS) gatling.c ssl.o $(HTTPS_OBJS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS) `cat libsocket libiconv libcrypt`
