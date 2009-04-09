@@ -36,6 +36,7 @@
 #include "havealloca.h"
 #include <assert.h>
 #include <ctype.h>
+#include <string.h>
 
 int dostats;
 
