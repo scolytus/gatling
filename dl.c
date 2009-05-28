@@ -544,7 +544,7 @@ int main(int argc,char* argv[]) {
   int imode=0;
   int onlyprintlocation=0;
   char ip[16];
-  uint16 port=80;
+  uint16 port=80, proxyport=80, connport=0;
   uint32 scope_id=0;
   stralloc ips={0};
   int s;
@@ -558,7 +558,7 @@ int main(int argc,char* argv[]) {
   enum {HTTP, FTP, SMB} mode;
   int skip;
   buffer ftpbuf;
-  char* host;
+  char* host,* proxyhost=0,* connhost=0;
 
 #if 0
   addcookie("Set-cookie: RMID=0478b6d1254f4816a29724b0; expires=Wednesday, 29-Apr-2009 04:22:47 GMT; path=/; domain=.nytimes.com\r\n","www.nytimes.com");
@@ -674,9 +674,31 @@ again:
       port=445;
     } else {
       mode=FTP;
+      proxyhost=getenv("ftp_proxy");
       port=21;
     }
+  } else
+    proxyhost=getenv("ftp_proxy");
+
+  /* do we have a proxy? */
+  if (proxyhost && !connhost) {
+    size_t i;
+    /* expect format "http://localhost:3128" */
+    if (byte_equal(proxyhost,7,"http://")) proxyhost+=7;
+    i=str_chr(proxyhost,'/');
+    if (proxyhost[i]=='/') proxyhost[i]=0;
+    i=str_rchr(proxyhost,':');
+    if (proxyhost[i]!=':' ||
+        proxyhost[i+1+scan_ushort(proxyhost+i+1,&proxyport)]) {
+      buffer_putsflush(buffer_2,"invalid proxy environment syntax\n");
+      return 1;
+    }
+    proxyhost[i]=0;
+    connhost=proxyhost;
+    connport=proxyport;
+    mode=HTTP;
   }
+
   {
     int colon;
     int slash;
@@ -722,19 +744,24 @@ again:
       }
     }
 
+    if (!proxyhost) {
+      connhost=host;
+      connport=port;
+    }
+
     {
       struct addrinfo hints, *ai, *aitop;
       int gaierr;
       char p[FMT_ULONG];
-      p[fmt_ulong(p,port)]=0;
+      p[fmt_ulong(p,connport)]=0;
       memset(&hints,0,sizeof(hints));
       hints.ai_family=AF_UNSPEC;
       hints.ai_flags=0;
       hints.ai_socktype=0;
       if (verbose) buffer_putsflush(buffer_1,"DNS lookup... ");
-      if ((gaierr = getaddrinfo(host,p,&hints,&aitop)) != 0 || !aitop) {
+      if ((gaierr = getaddrinfo(connhost,p,&hints,&aitop)) != 0 || !aitop) {
 	buffer_puts(buffer_2,"dl: could not resolve IP: ");
-	buffer_puts(buffer_2,host);
+	buffer_puts(buffer_2,connhost);
 	buffer_putnlflush(buffer_2);
 	return 1;
       }
@@ -777,6 +804,7 @@ again:
     if (mode==HTTP) {
       size_t cookielen=fmt_cookies(0,host,c);
       size_t referlen=referer?str_len(referer)+20:0;
+      if (proxyhost) c=argv[optind];
       request=malloc(300+str_len(host)+3*str_len(c)+str_len(useragent)+referlen+cookielen);
 
       if (!request) panic("malloc");
@@ -828,10 +856,10 @@ again:
 	buffer_puts(buffer_1,"connecting to ");
 	buffer_put(buffer_1,buf,fmt_ip6c(buf,ips.s+i));
 	buffer_puts(buffer_1," port ");
-	buffer_putulong(buffer_1,port);
+	buffer_putulong(buffer_1,connport);
 	buffer_putnlflush(buffer_1);
       }
-      s=make_connection(ips.s+i,port,scope_id);
+      s=make_connection(ips.s+i,connport,scope_id);
       if (s!=-1) {
 	byte_copy(ip,16,ips.s+i);
 	break;
