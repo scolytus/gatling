@@ -1233,7 +1233,11 @@ int main(int argc,char* argv[],char* envp[]) {
 	  buffer fsb;
 #ifndef __MINGW32__
 	  if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
-	  if (new_uid) prepare_switch_uid(new_uid);
+	  if (new_uid) {
+	    prepare_switch_uid(new_uid);
+	    if (switch_uid()==-1)
+	      panic("switch_uid");
+	  }
 #endif
 	  if (!io_readfile(&savedir,".")) panic("open()");
 	  buffer_init(&fsb,(void*)read,forksock[1],fsbuf,sizeof fsbuf);
