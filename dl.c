@@ -39,6 +39,7 @@
 #include <string.h>
 
 int dostats;
+int dosync;
 
 char* todel;
 
@@ -72,7 +73,7 @@ static unsigned long long resumeofs;
 
 static int statsprinted;
 
-void printstats(unsigned long long nextchunk) {
+void printstats(unsigned long long nextchunk,int fd) {
   static unsigned long long int finished;
   static struct timeval start,now,prev;
   finished+=nextchunk;
@@ -85,6 +86,8 @@ void printstats(unsigned long long nextchunk) {
     char received[FMT_ULONG], totalsize[FMT_ULONG], timedone[FMT_ULONG], percent[10];
     char speed[FMT_ULONG+20];
     size_t i,j;
+    if (dosync) fsync(fd);
+    if (!dostats) return;
     if (total) {
       if (total>1000000000)
 	i=finished/(total/10000);
@@ -402,7 +405,7 @@ kaputt:
   }
   total=rest;
   rest-=(r-body);
-  printstats(total-rest);
+  printstats(total-rest,d);
   while (nocl || rest) {
     r=read(s,buf,nocl?sizeof(buf):(rest>sizeof(buf)?sizeof(buf):rest));
     if (r<1) {
@@ -416,7 +419,7 @@ kaputt:
 	return -1;
       }
     } else {
-      printstats(r);
+      printstats(r,d);
       if (write(d,buf,r)!=r)
 	panic("write");
       rest-=r;
@@ -580,7 +583,7 @@ int main(int argc,char* argv[]) {
 #endif
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:l");
+    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:ls");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -622,6 +625,9 @@ int main(int argc,char* argv[]) {
     case 'l':
       onlyprintlocation=1;
       break;
+    case 's':
+      dosync=1;
+      break;
     case 'a':
 #ifndef __MINGW32__
       {
@@ -645,6 +651,7 @@ usage:
 		       "	-U s	set User-Agent HTTP header\n"
 		       "	-R s	set Referer HTTP header\n"
 		       "	-l	just print value of Location: header\n"
+		       "	-s	sync after local write\n"
 		       "	-v	be verbose\n");
       return 0;
     }
@@ -1075,7 +1082,7 @@ tryv4:
 	dostats=!isatty(1);
       }
       while ((l=read(dataconn,buf,sizeof buf))>0) {
-	if (dostats) printstats(l);
+	printstats(l,d);
 	if (d==1) {
 	  unsigned int i,j;
 	  for (i=j=0; i<l; ++i)
@@ -1423,7 +1430,7 @@ skipdownload:
 
 	if (buffer_get(&ib,readbuf+0x20+12*2+3,wanted-(0x20+12*2+3))!=wanted-(0x20+12*2+3)) panic("ReadFile response short read\n");
 	if (write(d,readbuf+dataofs,gotten)!=gotten) panic("short write.  disk full?\n");
-	if (dostats) printstats(gotten);
+	printstats(gotten,d);
       }
 
       io_close(d);
