@@ -506,7 +506,7 @@ static int prepare_switch_uid(const char* new_uid) {
   return 0;
 }
 
-static int switch_uid() {
+int switch_uid() {
 #ifdef LIBC_HAS_SETRESUID
   if (setresgid(__gid,__gid,__gid)) return -1;
   if (setgroups(1,&__gid)) return -1;
@@ -1235,8 +1235,6 @@ int main(int argc,char* argv[],char* envp[]) {
 	  if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
 	  if (new_uid) {
 	    prepare_switch_uid(new_uid);
-	    if (switch_uid()==-1)
-	      panic("switch_uid");
 	  }
 #endif
 	  if (!io_readfile(&savedir,".")) panic("open()");

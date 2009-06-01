@@ -1906,6 +1906,7 @@ int cgienvneeded(const char* httpreq,size_t reqlen) {
   return envc;
 }
 
+extern int switch_uid();
 
 void forkslave(int fd,buffer* in,int savedir) {
   /* receive query, create socketpair, fork, set up environment,
@@ -2278,7 +2279,8 @@ void forkslave(int fd,buffer* in,int savedir) {
 			chdir(path);
 			cginame=file;
 		      }
-		      execve(cginame,argv,envp);
+		      if (switch_uid()==0)
+			execve(cginame,argv,envp);
 		    }
 		  }
 		  {

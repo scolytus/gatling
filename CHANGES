@@ -1,3 +1,7 @@
+0.11:
+  add proxy support to dl ($http_proxy and $ftp_proxy like libwww)
+  setuid in the forkslave, too
+
 0.10:
   add multi-ranges (only used by the Acrobat Reader plugin AFAIK)
   abstract out accept() deferment to libowfat (socket_deferaccept)
@@ -8,7 +12,6 @@
   add SSH forwarding to SSL support (see README.tls)
   add matchiprange (see comment at top of matchiprange.c)
   fix a few CGI problems report by Andreas Stuehrk
-  add proxy support to dl ($http_proxy and $ftp_proxy like libwww)
 
 0.9:
   add /server-status
