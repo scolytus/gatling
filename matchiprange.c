@@ -108,7 +108,6 @@ kaputt:
       if (whined != lineno-1) {
 	char linenoasc[10];
 	linenoasc[fmt_ulong(linenoasc,lineno)]=0;
-	whined=lineno;
 	carp("parse error on line ",linenoasc);
       }
       whined=lineno;

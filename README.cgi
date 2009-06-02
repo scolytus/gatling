@@ -15,6 +15,6 @@ You can also tell gatling to consider all executable files CGI programs:
 Then, even index.html will be run as CGI if it is executable, allowing
 for example a dynamically generated homepage on http://example.com/
 without index.html having to do a lame redirect.  In this mode, gatling
-will to a primitive check and only run CGIs that have the ELF magic
+will do a primitive check and only run CGIs that have the ELF magic
 (i.e. look like an ELF binary) or the Shebang (#!, i.e. look like a
 shell/perl/whatever script).

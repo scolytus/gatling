@@ -428,7 +428,8 @@ nomem:
       if (name[1]==0) continue; /* skip "." */
       if (name[1]!='.' || name[2]!=0)	/* skip dot-files */
 	continue;
-    }
+    } else if (name[0]==':')
+      name[0]='.';
     if (_long)
       ftp_ls(&c,name,&ab[i].ss,now,pathprefix);
     else {

@@ -69,7 +69,7 @@ int canonpath(char* s) {
       } else
 	c=':';
     }
-    if (!(s[j]=s[i])) break; ++j;
+    if (!(s[j]=c)) break; ++j;
   }
   if (j && s[j-1]=='/') --j;
   if (!j) { s[0]='/'; j=1; }

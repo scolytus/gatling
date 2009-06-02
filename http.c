@@ -224,7 +224,7 @@ int add_proxy(const char* c) {
 }
 
 int buffer_putlogstr(buffer* b,const char* s) {
-  unsigned long l=str_len(s);
+  unsigned long l;
   char* x;
   for (l=0; s[l] && s[l]!='\r' && s[l]!='\n'; ++l) ;
   if (!l) return 0;
@@ -413,7 +413,7 @@ punt2:
 
       {
 	char* cl=http_header(ctx_for_sockfd,"Content-Length");
-	unsigned long long content_length;
+	unsigned long long content_length=0;
 	if (cl) {
 	  char c;
 	  if ((c=cl[scan_ulonglong(cl,&content_length)])!='\r' && c!='\n') content_length=0;
@@ -546,7 +546,7 @@ int proxy_write_header(int sockfd,struct http_data* h) {
 	                   "\x00\x01\x00\x00\x00\x00\x00\x00" /* FCGI_BeginRequestBody */
 			   "\x01\x04\x00\x01\x00\x00\x00\x00" /* fcgirecord: FCGI_PARAMS */
 			   );
-    i=24;
+    j=24;
 
 #if 0
      {FCGI_PARAMS,          1, "\013\002SERVER_PORT80\013\016SERVER_ADDR199.170.183.42 ... "}
@@ -2132,7 +2132,6 @@ void forkslave(int fd,buffer* in,int savedir) {
 		  msg="vfork failed!";
 		else if (r==0) {
 		  /* child */
-		  int plusx=0;
 		  pid_t pid;
 		  close(savedir);
 		  code=0;
@@ -2146,7 +2145,6 @@ void forkslave(int fd,buffer* in,int savedir) {
 		    j+=fmt_str(temp+j,"index.html");
 		    temp[j]=0;
 		    cginame=temp;
-		    plusx=1;
 		  }
 		  if (io_passfd(fd,sock[0])==0) {
 		    char* argv[]={cginame,0};

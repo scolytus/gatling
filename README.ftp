@@ -6,8 +6,9 @@ worse for FTP than it is for HTTP.  I'm not going to waste my time on
 this for now.  Please ask itojun himself to prove how "easy" or even
 "trivial" it is to do this, as he always claims it is.
 
-Like HTTP will try to bind to port 80 and 8000, FTP will try binding to
-port 21 and 2121.  To specify the FTP port, use -f -p [port].  Example:
+Like HTTP will bind to port 80 if running as root, or 8000 otherwise,
+FTP will bind to port 21 and 2121.  To specify the FTP port, use
+-f -p [port].  Example:
 
   gatling -p 81 -f -p 2100
 

@@ -84,10 +84,10 @@ static char* mmap_read_stat(const char* filename,struct stat* ss) {
 }
 
 static int stralloc_istag(stralloc* sa,const char* in) {
-  char* a,* b;
+  char* a;
   int l;
   l=strlen(in);
-  a=sa->s; b=sa->s+sa->len;
+  a=sa->s;
   if (sa->len<l+2) return 0;
   if (*a != '<') return 0;
   ++a;

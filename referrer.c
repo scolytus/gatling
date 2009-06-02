@@ -75,7 +75,7 @@ void sortbycount(struct node** N) {
 int main() {
   char line[8192];
   char* dat;
-  char* timestamp;
+//  char* timestamp;
   while (fgets(line,sizeof(line),stdin)) {
     int tslen;
     /* chomp */
@@ -104,10 +104,10 @@ int main() {
     if (tslen) {
       dat=line+tslen+1;
       line[tslen]=0;
-      timestamp=line;
+//      timestamp=line;
     } else {
       dat=line;
-      timestamp="";
+//      timestamp="";
     }
     /* element two is the unique key */
     {

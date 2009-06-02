@@ -1,6 +1,6 @@
 gatling is a non-forking HTTP server.
-It tries to listen to port 80, and if that fails, it tries to listen to
-port 8000.  You can specify the port with -p, i.e.
+It listens on port 80 when running as root, or port 8000 otherwise.
+You can specify the port with -p, i.e.
 
   gatling -p 81
 

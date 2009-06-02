@@ -1188,7 +1188,7 @@ static int smb_handle_QueryDiskInfo(unsigned char* c,size_t len,struct smb_respo
     uint16_pack(buf+7,k>>i);
     if (i<9+15) {
       uint16_pack(buf+5,1<<9);
-      uint16_pack(buf+3,1<<(i-9));
+      uint16_pack(buf+3,(i<9)?1:(1<<(i-9)));
     } else {
       uint16_pack(buf+5,1<<15);
       uint16_pack(buf+3,1<<(i-15));

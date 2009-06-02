@@ -52,10 +52,8 @@ static void afree(struct arena* a,void* x) {
 static void free_arena(struct arena* a) {
   for (; a; a=a->next) {
     unsigned int i;
-    struct arena* x;
     for (i=0; i<a->n; ++i)
       free(a->ptrs[i]);
-    x=a->next;
   }
 }
 
@@ -121,12 +119,10 @@ static struct mimeentry { const char* name, *type; }* mimetypes;
 static struct pool* mimepool;
 
 static void parse_mime_types(const char* filename) {
-  int res;
   size_t maplen;
   const char* map=mmap_read(filename,&maplen);
   unsigned int allocated=0,used=0;
   struct mimeentry* nmt=0;
-  res=0;
   if (map) {
     const char* mimetype;
     const char* extension;
