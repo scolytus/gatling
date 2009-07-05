@@ -164,11 +164,19 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     array_cats(&c,"<tr><td><a href=\"");
     catencoded(&c,base+ab[i].name);
     if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
+#ifndef __MINGW32__
+    else if (S_ISLNK(ab[i].ss.st_mode)) {
+      struct stat s;
+      if (stat(name,&s)!=-1) {
+	if (S_ISDIR(s.st_mode)) array_cats(&c,"/");
+      }
+    }
+#endif
     array_cats(&c,"\">");
     cathtml(&c,base+ab[i].name);
-    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/"); else
+    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
 #ifndef __MINGW32__
-    if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@");
+    else if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@");
 #endif
     array_cats(&c,"</a><td>");
 
