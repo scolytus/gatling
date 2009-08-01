@@ -109,6 +109,12 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     if (stat(d->d_name,&x->ss)==-1) continue;
 #else
     if (lstat(d->d_name,&x->ss)==-1) continue;
+    if (S_ISLNK(x->ss.st_mode)) {
+      struct stat tmp;
+      if (stat(d->d_name,&tmp)==0)
+	if (S_ISDIR(tmp.st_mode))
+	  x->todir=1;
+    }
 #endif
     array_cats0(&b,d->d_name);
     o+=str_len(d->d_name)+1;
@@ -163,21 +169,13 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     if (name[0]==':') name[0]='.';
     array_cats(&c,"<tr><td><a href=\"");
     catencoded(&c,base+ab[i].name);
-    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
-#ifndef __MINGW32__
-    else if (S_ISLNK(ab[i].ss.st_mode)) {
-      struct stat s;
-      if (stat(name,&s)!=-1) {
-	if (S_ISDIR(s.st_mode)) array_cats(&c,"/");
-      }
-    }
-#endif
+    if (S_ISDIR(ab[i].ss.st_mode) || ab[i].todir) array_cats(&c,"/");
     array_cats(&c,"\">");
     cathtml(&c,base+ab[i].name);
-    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
 #ifndef __MINGW32__
-    else if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@");
+    if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@"); else
 #endif
+    if (S_ISDIR(ab[i].ss.st_mode)) array_cats(&c,"/");
     array_cats(&c,"</a><td>");
 
     j=fmt_2digits(buf,x->tm_mday);
@@ -243,6 +241,7 @@ int buffer_putlogstr(buffer* b,const char* s) {
 static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* ctx_for_sockfd,int isexec,const char* args) {
   struct cgi_proxy* x=cgis;
   struct stat ss;
+  regmatch_t matches;
 
   /* if isexec is set, we already found that .proxy is there */
   if (!isexec && stat(".proxy",&ss)==-1) return -3;
@@ -251,7 +250,8 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
       x=x->next;
       continue;
     }
-    if (x->file_executable || regexec(&x->r,c,0,0,0)==0) {
+    matches.rm_so=matches.rm_eo=0;
+    if (x->file_executable || regexec(&x->r,c,1,&matches,0)==0) {
       /* if the port is zero, then use local execution proxy mode instead */
       int fd_to_gateway;
       struct http_data* ctx_for_gatewayfd;
@@ -260,6 +260,14 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 
       if (!(ctx_for_gatewayfd=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
       byte_zero(ctx_for_gatewayfd,sizeof(struct http_data));
+
+      if (!x->file_executable) {
+	if (x->proxyproto == FASTCGI) {
+	  /* TODO */
+	}
+	printf("%u %u\n",matches.rm_so,matches.rm_eo);
+	printf("got data \"%s\"\n",c+matches.rm_eo);
+      }
 
       if (logging) {
 	char buf[IP6_FMT+10];

@@ -270,7 +270,7 @@ static int add_cgi(const char* c) {
   byte_zero(x,sizeof(struct cgi_proxy));
   if (!strcmp(c,"+x"))
     x->file_executable=1;
-  else if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) {
+  else if (regcomp(&x->r,c,REG_EXTENDED)) {
     free(x);
     return -1;
   }
@@ -1520,7 +1520,7 @@ usage:
 		  "\t-u uid\tswitch to this UID after binding\n"
 		  "\t-c dir\tchroot to dir after binding\n"
 		  "\t-n\tdo not produce logging output\n"
-		  "\t-f\tprovide FTP; next -p is meant for the FTP port (default: 21)\n"
+		  "\t-f\tprovide FTP (default); next -p is meant for the FTP port (default: 21)\n"
 		  "\t-F\tdo not provide FTP\n"
 		  "\t-U\tdisallow FTP uploads, even to world writable directories\n"
 		  "\t-a\tchmod go+r uploaded files, so they can be downloaded immediately\n"
@@ -1533,13 +1533,14 @@ usage:
 #endif
 #ifdef SUPPORT_CGI
 		  "\t-C regex\tregex for local CGI execution (\"\\.cgi\")\n"
+		  "\t\tuse -C+x to assume executables are CGIs\n"
 #endif
 #ifdef SUPPORT_PROXY
 		  "\t-O [flag]/ip/port/regex\tregex for proxy mode (\"F/127.0.0.1/8001/\\.jsp$\")\n"
 		  "\t\tflags: F - FastCGI mode, J - JSP mode\n"
 #endif
 #ifdef SUPPORT_SMB
-		  "\t-s\tprovide SMB service\n"
+		  "\t-s\tprovide SMB service (default)\n"
 		  "\t-S\tdo not provide SMB service\n"
 		  "\t-w name\tset SMB workgroup\n"
 #endif
@@ -1648,7 +1649,7 @@ usage:
       panic("socket_bind4_reuse");
 #ifdef SUPPORT_FTP
     if (doftp>=0)
-      if (socket_bind4_reuse(f4,ip+12,port)==-1 || socket_listen(f4,16)==-1) {
+      if (socket_bind4_reuse(f4,ip+12,fport)==-1 || socket_listen(f4,16)==-1) {
 	if (doftp==1)
 	  panic("socket_bind4_reuse");
 	buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");
@@ -1666,7 +1667,7 @@ usage:
     s4=-1;
 #ifdef SUPPORT_FTP
     if (doftp>=0)
-      if (socket_bind6_reuse(f,ip,port,scope_id)==-1 || socket_listen(f,16)==-1) {
+      if (socket_bind6_reuse(f,ip,fport,scope_id)==-1 || socket_listen(f,16)==-1) {
 	if (doftp==1)
 	  panic("socket_bind6_reuse");
 	buffer_putsflush(buffer_2,"warning: could not bind to FTP port; FTP will be unavailable.\n");

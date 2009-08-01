@@ -185,6 +185,7 @@ extern int64 origdir;
 typedef struct de {
   long name;	/* offset within b */
   struct stat ss;
+  int todir;
 } de;
 extern char* base;
 
