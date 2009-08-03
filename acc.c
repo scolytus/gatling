@@ -47,7 +47,7 @@ static int cmp3(const char* a, const char* b) {
 #if defined(__i386__) || defined(__x86_64__)
   return a[0]==b[0] && a[1]==b[1] && a[2]==b[2];
 #else
-  return ((*(uint32_t*)a ^ *(uint32_t*)b) & 0xffffff) == 0
+  return ((*(uint32_t*)a ^ *(uint32_t*)b) & 0xffffff) == 0;
 #endif
 }
 
