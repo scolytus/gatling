@@ -333,6 +333,7 @@ void cleanup(int64 fd) {
       buddyfd=-1;
     }
 #endif
+    if (h->filefd!=-1) io_close(h->filefd);
     array_reset(&h->r);
     iob_reset(&h->iob);
 #ifdef SUPPORT_FTP
