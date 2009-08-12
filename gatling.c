@@ -1902,7 +1902,7 @@ usage:
 	next.sec.x += timeout_secs;
 	byte_copy(&nextftp,sizeof(now),&now);
 	nextftp.sec.x += ftptimeout_secs;
-#ifdef SUPPORT_HTTPS
+#if defined(SUPPORT_HTTPS) && !defined(SUPPORT_MULTIPROC)
 	if (ssh_timeout) {
 	  byte_copy(&nexthttps,sizeof(now),&now);
 	  nexthttps.sec.x += ssh_timeout;
@@ -1913,7 +1913,7 @@ usage:
 	++tick.sec.x;
 	while ((i=io_timeouted())!=-1) {
 	  struct http_data* x;
-#ifdef SUPPORT_HTTPS
+#if defined(SUPPORT_HTTPS) && !defined(SUPPORT_MULTIPROC)
 	  if (ssh_timeout && (x=io_getcookie(i)) && x->t == HTTPSACCEPT) {
 	    if (logging) {
 	      char numbuf[FMT_ULONG];
