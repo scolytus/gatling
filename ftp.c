@@ -828,7 +828,23 @@ void handle_read_ftppassive(int64 i,struct http_data* H) {
   struct http_data* h;
   int n;
   h=io_getcookie(H->buddy);
-  assert(h);
+  if (!h) {
+    /* This used to be an assert() but it turns out it can be triggered.
+     * I can't actually reproduce this but I think it happens if someone
+     * does PASV and sends the connection but then drops the control
+     * connection and we get that drop event before we get the read
+     * event here signalling the incoming connection.  Now, if this
+     * happens, just drop everything.  We got conned. */
+    if (logging) {
+      buffer_puts(buffer_1,"pasv_accept_without_buddy ");
+      buffer_putulong(buffer_1,i);
+      buffer_puts(buffer_1,"\nclose/statefail ");
+      buffer_putulong(buffer_1,i);
+      buffer_putnlflush(buffer_1);
+    }
+    cleanup(i);
+    return;
+  }
   n=socket_accept6(i,H->myip,&H->myport,&H->myscope_id);
   if (n==-1) {
 pasverror:
