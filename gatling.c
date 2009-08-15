@@ -1022,12 +1022,14 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 #ifdef SUPPORT_FTP
       if (h->t==FTPSLAVE || h->t==FTPACTIVE) {
 	struct http_data* b=io_getcookie(h->buddy);
-	assert(b);
 	if (b) {
 	  b->buddy=-1;
 	  iob_reset(&b->iob);
 	  iob_adds(&b->iob,"554 socket error.\r\n");
 	  io_wantwrite(h->buddy);
+	} else {
+	  /* Apparently the main control connection already died.
+	   * Nothing more to do here except clean up. */
 	}
       }
 #endif
