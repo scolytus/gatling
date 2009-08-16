@@ -666,6 +666,14 @@ again:
     static int redirects=0;
     if (++redirects>5) panic("too many redirects!\n");
   }
+
+  {	// unescape url
+    size_t i,j;
+    i=scan_urlencoded2(argv[optind],argv[optind],&j);
+    if (argv[optind][i]) panic("invalid urlencoding in url!\n");
+    argv[optind][j]=0;
+  }
+
   mode=HTTP;
   if (byte_diff(argv[optind],skip=7,"http://")) {
     if (byte_diff(argv[optind],skip=6,"ftp://")) {
