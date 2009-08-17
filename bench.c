@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <buffer.h>
 #include <fcntl.h>
+#include "havealloca.h"
 
 void usage() {
   die(0,"usage: bench [-n requests] [-c concurrency] [-t timeout] [-k] [-K count]\n"

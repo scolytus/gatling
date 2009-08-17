@@ -16,6 +16,8 @@ LDFLAGS=-s -L../libowfat/ -lowfat
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
 HTTPS_OBJS=mime.o ftp.o https.o smb.o common.o connstat.o
 
+$(OBJS) https.o gatling.o: gatling.h version.h gatling_features.h
+
 gatling: gatling.o $(OBJS) libsocket libiconv libcrypt md5lib
 	$(CC) -o $@ gatling.o $(OBJS) $(LDFLAGS) `cat libsocket libiconv libcrypt md5lib`
 
@@ -143,3 +145,13 @@ cakey.pem: cakey.key cakey.csr
 
 server.pem: cakey.key cakey.pem
 	cat cakey.key cakey.pem > server.pem
+
+havealloca.h: tryalloca.c
+	-rm -f $@
+	echo "#include <stdlib.h>" > $@
+	if $(DIET) $(CC) $(CFLAGS) -c tryalloca.c -DA >/dev/null 2>&1; then echo "#include <alloca.h>"; fi >> $@
+	if $(DIET) $(CC) $(CFLAGS) -c tryalloca.c -DB >/dev/null 2>&1; then echo "#include <malloc.h>"; fi >> $@
+	-rm -f tryalloca.o
+
+bench.o bindbench.o common.o dl.o ftp.o gatling.o getlinks.o http.o \
+httpbench.o ioerr.o rellink.o smb.o torrent.o: havealloca.h

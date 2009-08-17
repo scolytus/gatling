@@ -35,9 +35,7 @@
 #include <sys/socket.h>
 #include <limits.h>
 
-#ifdef __GLIBC__
-#include <alloca.h>
-#endif
+#include "havealloca.h"
 
 MD5_CTX md5_ctx;
 
@@ -202,6 +200,15 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
   return 1;
 }
 
+int buffer_putlogstr(buffer* b,const char* s) {
+  unsigned long l;
+  char* x;
+  for (l=0; s[l] && s[l]!='\r' && s[l]!='\n'; ++l) ;
+  if (!l) return 0;
+  x=alloca(l);
+  return buffer_put(b,x,fmt_foldwhitespace(x,s,l));
+}
+
 #ifdef SUPPORT_PROXY
 int add_proxy(const char* c) {
   struct cgi_proxy* x=malloc(sizeof(struct cgi_proxy));
@@ -227,15 +234,6 @@ int add_proxy(const char* c) {
   else
     last->next=x; last=x;
   return 0;
-}
-
-int buffer_putlogstr(buffer* b,const char* s) {
-  unsigned long l;
-  char* x;
-  for (l=0; s[l] && s[l]!='\r' && s[l]!='\n'; ++l) ;
-  if (!l) return 0;
-  x=alloca(l);
-  return buffer_put(b,x,fmt_foldwhitespace(x,s,l));
 }
 
 static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* ctx_for_sockfd,int isexec,const char* args) {
@@ -265,8 +263,8 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 	if (x->proxyproto == FASTCGI) {
 	  /* TODO */
 	}
-	printf("%u %u\n",matches.rm_so,matches.rm_eo);
-	printf("got data \"%s\"\n",c+matches.rm_eo);
+//	printf("%u %u\n",matches.rm_so,matches.rm_eo);
+//	printf("got data \"%s\"\n",c+matches.rm_eo);
       }
 
       if (logging) {

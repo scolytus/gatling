@@ -10,6 +10,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#include "havealloca.h"
+
 size_t max_handles=100;
 
 int open_for_reading(int64* fd,const char* name,struct stat* SS) {

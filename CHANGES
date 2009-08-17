@@ -3,6 +3,7 @@
   setuid in the forkslave, too
   fix the symlink to directory entries (Olaf Dreesen)
   close ftp-uploaded files in cleanup() (Johannes Ziemke)
+  fix some bizarre ftp races that caused assertion failures (Johannes Ziemke)
 
 0.10:
   add multi-ranges (only used by the Acrobat Reader plugin AFAIK)

@@ -22,6 +22,8 @@
 
 #include <stdio.h>
 
+#include "havealloca.h"
+
 /* very offensive, I know.  The idea is that gcc evaluates this at
  * compile time if buf and x are const char.  So I'm using this instead
  * of counting the offsets manually, so you don't have to count anything

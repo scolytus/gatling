@@ -19,6 +19,8 @@
 #include <fnmatch.h>
 #include <assert.h>
 
+#include "havealloca.h"
+
 #ifdef SUPPORT_FTP
 /*
   __ _

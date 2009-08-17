@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <str.h>
 #include <textcode.h>
+#include "havealloca.h"
 
 size_t fmt_benc_string(char* dest,const char* string,size_t len) {
   size_t i;

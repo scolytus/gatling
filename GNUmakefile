@@ -78,7 +78,7 @@ gatling.o tlsgatling: havesetresuid.h
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
 HTTPS_OBJS=mime.o ftp.o https.o smb.o common.o connstat.o
 
-$(OBJS) gatling.o: gatling.h version.h gatling_features.h
+$(OBJS) https.o gatling.o: gatling.h version.h gatling_features.h
 
 tlsgatling: gatling.c ssl.o $(HTTPS_OBJS)
 	-$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
@@ -197,3 +197,13 @@ server.pem: cakey.key cakey.pem
 
 windoze:
 	$(MAKE) DIET= CROSS=i686-mingw32-
+
+havealloca.h: tryalloca.c
+	-rm -f $@
+	echo "#include <stdlib.h>" > $@
+	if $(DIET) $(CC) $(CFLAGS) -c tryalloca.c -DA >/dev/null 2>&1; then echo "#include <alloca.h>"; fi >> $@
+	if $(DIET) $(CC) $(CFLAGS) -c tryalloca.c -DB >/dev/null 2>&1; then echo "#include <malloc.h>"; fi >> $@
+	-rm -f tryalloca.o
+
+bench.o bindbench.o common.o dl.o ftp.o gatling.o getlinks.o http.o \
+httpbench.o ioerr.o rellink.o smb.o torrent.o: havealloca.h

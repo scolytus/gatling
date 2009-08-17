@@ -7,6 +7,7 @@
 #include <byte.h>
 #include <scan.h>
 #include <string.h>
+#include "havealloca.h"
 
 buffer* in;
 int ungotten=-1;

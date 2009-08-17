@@ -38,6 +38,8 @@
 #include <ctype.h>
 #include <string.h>
 
+#include "havealloca.h"
+
 int dostats;
 int dosync;
 

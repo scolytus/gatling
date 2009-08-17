@@ -359,7 +359,10 @@ size_t header_complete(struct http_data* r) {
   long i;
   long l=array_bytes(&r->r);
   const char* c=array_start(&r->r);
-  if (r->t==HTTPREQUEST || r->t==HTTPPOST
+  if (r->t==HTTPREQUEST
+#ifdef SUPPORT_PROXY
+      || r->t==HTTPPOST
+#endif
 #ifdef SUPPORT_HTTPS
       || r->t==HTTPSREQUEST || r->t==HTTPSPOST
 #endif

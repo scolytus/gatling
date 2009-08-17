@@ -136,7 +136,9 @@ struct http_data {
 #endif
   uint64 sent_until,prefetched_until;
 #ifdef SUPPORT_PROXY
+#ifdef SUPPORT_PROXY
   enum proxyprotocol proxyproto;
+#endif
   unsigned long long still_to_copy;	/* for POST/PUT requests */
   int havefirst;	/* first read contains cgi header */
   char* oldheader;	/* old, unmodified request */
@@ -226,7 +228,9 @@ struct cgi_proxy {
   uint16 port;
   uint32 scope_id;
   struct cgi_proxy* next;
+#ifdef SUPPORT_PROXY
   enum proxyprotocol proxyproto;
+#endif
 };
 extern struct cgi_proxy* last,* cgis;
 extern char** _envp;
