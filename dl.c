@@ -40,6 +40,16 @@
 
 #include "havealloca.h"
 
+#ifndef __linux__
+char *strndup(const char *s,size_t n) {
+  char *tmp=!(n+1)?0:(char *)malloc(n+1);
+  if (!tmp) return 0;
+  strncpy(tmp,s,n);
+  tmp[n]=0;
+  return tmp;
+}
+#endif
+
 int dostats;
 int dosync;
 
