@@ -254,6 +254,7 @@ struct mimeentry mimetab[] = {
   { "mp4",	"video/mp4" },
   { "m4a",	"audio/mp4" },
   { "nzb",	"application/x-nzb" },
+  { "ogv",	"video/ogg" },
   { 0 } };
 
 const char* mimetype(const char* filename,int fd) {
