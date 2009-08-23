@@ -554,6 +554,7 @@ int main(int argc,char* argv[]) {
   int resume=0;
   int keepalive=0;
   int imode=0;
+  int longlist=0;
   int onlyprintlocation=0;
   char ip[16];
   uint16 port=80, proxyport=80, connport=0;
@@ -595,7 +596,7 @@ int main(int argc,char* argv[]) {
 #endif
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:ls");
+    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:lsL");
     if (c==-1) break;
     switch (c) {
     case 'k':
@@ -640,6 +641,9 @@ int main(int argc,char* argv[]) {
     case 's':
       dosync=1;
       break;
+    case 'L':
+      longlist=1;
+      break;
     case 'a':
 #ifndef __MINGW32__
       {
@@ -663,6 +667,7 @@ usage:
 		       "	-U s	set User-Agent HTTP header\n"
 		       "	-R s	set Referer HTTP header\n"
 		       "	-l	just print value of Location: header\n"
+		       "	-L	long ftp directory listing, not just names\n"
 		       "	-s	sync after local write\n"
 		       "	-v	be verbose\n");
       return 0;
@@ -910,10 +915,10 @@ again:
     }
 
   } else if (mode==FTP) {
-
+    char ip3[16];
     char buf[2048];
     int i;
-    int dataconn;
+    int srv=-1,dataconn=-1;
     buffer_init(&ftpbuf,(void*)read,s,buf,sizeof buf);
     if (verbose) buffer_putsflush(buffer_1,"Waiting for FTP greeting...");
     if ((readftpresponse(&ftpbuf)/100)!=2) panic("no 2xx ftp greeting.\n");
@@ -992,11 +997,10 @@ again:
     if (useport) {
       uint16 port;
       char ip2[16];
-      char ip3[16];
       char buf[200];
       if (usev4) {
 	int i,j;
-	int srv=socket_tcp4b();
+	srv=socket_tcp4b();
 	if (srv==-1) panic("socket");
 	socket_listen(srv,1);
 	if (socket_local4(s,ip2,0)) panic("getsockname");
@@ -1013,13 +1017,9 @@ again:
 	buf[i]=0;
 	if (verbose) buffer_putsflush(buffer_1,buf);
 	if (ftpcmd(s,&ftpbuf,buf) != 200) panic("PORT reply is not 200\n");
-	if (verbose) buffer_putsflush(buffer_1,"Waiting for connection...");
-	dataconn=socket_accept4(srv,ip3,0);
-	if (verbose) buffer_putsflush(buffer_1," there it is.\n");
-	if (byte_diff(ip3,4,ip+12)) panic("PORT stealing attack!\n");
       } else {
 	int i;
-	int srv=socket_tcp6b();
+	srv=socket_tcp6b();
 	if (srv==-1) panic("socket");
 	socket_listen(srv,1);
 	if (socket_local6(s,ip2,0,0)) panic("getsockname");
@@ -1036,10 +1036,6 @@ again:
 	buf[i]=0;
 	if (verbose) buffer_putsflush(buffer_1,buf);
 	if (ftpcmd(s,&ftpbuf,buf) != 200) panic("EPRT reply is not 200\n");
-	if (verbose) buffer_putsflush(buffer_1,"Waiting for connection...");
-	dataconn=socket_accept6(srv,ip3,0,0);
-	if (verbose) buffer_putsflush(buffer_1," there it is.\n");
-	if (byte_diff(ip3,16,ip)) panic("EPRT stealing attack!\n");
       }
     } else {
       int srv;
@@ -1092,8 +1088,13 @@ tryv4:
 	buffer_putsflush(buffer_1,"... ");
       }
       if ((ftpcmd2(s,&ftpbuf,"CWD ",pathname)/100)!=2) panic("CWD failed\n");
-      if (verbose) buffer_putsflush(buffer_2,"\nNLST\n");
-      if (((i=ftpcmd(s,&ftpbuf,"NLST\r\n"))!=150) && i!=125) panic("No 125/150 response to NLST\n");
+      if (longlist) {
+	if (verbose) buffer_putsflush(buffer_2,"\nLIST\n");
+	if (((i=ftpcmd(s,&ftpbuf,"LIST\r\n"))!=150) && i!=125) panic("No 125/150 response to LIST\n");
+      } else {
+	if (verbose) buffer_putsflush(buffer_2,"\nNLST\n");
+	if (((i=ftpcmd(s,&ftpbuf,"NLST\r\n"))!=150) && i!=125) panic("No 125/150 response to NLST\n");
+      }
     } else {
       int i;
       if (verbose) {
@@ -1118,6 +1119,23 @@ tryv4:
 	}
       }
     }
+
+    /* if we were in active mode, accept connection now */
+    if (useport) {
+      if (usev4) {
+	if (verbose) buffer_putsflush(buffer_1,"Waiting for connection...");
+	dataconn=socket_accept4(srv,ip3,0);
+	if (verbose) buffer_putsflush(buffer_1," there it is.\n");
+	if (byte_diff(ip3,4,ip+12)) panic("PORT stealing attack!\n");
+      } else {
+	if (verbose) buffer_putsflush(buffer_1,"Waiting for connection...");
+	dataconn=socket_accept6(srv,ip3,0,0);
+	if (verbose) buffer_putsflush(buffer_1," there it is.\n");
+	if (byte_diff(ip3,16,ip)) panic("EPRT stealing attack!\n");
+      }
+      close(srv);
+    }
+
     {
       char buf[8192];
       unsigned int l;
