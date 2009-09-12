@@ -316,7 +316,10 @@ void cleanup(int64 fd) {
 #endif
 
 #if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
-    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE ||
+    if (
+#ifdef SUPPORT_FTP
+	h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE ||
+#endif
 #ifdef SUPPORT_PROXY
 	h->t==PROXYSLAVE ||
 #endif
