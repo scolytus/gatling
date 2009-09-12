@@ -299,8 +299,10 @@ const char* mimetype(const char* filename,int fd) {
       return "application/pdf";
     else if (r>=4 && (byte_equal(buf,3,"ID3") || byte_equal(buf,2,"\xff\xfb")))
       return "audio/mpeg";
+#if 0
     else if (r>=4 && byte_equal(buf,4,"OggS"))
       return "application/ogg";
+#endif
     else if (r>=4 && byte_equal(buf,4,"RIFF")) {
       if (r>=16 && byte_equal(buf+8,3,"AVI"))
 	return "video/x-msvideo";
