@@ -227,7 +227,9 @@ struct mimeentry mimetab[] = {
   { "mov",	"video/quicktime" },
   { "qt",	"video/quicktime" },
   { "mp3",	"audio/mpeg" },
+#ifndef SUPPORT_MIMEMAGIC
   { "ogg",	"application/ogg" },
+#endif
   { "wav",	"audio/x-wav" },
   { "pac",	"application/x-ns-proxy-autoconfig" },
   { "sig",	"application/pgp-signature" },
@@ -254,7 +256,9 @@ struct mimeentry mimetab[] = {
   { "mp4",	"video/mp4" },
   { "m4a",	"audio/mp4" },
   { "nzb",	"application/x-nzb" },
+#ifndef SUPPORT_MIMEMAGIC
   { "ogv",	"video/ogg" },
+#endif
   { 0 } };
 
 const char* mimetype(const char* filename,int fd) {
@@ -299,11 +303,13 @@ const char* mimetype(const char* filename,int fd) {
       return "application/pdf";
     else if (r>=4 && (byte_equal(buf,3,"ID3") || byte_equal(buf,2,"\xff\xfb")))
       return "audio/mpeg";
-#if 0
-    else if (r>=4 && byte_equal(buf,4,"OggS"))
+    else if (r>=200 && byte_equal(buf,4,"OggS")) {
+      size_t i;
+      for (i=0; i<200-6; ++i)
+	if (buf[i]=='t' && byte_equal(buf+i+1,5,"heora"))
+	  return "video/ogg";
       return "application/ogg";
-#endif
-    else if (r>=4 && byte_equal(buf,4,"RIFF")) {
+    } else if (r>=4 && byte_equal(buf,4,"RIFF")) {
       if (r>=16 && byte_equal(buf+8,3,"AVI"))
 	return "video/x-msvideo";
       else
