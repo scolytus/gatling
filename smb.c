@@ -984,10 +984,12 @@ filenotfound:
     uint16_t attr,flags;
     uint16_t* resume;
     DIR* d;
+#if 0
     if (subcommand==1)
       printf("Incoming FIND_FIRST2!\n");
     else
       printf("Incoming FIND_NEXT2!\n");
+#endif
     if (sr->used>16*1024) {
 outofmemory:
       set_smb_error(sr,ERROR_NO_MEMORY,0x32);
@@ -1012,6 +1014,7 @@ outofmemory:
       if ((h->ftppath=malloc(l+l+4))) {
 	memcpy(h->ftppath+2,filename,l+l+2);
 	((uint16*)h->ftppath)[0]=l;
+#if 0
 	{
 	  size_t i;
 	  printf("storing ftppath \"");
@@ -1019,6 +1022,7 @@ outofmemory:
 	    printf("%c",h->ftppath[i]);
 	  printf("\"\n");
 	}
+#endif
       }
       resume=0;
     } else {
@@ -1032,16 +1036,17 @@ outofmemory:
 	return -1;		// want null terminated filename
       for (i=0; i<rl; ++i)
 	if (uint16_read((char*)&resume[i])=='\\' || uint16_read((char*)&resume[i])=='/') {
-	  printf("resume filename contains %c!\n",resume[i]);
+//	  printf("resume filename contains %c!\n",resume[i]);
 	  goto filenotfound;	// resume filename cannot contain \ or /
 	}
 
       if (!h->ftppath) {
-	printf("h->ftppath is NULL!\n");
+//	printf("h->ftppath is NULL!\n");
 	goto filenotfound;
       }
       filename=(uint16*)(h->ftppath);
       l=filename[0];
+#if 0
       {
 	size_t i;
 	printf("retrieved ftppath \"");
@@ -1052,6 +1057,7 @@ outofmemory:
 	  printf("%c",resume[i]);
 	printf("\"\n");
       }
+#endif
 
       ++filename;
     }
@@ -1171,7 +1177,7 @@ outofmemory:
 	      trans2[28]=0;
 	    else
 	      trans2[26]=0;
-	    printf("not enough space!\n");
+//	    printf("not enough space!\n");
 	    break;
 	  }
 
@@ -1185,7 +1191,7 @@ outofmemory:
 	    printf("\"), actual length: %u, name %s\n",actualnamelen,de->d_name);
 #endif
 	    if (byte_equal(cur+0x5e,rl,resume)) {
-	      printf("match!\n");
+//	      printf("match!\n");
 	      resume=0;
 	    }
 	    continue;
