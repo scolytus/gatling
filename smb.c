@@ -976,12 +976,18 @@ filenotfound:
       set_smb_error(sr,ERROR_ACCESS_DENIED,0x32);
       return 0;
     }
-  } else if (subcommand==1) {	// FIND_FIRST2
-    size_t i,l;
+  } else if (subcommand==1 ||	// FIND_FIRST2
+	     subcommand==2) {	// FIND_NEXT2
+    size_t i,l,rl;
     size_t maxdatacount;
     char* globlatin1,* globutf8;
     uint16_t attr,flags;
+    uint16_t* resume;
     DIR* d;
+    if (subcommand==1)
+      printf("Incoming FIND_FIRST2!\n");
+    else
+      printf("Incoming FIND_NEXT2!\n");
     if (sr->used>16*1024) {
 outofmemory:
       set_smb_error(sr,ERROR_NO_MEMORY,0x32);
@@ -992,13 +998,63 @@ outofmemory:
     maxdatacount=uint16_read((char*)c+7);
     attr=uint16_read((char*)c-smbheadersize+paramofs);
     flags=uint16_read((char*)c-smbheadersize+paramofs+4);
-    loi=uint16_read((char*)c-smbheadersize+paramofs+6);
+    if (subcommand==1)
+      loi=uint16_read((char*)c-smbheadersize+paramofs+6);
+    else
+      loi=uint16_read((char*)c-smbheadersize+paramofs+4);
     if (loi!=0x104) {
       set_smb_error(sr,ERROR_NOT_SUPPORTED,0x32);
       return 0;
     }
-    filename=(uint16*)(c-smbheadersize+paramofs+12);
-    l=paramcount-12;
+    if (subcommand==1) {
+      filename=(uint16*)(c-smbheadersize+paramofs+12);
+      l=paramcount-12;
+      if ((h->ftppath=malloc(l+l+4))) {
+	memcpy(h->ftppath+2,filename,l+l+2);
+	((uint16*)h->ftppath)[0]=l;
+	{
+	  size_t i;
+	  printf("storing ftppath \"");
+	  for (i=0; i<l; ++i)
+	    printf("%c",h->ftppath[i]);
+	  printf("\"\n");
+	}
+      }
+      resume=0;
+    } else {
+      resume=(uint16*)(c-smbheadersize+paramofs+12);
+      rl=paramcount-12;
+
+      /* validate the resume filename */
+      if ((uintptr_t)resume % 2)
+	goto filenotfound;
+      if (resume[rl-1])
+	return -1;		// want null terminated filename
+      for (i=0; i<rl; ++i)
+	if (uint16_read((char*)&resume[i])=='\\' || uint16_read((char*)&resume[i])=='/') {
+	  printf("resume filename contains %c!\n",resume[i]);
+	  goto filenotfound;	// resume filename cannot contain \ or /
+	}
+
+      if (!h->ftppath) {
+	printf("h->ftppath is NULL!\n");
+	goto filenotfound;
+      }
+      filename=(uint16*)(h->ftppath);
+      l=filename[0];
+      {
+	size_t i;
+	printf("retrieved ftppath \"");
+	for (i=0; i<l; ++i)
+	  printf("%c",filename[i]);
+	printf("\", resume at \"");
+	for (i=0; i<rl; ++i)
+	  printf("%c",resume[i]);
+	printf("\"\n");
+      }
+
+      ++filename;
+    }
 
     {
       /* we want to minimize copies, so we realloc enough space into the
@@ -1011,7 +1067,7 @@ outofmemory:
 
     if ((uintptr_t)filename % 2)
       goto filenotfound;
-    if (filename[l])
+    if (filename[l-1])
       return -1;		// want null terminated filename
     if (uint16_read((char*)&filename[l-1])=='\\' || uint16_read((char*)&filename[l-1])=='/')
       goto filenotfound;	// can't glob if filename ends in \ or /
@@ -1068,38 +1124,73 @@ outofmemory:
 	  if (!base) {
 	    trans2=sr->buf+sr->used;
 	    add_smb_response(sr,
-		"\x0a"	// word count
+		"\x0a"		// word count
 		"\x0a\x00"	// total param count
-		"xx"	// total data count; ofs 3
+		"xx"		// total data count; ofs 3
 		"\x00\x00"	// reserved
 		"\x0a\x00"	// param count
-		"xx"	// param ofs; ofs 9
+		"xx"		// param ofs; ofs 9
 		"\x00\x00"	// param displacement (?!)
-		"xx"	// data count; ofs 13
-		"xx"	// data offset; ofs 15
+		"xx"		// data count; ofs 13
+		"xx"		// data offset; ofs 15
 		"\x00\x00"	// data displacement
-		"\x00"	// setup count
-		"\x00"	// reserved
-		"xx"	// byte count; ofs 21
-		"\x00"	// padding
+		"\x00"		// setup count
+		"\x00"		// reserved
+		"xx"		// byte count; ofs 21
+		"\x00"		// padding
 		// FIND_FIRST2 Parameters
 		"\x01\x00"	// search id 1
-		"xx"	// search count (?!?); ofs 26
+		"\x01\x00"	// search count (?!?); ofs 26
 		"\x01\x00"	// end of search; ofs 28
 		"\x00\x00"	// ea error offset
-		"xx"	// last name offset; ofs 32
+		"xx"		// last name offset; ofs 32
 		"\x00\x00"	// padding
 		// FIND_FIRST2 Data
 		,36,0x32);
+	    if (subcommand==2) {
+	      trans2[1]=8;	// total param count
+	      trans2[7]=8;	// param count
+	      memcpy(trans2+24,
+		  // FIND_NEXT2 Parameters
+		  "\x01\x00"	// search count (?!?); ofs 24
+		  "\x01\x00"	// end of search; ofs 26
+		  "\x00\x00"	// ea error offset
+		  "xx"		// last name offset; ofs 30
+		  // FIND_NEXT2 Data
+		  ,8);
+	      sr->used-=4;
+	    }
+
 	    cur=base=sr->buf+sr->used;
 	    max=sr->buf+sr->allocated;
 	  }
-	  if (max-cur < 0x5e +strlen(de->d_name)*2 ||
+	  if (max-cur < 0x60 +strlen(de->d_name)*2 ||
 	      !(actualnamelen=utf8toutf16(cur+0x5e,max-cur-0x5e,de->d_name,strlen(de->d_name)))) {
 	    // not enough space!  abort!  abort!
-	    trans2[26]=0;
+	    if (subcommand==1)
+	      trans2[28]=0;
+	    else
+	      trans2[26]=0;
+	    printf("not enough space!\n");
 	    break;
 	  }
+
+	  /* if this is a FIND_NEXT and we have not reached the resume
+	   * filename yet, resume is not NULL. */
+	  if (resume) {
+#if 0
+	    printf("resume (%u,\"",rl);
+	    for (i=0; i<rl; ++i)
+	      printf("%c",resume[i]);
+	    printf("\"), actual length: %u, name %s\n",actualnamelen,de->d_name);
+#endif
+	    if (byte_equal(cur+0x5e,rl,resume)) {
+	      printf("match!\n");
+	      resume=0;
+	    }
+	    continue;
+	  }
+
 	  last=cur;
 	  if (loi==0x104) {
 	    size_t padlen=0x5e +actualnamelen;
@@ -1129,15 +1220,23 @@ outofmemory:
 	}
       }
       closedir(d);
-      if (!searchcount) goto filenotfound;
+      filename[-1]='\\';
+      if (!searchcount) {
+	if (subcommand==1) goto filenotfound;
+      }
       if (trans2) {
 	uint16_pack(trans2+3,cur-base);
 	uint16_pack(trans2+9,trans2+20-sr->buf);
 	uint16_pack(trans2+13,cur-base);
 	uint16_pack(trans2+15,base-smbhdr);
 	uint16_pack(trans2+21,base-smbhdr-12);
-	uint16_pack(trans2+26,searchcount);	// search count...!?
-	uint16_pack(trans2+32,last-base);
+	if (subcommand==1) {
+	  uint16_pack(trans2+26,searchcount);	// search count...!?
+	  uint16_pack(trans2+32,last-base);
+	} else {
+	  uint16_pack(trans2+24,searchcount);	// search count...!?
+	  uint16_pack(trans2+30,last-base);
+	}
       }
       uint32_pack_big(sr->buf,sr->used-4);
 //      printf("sr->used = %u\n",sr->used);

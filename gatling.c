@@ -339,7 +339,7 @@ void cleanup(int64 fd) {
     if (h->filefd!=-1) io_close(h->filefd);
     array_reset(&h->r);
     iob_reset(&h->iob);
-#ifdef SUPPORT_FTP
+#if defined(SUPPORT_FTP) || defined(SUPPORT_SMB)
     free(h->ftppath);
 #endif
 #ifdef SUPPORT_HTTPS

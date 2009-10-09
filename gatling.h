@@ -130,15 +130,15 @@ struct http_data {
   char peerip[16];	/* needed for active FTP */
   unsigned long long received,sent;
   enum encoding encoding;
+#if defined(SUPPORT_FTP) || defined(SUPPORT_SMB)
+  char* ftppath;	/* for FTP we store the path here, for SMB the last FIRST_FIRST2 glob expression */
+#endif
 #ifdef SUPPORT_FTP
-  char* ftppath;
   uint64 ftp_rest;	/* offset to start transfer at */
 #endif
   uint64 sent_until,prefetched_until;
 #ifdef SUPPORT_PROXY
-#ifdef SUPPORT_PROXY
   enum proxyprotocol proxyproto;
-#endif
   unsigned long long still_to_copy;	/* for POST/PUT requests */
   int havefirst;	/* first read contains cgi header */
   char* oldheader;	/* old, unmodified request */
