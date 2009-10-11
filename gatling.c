@@ -371,6 +371,34 @@ size_t header_complete(struct http_data* r) {
 #endif
      )
   {
+#if 1
+    /* Erdgeist nudged me into optimizing this :-)
+     * I'd be surprised if this optimization has any measurable
+     * advantage, but it sure is impressive */
+
+    int state=0;	/* This is a shift-or string matching */
+    /* I'm using the lower four bits of state to match \r\n\r\n and the
+     * next two bits to match \n\n, so we matched \r\n\r\n if (state&8)
+     * or for this particular pattern ==10 (+16 because of the secondary
+     * pattern), and we matched \n\n if (state&32) or for this
+     * particular pattern ==48 */
+    for (i=0; i<l; ++i) {
+      switch (c[i]) {
+      case '\r':
+	state=((state<<1)|1)&(1+4);
+	break;
+      case '\n':
+	state=((state<<1)|(1+16))&(2+8+16+32);
+	/* the 1 gets anded out immediately, but I leave it in for
+	 * algorithmic clarity and because we don't actually gain any
+	 * execution speed if we take it out */
+	break;
+      default:
+	state=0;
+      }
+      if (state==26 || state==48) return i+1;
+    }
+#else
     for (i=0; i+1<l; ++i) {
       if (c[i]=='\n' && c[i+1]=='\n')
 	return i+2;
@@ -379,6 +407,7 @@ size_t header_complete(struct http_data* r) {
 	  c[i+2]=='\r' && c[i+3]=='\n')
 	return i+4;
     }
+#endif
 #ifdef SUPPORT_SMB
   } else if (r->t==SMBREQUEST) {
     /* SMB */

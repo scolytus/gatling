@@ -43,7 +43,7 @@ char* http_header_blob(char* b,long l,char* h) {
   long i;
   long sl=str_len(h);
   for (i=0; i+sl+2<l; ++i)
-    if (b[i]=='\n' && case_equalb(b+i+1,sl,h) && b[i+sl+1]==':') {
+    if (b[i]=='\n' && b[i+sl+1]==':' && case_equalb(b+i+1,sl,h)) {
       b+=i+sl+2;
       while (*b==' ' || *b=='\t') ++b;
       return b;
