@@ -1,3 +1,7 @@
+0.12:
+  fix http ranges for Range: bytes=0-, would trigger 416 before
+    (Sebastian Köhler)
+
 0.11:
   add proxy support to dl ($http_proxy and $ftp_proxy like libwww)
   setuid in the forkslave, too

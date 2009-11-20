@@ -1494,7 +1494,7 @@ e404:
 		break;
 	      }
 	      bytes+=(ranges[i+1]-ranges[i]+1);
-	      if (bytes>ss.st_size) {
+	      if (bytes>ss.st_size+1) {
 		n=0;
 		break;
 	      }
