@@ -38,7 +38,7 @@ ifneq ($(DEBUG),)
 CFLAGS+=-g
 LDFLAGS+=-g
 else
-CFLAGS+=-O2 -fomit-frame-pointer
+CFLAGS+=-O2 -fomit-frame-pointer -I/usr/local/include
 LDFLAGS+=-s
 ifneq ($(DIET),)
 DIET+=-Os

@@ -2,8 +2,6 @@
 #define _GATLING_H
 
 #define _FILE_OFFSET_BITS 64
-#define _POSIX_SOURCE
-#define _POSIX_C_SOURCE 200112
 
 #include "gatling_features.h"
 #include "iob.h"
