@@ -122,7 +122,7 @@ libsocket: trysocket.c
 
 libiconv: tryiconv.c
 	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
-	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
+	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; else \
 	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -L/usr/local/lib -liconv >/dev/null 2>&1; then \
 	  echo "-L/usr/local/lib -liconv"; \
 	fi; fi; fi > libiconv
