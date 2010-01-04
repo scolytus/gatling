@@ -100,8 +100,8 @@ cgi: cgi.o
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
 
-%.o: %.c inciconv
-	$(CC) -c $< -o $@ -I. $(CFLAGS) `cat inciconv`
+%.o: %.c
+	$(CC) -c $< -o $@ -I. $(CFLAGS)
 
 https.o: http.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
@@ -120,12 +120,10 @@ libsocket: trysocket.c
 	fi; fi; fi; fi > libsocket
 	rm -f trysocket
 
-libiconv inciconv: tryiconv.c
-	cp -f /dev/null inciconv
+libiconv: tryiconv.c
 	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
 	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
-	if $(CC) $(CFLAGS) -o tryiconv -I/usr/local/include tryiconv.c -L/usr/local/lib -liconv >/dev/null 2>&1; then \
-	  echo "-I/usr/local/include" >> inciconv; \
+	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -L/usr/local/lib -liconv >/dev/null 2>&1; then \
 	  echo "-L/usr/local/lib -liconv"; \
 	fi; fi; fi > libiconv
 	rm -f tryiconv
@@ -169,7 +167,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1 $(DESTDIR)$(man1dir)/bench.1
 
 clean:
-	rm -f $(ALLTARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib inciconv
+	rm -f $(ALLTARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib
 
 VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
 CURNAME=$(notdir $(shell pwd))
