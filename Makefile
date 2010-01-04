@@ -71,8 +71,8 @@ gatling.o: version.h gatling.h havesetresuid.h
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h
 
-%.o: %.c
-	$(CC) -c $< -I. $(CFLAGS)
+%.o: %.c inciconv
+	$(CC) -c $< -I. $(CFLAGS) `cat inciconv`
 
 https.o: http.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
@@ -92,10 +92,14 @@ libsocket: trysocket.c
 	fi; fi; fi > libsocket
 	rm -f trysocket
 
-libiconv: tryiconv.c
+libiconv inciconv: tryiconv.c
+	cp -f /dev/null inciconv
 	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c >/dev/null 2>&1; then echo ""; else \
 	if $(CC) $(CFLAGS) -o tryiconv tryiconv.c -liconv >/dev/null 2>&1; then echo "-liconv"; \
-	fi; fi > libiconv
+	if $(CC) $(CFLAGS) -o tryiconv -I/usr/local/include tryiconv.c -L/usr/local/lib -liconv >/dev/null 2>&1; then \
+	  echo "-I/usr/local/include" >> inciconv; \
+	  echo "-L/usr/local/lib -liconv"; \
+	fi; fi; fi > libiconv
 	rm -f tryiconv
 
 libcrypt: trycrypt.c
@@ -126,7 +130,7 @@ uninstall:
 	rm -f $(BINDIR)/gatling $(BINDIR)/tlsgatling $(man1dir)/gatling.1 $(man1dir)/bench.1
 
 clean:
-	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib
+	rm -f $(TARGET) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib inciconv
 
 cert: server.pem
 
