@@ -1,4 +1,6 @@
+#ifndef __FreeBSD__
 #define _XOPEN_SOURCE 500
+#endif
 
 #include "gatling.h"
 
@@ -218,6 +220,8 @@ int add_proxy(const char* c) {
   if (c[1]=='/') {
     if (c[0]=='F')
       x->proxyproto=FASTCGI;
+    else if (c[0]=='S')
+      x->proxyproto=SCGI;
     else
       goto nixgut;
     c+=2;
@@ -234,6 +238,10 @@ int add_proxy(const char* c) {
   else
     last->next=x; last=x;
   return 0;
+}
+
+static size_t fmt_cgivars(char* dst,struct http_data* x,const char* matchend) {
+  /* TODO */
 }
 
 static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* ctx_for_sockfd,int isexec,const char* args) {
@@ -260,7 +268,9 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
       byte_zero(ctx_for_gatewayfd,sizeof(struct http_data));
 
       if (!x->file_executable) {
-	if (x->proxyproto == FASTCGI) {
+	if (x->proxyproto == SCGI) {
+	  /* TODO: implement SCGI */
+	} else if (x->proxyproto == FASTCGI) {
 	  /* TODO */
 	}
 //	printf("%u %u\n",matches.rm_so,matches.rm_eo);
@@ -2082,6 +2092,8 @@ void forkslave(int fd,buffer* in,int savedir) {
 	      servername[i+j]=0;
 
 	      if (pathinfo) {
+		size_t pilen;
+		scan_urlencoded2(pathinfo,pathinfo,&pilen); pathinfo[pilen]=0;
 		path_translated=alloca(PATH_MAX+30);
 		i=fmt_str(path_translated,"PATH_TRANSLATED=");
 		if (!realpath(pathinfo,path_translated+i))
