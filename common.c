@@ -158,3 +158,49 @@ int ip_vhost(struct http_data* h) {
   }
   return 0;
 }
+
+#ifdef STATE_DEBUG
+const char* state2string(enum conntype t) {
+  switch (t) {
+  case HTTPSERVER6: return "HTTPSERVER6";
+  case HTTPSERVER4: return "HTTPSERVER4";
+  case HTTPREQUEST: return "HTTPREQUEST";
+
+#ifdef SUPPORT_FTP
+  case FTPSERVER6: return "FTPSERVER6";
+  case FTPSERVER4: return "FTPSERVER4";
+  case FTPCONTROL6: return "FTPCONTROL6";
+  case FTPCONTROL4: return "FTPCONTROL4";
+  case FTPPASSIVE: return "FTPPASSIVE";
+  case FTPACTIVE: return "FTPACTIVE";
+  case FTPSLAVE: return "FTPSLAVE";
+#endif
+
+#ifdef SUPPORT_SMB
+  case SMBSERVER6: return "SMBSERVER6";
+  case SMBSERVER4: return "SMBSERVER4";
+  case SMBREQUEST: return "SMBREQUEST";
+#endif
+
+#ifdef SUPPORT_PROXY
+  case PROXYSLAVE: return "PROXYSLAVE";
+  case PROXYPOST: return "PROXYPOST";
+  case HTTPPOST: return "HTTPPOST";
+#endif
+
+#ifdef SUPPORT_HTTPS
+  case HTTPSSERVER6: return "HTTPSSERVER6";
+  case HTTPSSERVER4: return "HTTPSSERVER4";
+  case HTTPSACCEPT: return "HTTPSACCEPT";
+  case HTTPSREQUEST: return "HTTPSREQUEST";
+  case HTTPSRESPONSE: return "HTTPSRESPONSE";
+  case HTTPSPOST: return "HTTPSPOST";
+#endif
+
+  case PUNISHMENT: return "PUNISHMENT";
+
+  default: return "[invalid]";
+  }
+};
+#endif
+

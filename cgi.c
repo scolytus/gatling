@@ -4,7 +4,7 @@
 #include <fmt.h>
 #include <buffer.h>
 
-#define MAXARGLEN (16*1024)
+#define MAXARGLEN (64*1024)
 
 /* return content length */
 static long do_cgi(char** res) {

@@ -164,47 +164,6 @@ static void panic(const char* routine) {
   exit(111);
 }
 
-#ifdef SMDEBUG
-const char* conntypestring[LAST_UNUNSED];
-
-void setup_smdebug_strings() {
-  conntypestring[HTTPSERVER6]="HTTPSERVER6";
-  conntypestring[HTTPSERVER4]="HTTPSERVER4";
-  conntypestring[HTTPREQUEST]="HTTPREQUEST";
-
-#ifdef SUPPORT_FTP
-  conntypestring[FTPSERVER6]="FTPSERVER6";
-  conntypestring[FTPSERVER4]="FTPSERVER4";
-  conntypestring[FTPCONTROL6]="FTPCONTROL6";
-  conntypestring[FTPCONTROL4]="FTPCONTROL4";
-  conntypestring[FTPPASSIVE]="FTPPASSIVE";
-  conntypestring[FTPACTIVE]="FTPACTIVE";
-  conntypestring[FTPACTIVE]="FTPSLAVE";
-#endif
-
-#ifdef SUPPORT_SMB
-  conntypestring[SMBSERVER6]="SMBSERVER6";
-  conntypestring[SMBSERVER4]="SMBSERVER4";
-  conntypestring[SMBREQUEST]="SMBREQUEST";
-#endif
-
-#ifdef SUPPORT_PROXY
-  conntypestring[PROXYSLAVE]="PROXYSLAVE";
-  conntypestring[PROXYPOST]="PROXYPOST";
-  conntypestring[HTTPPOST]="HTTPPOST";
-#endif
-
-#ifdef SUPPORT_HTTPS
-  conntypestring[HTTPSSERVER6]="HTTPSSERVER6";
-  conntypestring[HTTPSSERVER4]="HTTPSSERVER4";
-  conntypestring[HTTPSACCEPT]="HTTPSACCEPT";
-  conntypestring[HTTPSREQUEST]="HTTPSREQUEST";
-  conntypestring[HTTPSRESPONSE]="HTTPSRESPONSE";
-  conntypestring[HTTPSPOST]="HTTPSPOST";
-#endif
-}
-#endif
-
 unsigned long connections;
 unsigned long http_connections, https_connections, ftp_connections, smb_connections;
 unsigned long cps,cps1;	/* connections per second */
@@ -583,6 +542,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
   uint16 port;
   uint32 scope_id;
   int n;
+
   while (1) {
     int punk;
 #ifdef __broken_itojun_v6__
@@ -663,6 +623,9 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	    io_wantwrite(n);
 	}
 	byte_zero(h,sizeof(struct http_data));
+#ifdef STATE_DEBUG
+	h->myfd=n;
+#endif
 #ifdef __broken_itojun_v6__
 	if (i==s4 || i==f4) {
 	  byte_copy(h->myip,12,V4mappedprefix);
@@ -676,10 +639,12 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	h->peerport=port;
 	h->myscope_id=scope_id;
 	if (punk) {
-	  h->t=PUNISHMENT;
+	  setstate(h,PUNISHMENT);
+//	  h->t=PUNISHMENT;
 	  io_timeout(n,next);
 	} else if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
-	  h->t=HTTPREQUEST;
+	  setstate(h,HTTPREQUEST);
+//	  h->t=HTTPREQUEST;
 	  if (timeout_secs)
 	    io_timeout(n,next);
 #ifdef SUPPORT_HTTPS
@@ -699,22 +664,26 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	    cleanup(n);
 	    continue;
 	  }
-	  h->t=HTTPSACCEPT;
+	  setstate(h,HTTPSACCEPT);
+//	  h->t=HTTPSACCEPT;
 	  if (timeout_secs)
 	    io_timeout(n,nextftp);
 #endif
 #ifdef SUPPORT_SMB
 	} else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
-	  h->t=SMBREQUEST;
+	  setstate(h,SMBREQUEST);
+//	  h->t=SMBREQUEST;
 	  if (timeout_secs)
 	    io_timeout(n,next);
 #endif
 #ifdef SUPPORT_FTP
 	} else {
 	  if (H->t==FTPSERVER6)
-	    h->t=FTPCONTROL6;
+	    setstate(h,FTPCONTROL6);
+//	    h->t=FTPCONTROL6;
 	  else
-	    h->t=FTPCONTROL4;
+	    setstate(h,FTPCONTROL4);
+//	    h->t=FTPCONTROL4;
 	  iob_addbuf(&h->iob,"220 Hi there!\r\n",15);
 	  h->keepalive=1;
 	  if (ftptimeout_secs)
@@ -792,7 +761,8 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 #if 0
     h->writefail=1;
 #endif
-    h->t=HTTPSREQUEST;
+    setstate(h,HTTPSREQUEST);
+//    h->t=HTTPSREQUEST;
     if (logging) {
       buffer_puts(buffer_1,"ssl_handshake_ok ");
       buffer_putulong(buffer_1,sock);
@@ -913,7 +883,8 @@ pipeline:
 	/* The H->mimetype reference is here so that we don't count both the HTTP
 	 * connection and the first request on it as a dos attack. */
 	if (H->mimetype && new_request_from_ip(H->peerip,now.sec.x-4611686018427387914ULL)==1) {
-	  H->t=PUNISHMENT;
+	  setstate(H,PUNISHMENT);
+//	  H->t=PUNISHMENT;
 	  if (logging) {
 	    char buf[IP6_FMT];
 	    char n[FMT_LONG];
@@ -934,7 +905,7 @@ pipeline:
 #ifdef SUPPORT_HTTPS
 	if (H->t==HTTPREQUEST || H->t==HTTPSREQUEST) {
 	  httpresponse(H,i,l);
-	  if (H->t == HTTPSREQUEST) H->t=HTTPSRESPONSE;
+	  if (H->t == HTTPSREQUEST) setstate(H,HTTPSRESPONSE); // H->t=HTTPSRESPONSE;
 	}
 #else
 	if (H->t==HTTPREQUEST)
@@ -1187,10 +1158,6 @@ int main(int argc,char* argv[],char* envp[]) {
   char* chroot_to=0;
   unsigned long long prefetchquantum=0;
   pid_t* Instances;
-
-#ifdef SMDEBUG
-  setup_smdebug_strings();
-#endif
 
 #ifdef SUPPORT_HTTPS
   SSL_load_error_strings();
@@ -1975,10 +1942,8 @@ usage:
 #ifdef SMDEBUG
       {
 	char a[FMT_ULONG];
-	char b[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
-	b[fmt_ulong(b,H->t)]=0;
-	buffer_putmflush(buffer_2,"DEBUG: fd ",a," got READ event ",conntypestring[H->t]?conntypestring[H->t]:b,"!\n");
+	buffer_putmflush(buffer_2,"DEBUG: fd ",a," got READ event, state is ",state2string(H->t),"!\n");
       }
 #endif
 
@@ -2080,10 +2045,8 @@ usage:
 #ifdef SMDEBUG
       {
 	char a[FMT_ULONG];
-	char b[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
-	b[fmt_ulong(b,h->t)]=0;
-	buffer_putmflush(buffer_2,"DEBUG: fd ",a," got WRITE event ",conntypestring[h->t]?conntypestring[h->t]:b,"!\n");
+	buffer_putmflush(buffer_2,"DEBUG: fd ",a," got WRITE event, state is ",state2string(h->t),"!\n");
       }
 #endif
 

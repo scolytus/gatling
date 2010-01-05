@@ -327,8 +327,12 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 
       if (x->port) {
 	/* proxy mode */
-	ctx_for_gatewayfd->t=PROXYSLAVE;
+	setstate(ctx_for_gatewayfd,PROXYSLAVE);
+//	ctx_for_gatewayfd->t=PROXYSLAVE;
 	fd_to_gateway=socket_tcp6();
+#ifdef STATE_DEBUG
+	ctx_for_gatewayfd->myfd=fd_to_gateway;
+#endif
 	if (fd_to_gateway==-1) goto punt2;
 	if (!io_fd(fd_to_gateway)) {
 punt:
@@ -363,16 +367,32 @@ punt2:
 	/* local CGI mode */
 	uint32 a,len; uint16 b;
 	pid_t pid;
+	size_t reqlen;
 	char* req=array_start(&ctx_for_sockfd->r); /* "GET /t.cgi/foo/bar?fnord HTTP/1.0\r\nHost: localhost:80\r\n\r\n"; */
 	char ra[IP6_FMT];
-	ctx_for_gatewayfd->t=PROXYPOST;
 	req[strlen(req)]=' ';
+
+	{
+	  char* tmp;
+	  reqlen=0;
+	  for (tmp=req; tmp; tmp=strchr(tmp,'\n')) {
+	    if (tmp[1]=='\r' && tmp[2]=='\n') {
+	      reqlen=tmp+2-req;
+	      break;
+	    } else if (tmp[1]=='\n') {
+	      reqlen=tmp+1-req;
+	      break;
+	    }
+	    ++tmp;
+	  }
+	}
+
 	ctx_for_sockfd->keepalive=0;
 	ra[fmt_ip6c(ra,ctx_for_sockfd->peerip)]=0;
-	a=strlen(req); write(forksock[0],&a,4);
+	a=reqlen; write(forksock[0],&a,4);
 	a=strlen(dir); write(forksock[0],&a,4);
 	a=strlen(ra); write(forksock[0],&a,4);
-	write(forksock[0],req,strlen(req));
+	write(forksock[0],req,reqlen);
 	write(forksock[0],dir,strlen(dir));
 	write(forksock[0],ra,strlen(ra));
 	b=ctx_for_sockfd->peerport; write(forksock[0],&b,2);
@@ -390,6 +410,11 @@ punt2:
 	  return -1;
 	} else {
 	  fd_to_gateway=io_receivefd(forksock[0]);
+#ifdef STATE_DEBUG
+	  ctx_for_gatewayfd->myfd=fd_to_gateway;
+#endif
+	  setstate(ctx_for_gatewayfd,PROXYPOST);
+//	  ctx_for_gatewayfd->t=PROXYPOST;
 	  if (fd_to_gateway==-1) {
 	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
 	    free(ctx_for_gatewayfd);
@@ -404,10 +429,12 @@ punt2:
 	}
 #ifdef SUPPORT_HTTPS
 	if (ctx_for_sockfd->t==HTTPSREQUEST)
-	  ctx_for_sockfd->t=HTTPSPOST;
+	  setstate(ctx_for_sockfd,HTTPSPOST);
+//	  ctx_for_sockfd->t=HTTPSPOST;
 	else
 #endif
-	ctx_for_sockfd->t=HTTPPOST;
+	setstate(ctx_for_sockfd,HTTPPOST);
+//	ctx_for_sockfd->t=HTTPPOST;
 	if (logging) {
 	  char bufsfd[FMT_ULONG];
 	  char bufs[FMT_ULONG];
@@ -1773,12 +1800,17 @@ void handle_write_proxypost(int64 i,struct http_data* h) {
 	byte_copy(c,alen-l,c+l);
 	array_truncate(&H->r,1,alen-l);
 //	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",H,H->still_to_copy,H->still_to_copy-l);
-	H->still_to_copy-=l;
+	h->still_to_copy-=l;
 //	      printf("still_to_copy PROXYPOST write handler: %p %llu -> %llu\n",h,h->still_to_copy,h->still_to_copy-i);
 //	      h->still_to_copy-=i;
-	if (alen-l==0)
+	if (alen-l==0) {
+	  /* we wrote everything we have in the buffer */
 	  io_dontwantwrite(i);
-	if (h->still_to_copy) {
+	  /* check if we need to copy more data */
+	  if (h->still_to_copy)
+	    io_wantread(h->buddy);
+	}
+	if (h->still_to_copy==0) {
 	  /* we got all we asked for */
 nothingmoretocopy:
 	  io_dontwantwrite(i);
@@ -1858,7 +1890,8 @@ void handle_write_proxyslave(int64 i,struct http_data* h) {
     * POST data to write.  h->still_to_copy is Content-Length. */
 //	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
   if (h->still_to_copy) {
-    h->t=PROXYPOST;
+    setstate(h,PROXYPOST);
+//    h->t=PROXYPOST;
     handle_write_httppost(i,H);
     return;
 //    goto httpposthandler;
@@ -1867,7 +1900,8 @@ void handle_write_proxyslave(int64 i,struct http_data* h) {
     io_dontwantwrite(i);
     io_wantread(i);
   }
-  h->t=PROXYPOST;
+  setstate(h,PROXYPOST);
+//  h->t=PROXYPOST;
 }
 
 #endif
@@ -1961,6 +1995,8 @@ void forkslave(int fd,buffer* in,int savedir) {
   code=1;
   if (read(fd,(char*)&reqlen,4)!=4) goto error;
 
+//  printf("CGI: reqlen %u\n",reqlen);
+
 #ifdef SUPPORT_HTTPS
   if (reqlen==0) { /* SSH MODE */
     int s,r;
@@ -2007,6 +2043,7 @@ void forkslave(int fd,buffer* in,int savedir) {
 
   if (buffer_get(in,(char*)&dirlen,4)==4 &&
       buffer_get(in,(char*)&ralen,4)==4) {
+//    printf("CGI: dirlen %u, ralen %u\n",dirlen,ralen);
     if (dirlen<PATH_MAX && reqlen<MAX_HEADER_SIZE) {
       char* httpreq=alloca(reqlen+1);
       char* path=alloca(dirlen+1);

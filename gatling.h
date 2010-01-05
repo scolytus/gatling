@@ -46,6 +46,8 @@ enum encoding {
 };
 
 enum conntype {
+  UNUSED,
+
   HTTPSERVER6,	/* call socket_accept6() */
   HTTPSERVER4,	/* call socket_accept4() */
   HTTPREQUEST,	/* read and handle http request */
@@ -160,7 +162,24 @@ struct http_data {
   char* name_of_file_to_open;
   struct stat ss;
 #endif
+#ifdef STATE_DEBUG
+  int myfd;
+#endif
 };
+
+#ifdef STATE_DEBUG
+extern const char* state2string(enum conntype t);
+#endif
+
+static inline void setstate(struct http_data* x,enum conntype t) {
+#ifdef STATE_DEBUG
+  if (x->t==UNUSED)
+    printf("STATE: new fd %d: state %s\n",x->myfd,state2string(t));
+  else
+    printf("STATE: fd %d: state change from %s to %s\n",x->myfd,state2string(x->t),state2string(t));
+#endif
+  x->t=t;
+}
 
 #ifdef SUPPORT_HTTPS
 extern char* sshd;
