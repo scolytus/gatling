@@ -53,6 +53,8 @@
 #include "havealloca.h"
 #include "havesetresuid.h"
 
+char serverroot[1024];
+
 unsigned long instances=1;
 unsigned long timeout_secs=23;
 tai6464 now,next;
@@ -639,11 +641,11 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	h->peerport=port;
 	h->myscope_id=scope_id;
 	if (punk) {
-	  setstate(h,PUNISHMENT);
+	  changestate(h,PUNISHMENT);
 //	  h->t=PUNISHMENT;
 	  io_timeout(n,next);
 	} else if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
-	  setstate(h,HTTPREQUEST);
+	  changestate(h,HTTPREQUEST);
 //	  h->t=HTTPREQUEST;
 	  if (timeout_secs)
 	    io_timeout(n,next);
@@ -664,14 +666,14 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	    cleanup(n);
 	    continue;
 	  }
-	  setstate(h,HTTPSACCEPT);
+	  changestate(h,HTTPSACCEPT);
 //	  h->t=HTTPSACCEPT;
 	  if (timeout_secs)
 	    io_timeout(n,nextftp);
 #endif
 #ifdef SUPPORT_SMB
 	} else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
-	  setstate(h,SMBREQUEST);
+	  changestate(h,SMBREQUEST);
 //	  h->t=SMBREQUEST;
 	  if (timeout_secs)
 	    io_timeout(n,next);
@@ -679,10 +681,10 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #ifdef SUPPORT_FTP
 	} else {
 	  if (H->t==FTPSERVER6)
-	    setstate(h,FTPCONTROL6);
+	    changestate(h,FTPCONTROL6);
 //	    h->t=FTPCONTROL6;
 	  else
-	    setstate(h,FTPCONTROL4);
+	    changestate(h,FTPCONTROL4);
 //	    h->t=FTPCONTROL4;
 	  iob_addbuf(&h->iob,"220 Hi there!\r\n",15);
 	  h->keepalive=1;
@@ -761,7 +763,7 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 #if 0
     h->writefail=1;
 #endif
-    setstate(h,HTTPSREQUEST);
+    changestate(h,HTTPSREQUEST);
 //    h->t=HTTPSREQUEST;
     if (logging) {
       buffer_puts(buffer_1,"ssl_handshake_ok ");
@@ -883,7 +885,7 @@ pipeline:
 	/* The H->mimetype reference is here so that we don't count both the HTTP
 	 * connection and the first request on it as a dos attack. */
 	if (H->mimetype && new_request_from_ip(H->peerip,now.sec.x-4611686018427387914ULL)==1) {
-	  setstate(H,PUNISHMENT);
+	  changestate(H,PUNISHMENT);
 //	  H->t=PUNISHMENT;
 	  if (logging) {
 	    char buf[IP6_FMT];
@@ -905,7 +907,7 @@ pipeline:
 #ifdef SUPPORT_HTTPS
 	if (H->t==HTTPREQUEST || H->t==HTTPSREQUEST) {
 	  httpresponse(H,i,l);
-	  if (H->t == HTTPSREQUEST) setstate(H,HTTPSRESPONSE); // H->t=HTTPSRESPONSE;
+	  if (H->t == HTTPSREQUEST) changestate(H,HTTPSRESPONSE); // H->t=HTTPSRESPONSE;
 	}
 #else
 	if (H->t==HTTPREQUEST)
@@ -1730,10 +1732,16 @@ usage:
 
 #ifdef __MINGW32__
   _getcwd(origdir,sizeof(origdir));
+  strncpy(serverroot,origdir,sizeof(serverroot));
 //  printf("origdir is \"%s\"\n",origdir);
 #else
-  if (!io_readfile(&origdir,".")) panic("open()");
   /* get fd for . so we can always fchdir back */
+  if (!io_readfile(&origdir,".")) panic("open()");
+  /* note the server root path for CGI $SCRIPT_FILENAME */
+  if (!getcwd(serverroot,sizeof(serverroot))) {
+    serverroot[0]='.';
+    serverroot[1]=0;
+  }
 #endif
 
 #ifdef SUPPORT_MULTIPROC
@@ -1947,6 +1955,14 @@ usage:
       }
 #endif
 
+      /* This is a speed hack.  If we have a LOT of connections, we
+       * might get swamped handling events and it might take a while for
+       * us to get around to accepting new connections.  Unfortunately,
+       * the kernel has a limited number of connections that can be
+       * incoming but not accepted; if more attempts come in, the kernel
+       * just drops them, and they then run into a timeout and try
+       * again.  To avoid this, we try accepting connections even
+       * without any events. */
       if (++events==10) {
 	events=0;
 	if (s!=-1) accept_server_connection(s,(struct http_data*)&ct,ftptimeout_secs,nextftp);
@@ -1991,6 +2007,7 @@ usage:
 	H->sent_until=H->prefetched_until=0;
 
 #ifdef SUPPORT_PROXY
+	/* read on PROXYPOST means the CGI sent some data */
       if (H->t==PROXYPOST)
 	handle_read_proxypost(i,H);
       else if (H->t==HTTPPOST
@@ -1998,6 +2015,7 @@ usage:
 	    || H->t==HTTPSPOST
 #endif
 			      )
+	/* read on HTTPPOST means the browser sent some more POST data */
 	handle_read_httppost(i,H);
       else
 #endif

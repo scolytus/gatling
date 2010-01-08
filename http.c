@@ -232,7 +232,7 @@ int add_proxy(const char* c) {
   i=scan_ushort(c,&x->port);
   if (c[i]!='/') goto nixgut;
   c+=i+1;
-  if (regcomp(&x->r,c,REG_EXTENDED|REG_NOSUB)) goto nixgut;
+  if (regcomp(&x->r,c,REG_EXTENDED)) goto nixgut;
   if (!last)
     cgis=last=x;
   else
@@ -240,11 +240,142 @@ int add_proxy(const char* c) {
   return 0;
 }
 
-static size_t fmt_cgivars(char* dst,struct http_data* x,const char* matchend) {
-  /* TODO */
+static size_t fmt_strblob(char* dst,const char* str,const char* blob,size_t n) {
+  size_t x;
+  if (!dst) return strlen(str)+n+1;
+  x=fmt_str(dst,str);
+  memcpy(dst+x,blob,n);
+  x+=n;
+  dst[x]='\n';
+  return x+1;
 }
 
-static int proxy_connection(int sockfd,const char* c,const char* dir,struct http_data* ctx_for_sockfd,int isexec,const char* args) {
+static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t urilen,const char* vhostdir) {
+  /* input:
+   *   dst: destination buffer, may be NULL
+   *   h: http context, used to get to HTTP request
+   *   uri: pointer to decoded URI, truncated at '?', after leading '/'
+   *   urilen: last char in regex match
+   *     uri="script.php/path_info?query_string"
+   *                    ^ uri+urilen
+   *   vhostdir: virtual hosting dir, e.g. "www.fefe.de:80" or "default"
+   *   needs global: char serverroot[]
+   * output:
+   *   returns number of bytes written to dst
+   *   if dst is NULL, returns number of buffer size needed
+   *   writes environment entries to dst, separated by \n
+   */
+  char remoteaddr[IP6_FMT];
+  char myaddr[IP6_FMT];
+  char tmp[FMT_ULONG];
+  size_t n,s;
+  s=0;
+
+  remoteaddr[fmt_ip6c(remoteaddr,h->peerip)]=0;
+  myaddr[fmt_ip6c(myaddr,h->myip)]=0;
+
+  {
+    char* x=http_header(h,"Content-Length");
+    if (x) {
+      size_t j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+      n=fmt_strblob(dst,"CONTENT_LENGTH=",x,j);
+    } else {
+      n=fmt_str(dst,"CONTENT_LENGTH=0\n");
+    }
+    s+=n; if (dst) dst+=n;
+  }
+
+  n=fmt_strm(dst,"SCGI=1\nSERVER_SOFTWARE=",RELEASE,"\n"); s+=n; if (dst) dst+=n;
+  {
+    char* x=http_header(h,"Host");
+    if (x) {
+      size_t j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+      n=fmt_strblob(dst,"SERVER_NAME=",x,j);
+    } else
+      n=fmt_strm(dst,"SERVER_NAME=",remoteaddr,"\n");
+    s+=n; if (dst) dst+=n;
+  }
+  n=fmt_strm(dst,"SERVER_ADDR=",myaddr,"\n"); s+=n; if (dst) dst+=n;
+  tmp[fmt_ulong(tmp,h->myport)]=0;
+  n=fmt_strm(dst,"SERVER_PORT=",tmp,"\n"); s+=n; if (dst) dst+=n;
+  n=fmt_strm(dst,"REMOTE_ADDR=",remoteaddr,"\n"); s+=n; if (dst) dst+=n;
+  tmp[fmt_ulong(tmp,h->peerport)]=0;
+  n=fmt_strm(dst,"REMOTE_PORT=",tmp,"\n"); s+=n; if (dst) dst+=n;
+  n=fmt_strm(dst,"GATEWAY_INTERFACE=CGI/1.1\nSERVER_PROTOCOL=HTTP/1.1\n"); s+=n; if (dst) dst+=n;
+  {
+    char* x=array_start(&h->r);
+    size_t z,y=str_chr(x,' ');
+    n=fmt_strblob(dst,"REQUEST_METHOD=",x,y); s+=n; if (dst) dst+=n;
+    x+=y+1;
+    y=str_chr(x,' ');
+    /* REQUEST_URI is not actually part of the CGI 1.1 spec (RFC3875) */
+    n=fmt_strblob(dst,"REQUEST_URI=",x,y); s+=n; if (dst) dst+=n;
+    z=byte_chr(x,y,'?')+1;
+    if (z<y) {
+      n=fmt_strblob(dst,"QUERY_STRING=",x+z,y-z); s+=n; if (dst) dst+=n;
+    }
+
+    n=fmt_strblob(dst,"SCRIPT_NAME=/",uri,urilen); s+=n; if (dst) dst+=n;
+    n=fmt_strm(dst,"SCRIPT_FILENAME=",serverroot,"/",vhostdir); s+=n; if (dst) dst+=n;
+    n=fmt_strblob(dst,"/",uri,urilen); s+=n; if (dst) dst+=n;
+
+    if (uri[urilen]!='?') {	/* we have a PATH_INFO */
+      /* the situation is like this:
+	 uri="script.cgi/pathinfo"
+	                ^urilen
+      */
+
+      n=fmt_strm(dst,"PATH_INFO=",uri+urilen,"\n"); s+=n; if (dst) dst+=n;
+
+      /* PATH_TRANSLATED is "$PWD$PATH_INFO" */
+      while (uri[urilen]=='/') ++urilen;
+      n=fmt_strm(dst,"PATH_TRANSLATED=",serverroot,"/",vhostdir,"/",uri+urilen,"\n"); s+=n; if (dst) dst+=n;
+    }
+
+  }
+
+  /* now translate all header lines into HTTP_* */
+  /* for example Accept: -> HTTP_ACCEPT= */
+  {
+    char* x=array_start(&h->r);
+    x=strchr(x,'\n');
+    while (x) {
+      char* olddst=dst;
+      ++x;
+      if (*x<=' ') break;
+      if (!case_starts(x,"Content-Length:") && !case_starts(x,"Content-Type:")) {
+	n=fmt_strm(dst,"HTTP_"); s+=n; if (dst) dst+=n;
+      }
+      while (*x!=':') {
+	char c=*x;
+	if (c>='a' && c<='z') c-='a'-'A';
+	if (c=='-') c='_'; else
+	if (c<'A' || c>'Z') {
+	  dst=olddst;
+	  goto skipheader;
+	}
+	if (dst) { *dst=c; ++dst; } ++s;
+	++x;
+      }
+      if (dst) { *dst='='; ++dst; } ++s;
+      ++x; while (*x==' ') ++x;
+      {
+	char* start=x;
+	while (*x && *x!='\r' && *x!='\n') ++x;
+	n=x-start;
+	if (dst) { byte_copy(dst,n,start); dst+=n+1; dst[-1]='\n'; } s+=n+1;
+      }
+skipheader:
+      x=strchr(x,'\n');
+    }
+  }
+  return s;
+}
+
+static int proxy_connection(int sockfd,char* c,const char* dir,struct http_data* ctx_for_sockfd,int isexec,const char* args) {
+  /* c is the filename
+   * dir is the virtual hosting dir ("www.fefe.de:80")
+   * the current working directory is inside the virtual hosting dir */
   struct cgi_proxy* x=cgis;
   struct stat ss;
   regmatch_t matches;
@@ -256,25 +387,74 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
       x=x->next;
       continue;
     }
+
     matches.rm_so=matches.rm_eo=0;
     if (x->file_executable || regexec(&x->r,c,1,&matches,0)==0) {
       /* if the port is zero, then use local execution proxy mode instead */
       int fd_to_gateway;
       struct http_data* ctx_for_gatewayfd;
+      char* d=c;
+      while (*d=='/') ++d;
 
       ctx_for_sockfd->proxyproto=x->proxyproto;
 
-      if (!(ctx_for_gatewayfd=(struct http_data*)malloc(sizeof(struct http_data)))) continue;
+      if (!(ctx_for_gatewayfd=(struct http_data*)malloc(sizeof(struct http_data)))) return -1;
       byte_zero(ctx_for_gatewayfd,sizeof(struct http_data));
 
       if (!x->file_executable) {
+
+#if 0
+	printf("%u %u\n",matches.rm_so,matches.rm_eo);
+	printf("got data \"%s\"\n",c+matches.rm_eo);
+#endif
+
+	if (x->proxyproto == SCGI || x->proxyproto == FASTCGI) {
+	  struct stat ss;
+	  /* does the file actually exist? */
+	  if (stat(d,&ss)) {
+	    if (errno==ENOTDIR) {	/* we have PATH_INFO */
+	      char save=c[matches.rm_eo];
+	      int r;
+	      c[matches.rm_eo]=0;
+	      r=stat(d,&ss);
+	      c[matches.rm_eo]=save;
+	      goto freeandfail;
+	      if (r) goto freeandfail;
+	    } else {
+freeandfail:
+	      free(ctx_for_gatewayfd);
+	      return -1;
+	    }
+	  }
+	}
+	ctx_for_gatewayfd->proxyproto=x->proxyproto;
 	if (x->proxyproto == SCGI) {
-	  /* TODO: implement SCGI */
+	  size_t l=fmt_cgivars(0,ctx_for_sockfd,c,matches.rm_eo,dir);
+	  char* x,* y;
+	  if (!array_allocate(&ctx_for_gatewayfd->r,1,l+fmt_ulong(0,l)+3))
+	    goto freeandfail;
+	  x=array_start(&ctx_for_gatewayfd->r);
+	  x+=fmt_ulong(x,l);
+	  *x++=':';
+	  y=x;
+	  x+=fmt_cgivars(x,ctx_for_sockfd,c,matches.rm_eo,dir);
+
+	  /* fmt_cgivars uses "FOO=bar\n" but we want "FOO\000bar\000" */
+	  while (y<x) {
+	    if (*y=='=') {
+	      *y=0;
+	      while (y<x) {
+		if (*y=='\n') { *y=0; break; }
+		++y;
+	      }
+	    }
+	    ++y;
+	  }
+
+	  *x=',';
 	} else if (x->proxyproto == FASTCGI) {
 	  /* TODO */
 	}
-//	printf("%u %u\n",matches.rm_so,matches.rm_eo);
-//	printf("got data \"%s\"\n",c+matches.rm_eo);
       }
 
       if (logging) {
@@ -327,8 +507,7 @@ static int proxy_connection(int sockfd,const char* c,const char* dir,struct http
 
       if (x->port) {
 	/* proxy mode */
-	setstate(ctx_for_gatewayfd,PROXYSLAVE);
-//	ctx_for_gatewayfd->t=PROXYSLAVE;
+	changestate(ctx_for_gatewayfd,PROXYSLAVE);
 	fd_to_gateway=socket_tcp6();
 #ifdef STATE_DEBUG
 	ctx_for_gatewayfd->myfd=fd_to_gateway;
@@ -413,8 +592,7 @@ punt2:
 #ifdef STATE_DEBUG
 	  ctx_for_gatewayfd->myfd=fd_to_gateway;
 #endif
-	  setstate(ctx_for_gatewayfd,PROXYPOST);
-//	  ctx_for_gatewayfd->t=PROXYPOST;
+	  changestate(ctx_for_gatewayfd,PROXYPOST);
 	  if (fd_to_gateway==-1) {
 	    buffer_putsflush(buffer_2,"received no file descriptor for CGI\n");
 	    free(ctx_for_gatewayfd);
@@ -429,12 +607,10 @@ punt2:
 	}
 #ifdef SUPPORT_HTTPS
 	if (ctx_for_sockfd->t==HTTPSREQUEST)
-	  setstate(ctx_for_sockfd,HTTPSPOST);
-//	  ctx_for_sockfd->t=HTTPSPOST;
+	  changestate(ctx_for_sockfd,HTTPSPOST);
 	else
 #endif
-	setstate(ctx_for_sockfd,HTTPPOST);
-//	ctx_for_sockfd->t=HTTPPOST;
+	changestate(ctx_for_sockfd,HTTPPOST);
 	if (logging) {
 	  char bufsfd[FMT_ULONG];
 	  char bufs[FMT_ULONG];
@@ -489,15 +665,18 @@ punt2:
 	  size_t size_of_data_in_packet=array_bytes(&ctx_for_sockfd->r) - size_of_header - 1;
 	    /* the -1 is for the \0 we appended */
 
+	  changestate(ctx_for_sockfd,HTTPPOST);
 	  if (size_of_data_in_packet) {
 	    byte_copy(array_start(&ctx_for_sockfd->r),
 		      size_of_data_in_packet,
 		      array_start(&ctx_for_sockfd->r)+size_of_header);
 	    array_truncate(&ctx_for_sockfd->r,1,size_of_data_in_packet);
+/*
 	    if (content_length>size_of_data_in_packet)
-	      ctx_for_sockfd->still_to_copy=content_length-size_of_data_in_packet;
+	      ctx_for_sockfd->still_to_copy-=size_of_data_in_packet;
 	    else
 	      ctx_for_sockfd->still_to_copy=0;
+*/
 	  } else {
 	    array_trunc(&ctx_for_sockfd->r);
 	    ctx_for_sockfd->still_to_copy=content_length;
@@ -605,9 +784,14 @@ int proxy_write_header(int sockfd,struct http_data* h) {
      {FCGI_STDIN,           1, ""}
 #endif
     /* TODO */
+  } else if (h->proxyproto==SCGI) {
+    newheader=array_start(&h->r);
+    j=array_bytes(&h->r);
   }
   if (write(sockfd,newheader,j)!=j)
     return -1;
+  if (h->proxyproto==SCGI)
+    array_trunc(&h->r);
   H->sent+=j;
   return 0;
 }
@@ -615,12 +799,13 @@ int proxy_write_header(int sockfd,struct http_data* h) {
 
 
 int proxy_is_readable(int sockfd,struct http_data* H) {
-  char buf[8192];
+  char Buf[8194];
+  char* buf=Buf+1;
   int i;
   char* x;
   int res=0;
   struct http_data* peer=io_getcookie(H->buddy);
-  i=read(sockfd,buf,sizeof(buf));
+  i=read(sockfd,buf,sizeof(Buf)-2);
   if (i==-1) return -1;
   H->sent+=i;
   if (i==0) {
@@ -637,23 +822,28 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
       peer->buddy=-1;
       cleanup(sockfd);
     }
-    H->buddy=-1;
-    io_wantwrite(H->buddy);
     io_close(sockfd);
     return -3;
   } else {
     int needheader=0;
     if (!H->havefirst) {
       H->havefirst=1;
-      if (byte_diff(buf,5,"HTTP/"))
+      if (H->proxyproto==SCGI) {
+	if (case_starts(buf,"Status:")) {
+	  --buf; ++i;
+	  memcpy(buf,"HTTP/1.1 ",9);
+	  ++i;
+	} else
+	  needheader=1;
+      } else if (byte_diff(buf,5,"HTTP/"))
 	/* No "HTTP/1.0 200 OK", need to write our own header. */
 	needheader=1;
     }
     if (needheader) {
-      int j;
+      size_t j;
       x=malloc(i+100);
       if (!x) goto nomem;
-      j=fmt_str(x,"HTTP/1.0 200 Here you go\r\nServer: " RELEASE "\r\n");
+      j=fmt_str(x,"HTTP/1.1 200 Here you go\r\nServer: " RELEASE "\r\n");
       byte_copy(x+j,i,buf);
       i+=j;
     } else {
@@ -1335,11 +1525,11 @@ void httpresponse(struct http_data* h,int64 s,long headerlen) {
   ++rps1;
   array_cat0(&h->r);
   c=array_start(&h->r);
-  if (byte_diff(c,4,"GET ") && byte_diff(c,5,"POST ") &&
+  if (byte_diff(c,5,"GET /") && byte_diff(c,6,"POST /") &&
 #ifdef SUPPORT_PUT
-      byte_diff(c,4,"PUT ") &&
+      byte_diff(c,5,"PUT /") &&
 #endif
-      byte_diff(c,5,"HEAD ")) {
+      byte_diff(c,6,"HEAD /")) {
 e400:
     httperror(h,"400 Invalid Request","This server does not understand this HTTP verb.",0);
 
@@ -1484,16 +1674,6 @@ e404:
 	}
 #ifdef SUPPORT_PROXY
       } else if (fd==-3) {
-#if 0
-	/* bogus */
-	struct http_data* x=io_getcookie(h->buddy);
-	if (x) {
-	  char *c=array_start(&h->r);
-	  c[str_len(c)]=' ';
-	  array_catb(&x->r,array_start(&h->r),headerlen);
-	}
-	io_dontwantread(s);
-#endif
 	return;
 #endif
       } else {
@@ -1889,19 +2069,25 @@ void handle_write_proxyslave(int64 i,struct http_data* h) {
   /* it worked.  We wrote the header.  Now see if there is
     * POST data to write.  h->still_to_copy is Content-Length. */
 //	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
+  changestate(h,PROXYPOST);
   if (h->still_to_copy) {
-    setstate(h,PROXYPOST);
-//    h->t=PROXYPOST;
+    size_t l=h->still_to_copy;
+    if (l>array_bytes(&H->r)) l=array_bytes(&H->r);
+    if (l)
+      iob_addbuf(&H->iob,array_start(&H->r),l);
+#if 0
+	  char* towrite=malloc(size_of_data_in_packet);
+	  if (!towrite)
+	    return -2;
+	  memcpy(towrite,array_start(&ctx_for_sockfd->r)+size_of_header,size_of_data_in_packet);
+	  iob_addbuf_free(&ctx_for_sockfd->iob,towrite,size_of_data_in_packet);
+#endif
+
     handle_write_httppost(i,H);
-    return;
-//    goto httpposthandler;
-//	  io_wantwrite(h->buddy);
   } else {
     io_dontwantwrite(i);
     io_wantread(i);
   }
-  setstate(h,PROXYPOST);
-//  h->t=PROXYPOST;
 }
 
 #endif

@@ -636,7 +636,7 @@ freecloseabort:
       }
       byte_zero(x,sizeof(struct http_data));
       x->buddy=s; x->filefd=-1;
-      setstate(x,FTPPASSIVE);
+      changestate(x,FTPPASSIVE);
 //      x->t=FTPPASSIVE;
 #ifdef STATE_DEBUG
       x->myfd=h->buddy;
@@ -722,7 +722,7 @@ syntaxerror:
       if (!x) goto closeandgo;
       byte_zero(x,sizeof(struct http_data));
       x->buddy=s; x->filefd=-1;
-      setstate(x,FTPACTIVE);
+      changestate(x,FTPACTIVE);
 //      x->t=FTPACTIVE;
       x->destport=port;
       byte_copy(x->peerip,16,ip);
@@ -888,7 +888,7 @@ pasverror:
 #endif
     io_setcookie(n,H);
     io_close(i);
-    setstate(H,FTPSLAVE);
+    changestate(H,FTPSLAVE);
 //    H->t=FTPSLAVE;
 #ifdef TCP_NODELAY
     {
@@ -934,7 +934,7 @@ void handle_write_ftpactive(int64 i,struct http_data* h) {
       buffer_put(buffer_1,buf,fmt_ulong(buf,h->destport));
       buffer_putnlflush(buffer_1);
     }
-    setstate(h,FTPSLAVE);
+    changestate(h,FTPSLAVE);
 //    h->t=FTPSLAVE;
 #ifdef TCP_NODELAY
     {

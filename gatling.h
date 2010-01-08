@@ -16,6 +16,10 @@
 
 #include <time.h>
 
+#ifdef STATE_DEBUG
+#include <stdio.h>
+#endif
+
 #ifdef SUPPORT_FTP
 enum ftpstate {
   GREETING,
@@ -72,8 +76,8 @@ enum conntype {
   PROXYSLAVE,	/* write-to-proxy connection. */
 		/* write HTTP header; switch type to PROXYPOST */
   PROXYPOST,	/* while still_to_copy>0: write POST data; relay answer */
-  HTTPPOST,	/* type of HTTP request until POST data is completely
-		   written; read post data and write them to proxy */
+  HTTPPOST,	/* type of HTTP request with POST data
+		   read post data and write them to proxy (ctx->buddy) */
 #endif
 
 #ifdef SUPPORT_HTTPS
@@ -171,7 +175,7 @@ struct http_data {
 extern const char* state2string(enum conntype t);
 #endif
 
-static inline void setstate(struct http_data* x,enum conntype t) {
+static inline void changestate(struct http_data* x,enum conntype t) {
 #ifdef STATE_DEBUG
   if (x->t==UNUSED)
     printf("STATE: new fd %d: state %s\n",x->myfd,state2string(t));
@@ -327,5 +331,6 @@ extern int handle_ssl_error_code(int sock,int code,int reading);
 #endif
 
 extern char* magicelfvalue;
+extern char serverroot[];
 
 #endif
