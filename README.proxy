@@ -17,8 +17,6 @@ And then run fnord in the same directory like this:
 
   tcpserver -v -u `id -u nobody` -RHl localhost 0 8023 fnord-cgi
 
-The next step is a FastCGI backend and maybe a CGI backend.
-
 Another idea I have is to not relay the requests synchronously but
 through a request pool.  If there are more requests than slots in the
 pool, gatling could prioritize the requests through an external program.

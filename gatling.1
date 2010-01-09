@@ -3,7 +3,7 @@
 gatling \- high performance file server
 .SH SYNOPSIS
 .B gatling [-hnvVtdDfFUlaEe] [-i bind-to-ip] [-p bind-to-port] [-T seconds]
-        \fB[-u uid] [-c dir] [-w workgroup] [-P bytes] [-O ip/port/regex]\fR
+        \fB[-u uid] [-c dir] [-w workgroup] [-P bytes] [-O [f/]ip/port/regex]\fR
         \fB[-r redir-url] [-X timeout,sshd]
 .SH DESCRIPTION
 gatling is a HTTP and FTP server.  It will export the current working
@@ -86,6 +86,15 @@ connects on the SSL socket, but does not say anything for \fBtimeout\fR
 with that socket.  \fBsshd\fR is the full path name to sshd, plus the
 command line you want to give it, if any.  gatling automatically appends
 -i, so use this for example for -u0 to disable DNS lookups.
+
+Use \fB-O [flag/]ip/port/regex\fR to enable proxy mode, also used for
+SCGI and FastCGI.  To use the proxy mode, there has to be a ".proxy"
+file in the root of the virtual host it is meant for.  Specify ip and
+port to point to your app server, and give a regex to match the URI.
+Note: the regex needs to match the full file name, so use the extension
+for matching.  If no flags are given, HTTP proxying is used.  Otherwise,
+flags specifies the proxying mode: Use S for SCGI and F for FastCGI
+mode.  See README.php for an example.
 
 .SH "SIGNALS"
 Sending gatling SIGHUP will make it close all the server sockets (so you
