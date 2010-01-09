@@ -250,7 +250,7 @@ static size_t fmt_strblob(char* dst,const char* str,const char* blob,size_t n) {
   return x+1;
 }
 
-static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t urilen,const char* vhostdir) {
+static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t urilen,const char* vhostdir,size_t* headers) {
   /* input:
    *   dst: destination buffer, may be NULL
    *   h: http context, used to get to HTTP request
@@ -264,6 +264,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
    *   returns number of bytes written to dst
    *   if dst is NULL, returns number of buffer size needed
    *   writes environment entries to dst, separated by \n
+   *   writes count of headers written to *headers if non-NULL
    */
   char remoteaddr[IP6_FMT];
   char myaddr[IP6_FMT];
@@ -285,7 +286,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
     s+=n; if (dst) dst+=n;
   }
 
-  n=fmt_strm(dst,"SCGI=1\nSERVER_SOFTWARE=",RELEASE,"\n"); s+=n; if (dst) dst+=n;
+  n=fmt_strm(dst,"SERVER_SOFTWARE=",RELEASE,"\n"); s+=n; if (dst) dst+=n;
   {
     char* x=http_header(h,"Host");
     if (x) {
@@ -337,6 +338,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
   /* now translate all header lines into HTTP_* */
   /* for example Accept: -> HTTP_ACCEPT= */
   {
+    size_t hc=16;
     char* x=array_start(&h->r);
     x=strchr(x,'\n');
     while (x) {
@@ -365,9 +367,11 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
 	n=x-start;
 	if (dst) { byte_copy(dst,n,start); dst+=n+1; dst[-1]='\n'; } s+=n+1;
       }
+      ++hc;
 skipheader:
       x=strchr(x,'\n');
     }
+    if (headers) *headers=hc;
   }
   return s;
 }
@@ -429,7 +433,7 @@ freeandfail:
 	}
 	ctx_for_gatewayfd->proxyproto=x->proxyproto;
 	if (x->proxyproto == SCGI) {
-	  size_t l=fmt_cgivars(0,ctx_for_sockfd,c,matches.rm_eo,dir);
+	  size_t l=fmt_cgivars(0,ctx_for_sockfd,c,matches.rm_eo,dir,0)+sizeof("SCGI=1");
 	  char* x,* y;
 	  if (!array_allocate(&ctx_for_gatewayfd->r,1,l+fmt_ulong(0,l)+3))
 	    goto freeandfail;
@@ -437,7 +441,8 @@ freeandfail:
 	  x+=fmt_ulong(x,l);
 	  *x++=':';
 	  y=x;
-	  x+=fmt_cgivars(x,ctx_for_sockfd,c,matches.rm_eo,dir);
+	  x+=fmt_cgivars(x,ctx_for_sockfd,c,matches.rm_eo,dir,0);
+	  x+=fmt_str(x,"SCGI=1\n");
 
 	  /* fmt_cgivars uses "FOO=bar\n" but we want "FOO\000bar\000" */
 	  while (y<x) {
@@ -453,7 +458,89 @@ freeandfail:
 
 	  *x=',';
 	} else if (x->proxyproto == FASTCGI) {
-	  /* TODO */
+	  size_t hc;
+	  size_t l=fmt_cgivars(0,ctx_for_sockfd,c,matches.rm_eo,dir,&hc);
+	  char* x,* y;
+	  /* fmt_cgivars writes "FOO=barbaz\n" but we need
+	   * "\003\006FOObarbaz"; if a key or value is longer than 127,
+	   * the length takes up four bytes instead of one.  A
+	   * conservative upper bound on additional space used is 
+	   * thus the number of headers (hc) times 6. */
+
+	  /* space calculation with fastcgi boilerplate overhead:
+	   * 16 for {FCGI_BEGIN_REQUEST,   1, {FCGI_RESPONDER, 0}}
+	   * 8 for {FCGI_PARAMS,          1,
+	   * l for the actual params
+	   * 8 for {FCGI_PARAMS,          1, ""}
+	   * 8 for {FCGI_STDIN,           1, ""}
+	   */
+	  if (!array_allocate(&ctx_for_gatewayfd->r,1,l+hc*6+16+8+8+8+2))
+	    goto freeandfail;
+	  x=array_start(&ctx_for_gatewayfd->r);
+	  byte_copy(x,24,"\x01\x01\x00\x01\x00\x08\x00\x00" /* FCGI_Record: FCGI_BEGIN_REQUEST (1) */
+			 "\x00\x01\x00\x00\x00\x00\x00\x00" /* FCGI_BeginRequestBody */
+			 "\x01\x04\x00\x01\x00\x00\x00\x00" /* FCGI_Record: FCGI_PARAMS (4) */
+			);
+	  /* We need to convert the key-value pairs, but unfortunately
+	   * that expansion may require more space than the unexpanded
+	   * version.  So we allocate for the worst case and write the
+	   * original towards the end of the allocated space, so we can
+	   * expand inside the same buffer. */
+	  y=x+hc*6+16+8+8+8+2;
+	  fmt_cgivars(y,ctx_for_sockfd,c,matches.rm_eo,dir,&hc);
+	  x+=24;
+	  {
+	    size_t a=0;
+	    size_t b;
+	    size_t kl,vl,prev;
+	    for (b=kl=vl=prev=0; b<l; ++b) {
+	      if (y[b]=='=') {
+		kl=b-prev;
+		prev=b+1;
+	      } else if (y[b]=='\n') {
+		vl=b-prev;
+		prev=b+1;
+		if (kl<127) {
+		  x[a]=kl;
+		  ++a;
+		} else {
+		  uint32_pack_big(x+a,kl|0x80000000u);
+		  a+=4;
+		}
+		if (vl<127) {
+		  x[a]=vl;
+		  ++a;
+		} else {
+		  uint32_pack_big(x+a,vl|0x80000000u);
+		  a+=4;
+		}
+		byte_copy(x+a,kl,y+b-vl-kl-1); a+=kl;
+		byte_copy(x+a,vl,y+b-vl); a+=vl;
+	      }
+	    }
+	    x[a]=x[a+1]=0; a+=2;
+	    x[-4]=a>>8;	/* adjust length field in FCGI_Record */
+	    x[-3]=a&0xff;
+	    array_truncate(&ctx_for_gatewayfd->r,1,a+24+8+8);
+	    x+=a;
+	    byte_copy(x,8,"\x01\x04\x00\x01\x00\x00\x00\x00"); /* FCGI_Record: FCGI_PARAMS (4) */
+	    x+=8;
+
+	    {
+	      char* cl=http_header(ctx_for_sockfd,"Content-Length");
+	      unsigned long long content_length=0;
+	      if (cl) {
+		char c;
+		if ((c=cl[scan_ulonglong(cl,&content_length)])!='\r' && c!='\n') content_length=0;
+	      }
+	      if (content_length)
+		array_truncate(&ctx_for_gatewayfd->r,1,a+24+8); /* shave off 8 bytes */
+	      else {
+		byte_copy(x,8,"\x01\x05\x00\x01\x00\x00\x00\x00"); /* FCGI_Record: FCGI_STDIN (5) */
+		x+=8;
+	      }
+	    }
+	  }
 	}
       }
 
@@ -704,21 +791,6 @@ punt2:
   return -2;
 }
 
-unsigned int fmt_fastcgi_keyvalue(char* dest,const char* key,const char* value,unsigned int vlen) {
-  int l,o;
-  dest[0]=l=strlen(key);
-  if (vlen<127) {
-    dest[1]=vlen;
-    o=2;
-  } else {
-    uint32_pack_big(dest+1,vlen);
-    o=5;
-  }
-  byte_copy(dest+o,l,key);
-  byte_copy(dest+o+l,vlen,value);
-  return vlen+o+l;
-}
-
 int proxy_write_header(int sockfd,struct http_data* h) {
   /* assume we can write the header in full. */
   /* slight complication: we need to turn keep-alive off and we need to
@@ -747,44 +819,7 @@ int proxy_write_header(int sockfd,struct http_data* h) {
     j+=fmt_str(newheader+j,"Connection: close\r\nX-Forwarded-For: ");
     j+=fmt_ip6c(newheader+j,H->peerip);
     j+=fmt_str(newheader+j,"\r\n\r\n");
-  } else if (h->proxyproto==FASTCGI) {
-    newheader=alloca(hlen*4+400);
-#if 0
-         typedef struct {
-             unsigned char version;
-             unsigned char type;
-             unsigned char requestIdB1;
-             unsigned char requestIdB0;
-             unsigned char contentLengthB1;
-             unsigned char contentLengthB0;
-             unsigned char paddingLength;
-             unsigned char reserved;
-             unsigned char contentData[contentLength];
-             unsigned char paddingData[paddingLength];
-         } FCGI_Record;
-#endif
-    /* {FCGI_BEGIN_REQUEST,   1, {FCGI_RESPONDER, 0}} */
-#if 0
-         typedef struct {
-             unsigned char roleB1;
-             unsigned char roleB0;
-             unsigned char flags;
-             unsigned char reserved[5];
-         } FCGI_BeginRequestBody;
-#endif
-    byte_copy(newheader,24,"\x01\x01\x00\x01\x00\x08\x00\x00" /* FCGI_Record: FCGI_BEGIN_REQUEST */
-	                   "\x00\x01\x00\x00\x00\x00\x00\x00" /* FCGI_BeginRequestBody */
-			   "\x01\x04\x00\x01\x00\x00\x00\x00" /* fcgirecord: FCGI_PARAMS */
-			   );
-    j=24;
-
-#if 0
-     {FCGI_PARAMS,          1, "\013\002SERVER_PORT80\013\016SERVER_ADDR199.170.183.42 ... "}
-     {FCGI_PARAMS,          1, ""}
-     {FCGI_STDIN,           1, ""}
-#endif
-    /* TODO */
-  } else if (h->proxyproto==SCGI) {
+  } else if (h->proxyproto==FASTCGI || h->proxyproto==SCGI) {
     newheader=array_start(&h->r);
     j=array_bytes(&h->r);
   }
@@ -799,16 +834,21 @@ int proxy_write_header(int sockfd,struct http_data* h) {
 
 
 int proxy_is_readable(int sockfd,struct http_data* H) {
+  /* read data from proxy and queue it for writing to browser
+   * connection, also add "HTTP/1.0 200 OK" header if necessary */
   char Buf[8194];
   char* buf=Buf+1;
   int i;
   char* x;
-  int res=0;
   struct http_data* peer=io_getcookie(H->buddy);
+  if (!peer) return -1;
   i=read(sockfd,buf,sizeof(Buf)-2);
   if (i==-1) return -1;
   H->sent+=i;
+  /* TODO: need to parse fastcgi packets from proxy, remove fastcgi
+   * headers */
   if (i==0) {
+eof:
     if (logging) {
       char numbuf[FMT_ULONG];
       char r[FMT_ULONG];
@@ -818,14 +858,51 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
       s[fmt_ulonglong(s,peer->sent)]=0;
       buffer_putmflush(buffer_1,"cgiproxy_read0 ",numbuf," ",r," ",s,"\n");
     }
-    if (peer) {
-      peer->buddy=-1;
-      cleanup(sockfd);
-    }
+    if (H->buddy) peer->buddy=-1;
+    cleanup(sockfd);
     io_close(sockfd);
     return -3;
   } else {
     int needheader=0;
+    size_t cl=0,rs=0;
+    int gotone=0;
+
+    if (H->proxyproto==FASTCGI) {
+      /* For FastCGI, we get the data in packets, which we need to parse.
+      * Which also means we have to deal with partial packets.  We do
+      * this by putting the packets in our H->r until we have assembled
+      * one. */
+      array_catb(&H->r,buf,i);
+      if (array_failed(&H->r)) return -1;
+nextpacket:
+      x=array_start(&H->r);
+      rs=array_bytes(&H->r);
+      if (rs<8) return 0;	/* not done, need more data */
+      /* we have a header */
+      errno=EINVAL;
+      if (x[0]!=1) return -1;
+      /* we expect one of FCGI_STDOUT, FCGI_STDERR, or
+	* FCGI_END_REQUEST */
+      if (x[1]!=6 && x[1]!=7 && x[1]!=3) return -1;
+      /* the request ID must be 1, because that is what we sent */
+      if (x[2]!=0 || x[3]!=1) return -1;
+      cl=(x[4]<<8)|x[5];
+      if (rs<8+cl+(unsigned char)(x[6])) {
+	if (gotone) goto success;
+	return 0;	/* not done, need more data */
+      }
+      /* got enough data for one packet.  look at packet. */
+      if (x[1]==3) {
+	io_wantwrite(H->buddy);
+	H->buddy=-1;
+	goto eof;	/* FCGI_END_REQUEST */
+      }
+      if (x[1]==6) { /* FCGI_STDOUT */
+	buf=x+8;
+	i=cl;
+      }
+    }
+
     if (!H->havefirst) {
       H->havefirst=1;
       if (H->proxyproto==SCGI) {
@@ -851,11 +928,23 @@ int proxy_is_readable(int sockfd,struct http_data* H) {
       if (!x) goto nomem;
       byte_copy(x,i,buf);
     }
-    if (peer) iob_addbuf_free(&peer->iob,x,i);
+    iob_addbuf_free(&peer->iob,x,i);
+    gotone=1;
+
+    if (H->proxyproto==FASTCGI) {
+    /* now, if we got this far, we need to remove the packet from the
+     * buffer */
+      x=array_start(&H->r);
+      cl+=8;
+      if (rs>cl) byte_copy(x,rs-cl,x+cl);
+      array_truncate(&H->r,1,rs-cl);
+      if (rs>cl && rs-cl>=8) goto nextpacket;
+    }
   }
+success:
   io_dontwantread(sockfd);
   io_wantwrite(H->buddy);
-  return res;
+  return 0;
 nomem:
   if (logging) {
     char numbuf[FMT_ULONG];
@@ -867,6 +956,7 @@ nomem:
 }
 
 int read_http_post(int sockfd,struct http_data* H) {
+  /* read post data from browser, write to proxy */
   char buf[8192];
   int i;
   unsigned long long l=H->still_to_copy;
@@ -888,10 +978,21 @@ int read_http_post(int sockfd,struct http_data* H) {
   i=read(sockfd,buf,l);
 //  printf("read_http_post: want to read %ld bytes from %d; got %d\n",l,sockfd,i);
   if (i<1) return -1;
+
   H->received+=i;
   H->still_to_copy-=i;
 //  printf("still_to_copy read_http_post: %p %llu -> %llu\n",H,H->still_to_copy+i,H->still_to_copy);
+  /* we got some data.  Now, for FastCGI we need to add a header before
+   * writing it to the proxy */
+  if (H->proxyproto==FASTCGI) {
+    char tmp[8]="\x01\x05\x00\x01\x00\x00\x00\x00";
+    tmp[4]=i>>8;
+    tmp[5]=i&0xff;
+    array_catb(&H->r,tmp,8); /* FCGI_Record: FCGI_STDIN (5) */
+  }
   array_catb(&H->r,buf,i);
+  if (H->proxyproto==FASTCGI && H->still_to_copy==0)
+    array_catb(&H->r,"\x01\x05\x00\x01\x00\x00\x00\x00",8); /* FCGI_Record: FCGI_STDIN (5) */
   if (array_failed(&H->r))
     return -1;
   return 0;
@@ -1903,15 +2004,12 @@ void handle_read_proxypost(int64 i,struct http_data* H) {
   switch (proxy_is_readable(i,H)) {
   case -1:
     {
-      struct http_data* h=io_getcookie(H->buddy);
       if (logging) {
 	char numbuf[FMT_ULONG];
 	numbuf[fmt_ulong(numbuf,i)]=0;
 
 	buffer_putmflush(buffer_1,"proxy_read_error ",numbuf," ",strerror(errno),"\nclose/acceptfail ",numbuf,"\n");
       }
-      H->buddy=-1;
-      h->buddy=-1;
       cleanup(i);
     }
     break;
@@ -2051,6 +2149,7 @@ void handle_write_proxyslave(int64 i,struct http_data* h) {
   struct http_data* H;
   H=io_getcookie(h->buddy);
   if (proxy_write_header(i,h)==-1) {
+kaputt:
     if (logging) {
       buffer_puts(buffer_1,"proxy_connect_error ");
       buffer_putulong(buffer_1,i);
@@ -2070,19 +2169,31 @@ void handle_write_proxyslave(int64 i,struct http_data* h) {
     * POST data to write.  h->still_to_copy is Content-Length. */
 //	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
   changestate(h,PROXYPOST);
+  array_trunc(&h->r);
   if (h->still_to_copy) {
     size_t l=h->still_to_copy;
     if (l>array_bytes(&H->r)) l=array_bytes(&H->r);
-    if (l)
-      iob_addbuf(&H->iob,array_start(&H->r),l);
-#if 0
-	  char* towrite=malloc(size_of_data_in_packet);
-	  if (!towrite)
-	    return -2;
-	  memcpy(towrite,array_start(&ctx_for_sockfd->r)+size_of_header,size_of_data_in_packet);
-	  iob_addbuf_free(&ctx_for_sockfd->iob,towrite,size_of_data_in_packet);
-#endif
-
+    if (l) {
+      /* for FASTCGI, we need to add a header */
+      if (H->proxyproto==FASTCGI) {
+	char* tmp,* cur;
+	cur=array_start(&H->r);
+	while (l) {	/* this basically can't happen */
+	  size_t chunk=l;
+	  if (chunk>32768) chunk=32768;
+	  tmp=malloc(8);
+	  if (!tmp) goto kaputt;
+	  memcpy(tmp,"\x01\x05\x00\x01\x00\x00\x00\x00",8);
+	  tmp[4]=chunk>>8;
+	  tmp[5]=chunk&0xff;
+	  iob_addbuf_free(&H->iob,tmp,8);
+	  iob_addbuf(&H->iob,cur,chunk);
+	  cur+=chunk;
+	  l-=chunk;
+	}
+      } else
+	iob_addbuf(&H->iob,array_start(&H->r),l);
+    }
     handle_write_httppost(i,H);
   } else {
     io_dontwantwrite(i);

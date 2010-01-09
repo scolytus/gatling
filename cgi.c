@@ -2,9 +2,17 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fmt.h>
+#include <scan.h>
+#include <socket.h>
+#include <getopt.h>
+#include <ip6.h>
 #include <buffer.h>
 
 #define MAXARGLEN (64*1024)
+
+enum {
+  CGI, SCGI, FASTCGI
+} cgimode;
 
 /* return content length */
 static long do_cgi(char** res) {
@@ -47,6 +55,7 @@ int main(int argc,char* argv[],char* envp[]) {
   int i;
   char* c;
   long l;
+  unsigned long port;
   (void)argc;
   (void)argv;
   buffer_puts(buffer_1,"Content-Type: text/plain\r\n\r\n");

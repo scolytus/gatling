@@ -276,19 +276,8 @@ void cleanup(int64 fd) {
 	h->t==HTTPSRESPONSE) --https_connections;
 #endif
 
-#if defined(SUPPORT_FTP) || defined(SUPPORT_PROXY)
-    if (
-#ifdef SUPPORT_FTP
-	h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE ||
-#endif
-#ifdef SUPPORT_PROXY
-	h->t==PROXYSLAVE ||
-#endif
-	h->t==HTTPREQUEST
-#ifdef SUPPORT_HTTPS
-			  || h->t==HTTPSREQUEST || h->t==HTTPSRESPONSE
-#endif
-	) {
+#if defined(SUPPORT_FTP)
+    if (h->t==FTPSLAVE || h->t==FTPACTIVE || h->t==FTPPASSIVE) {
       if (buddyfd!=-1) {
 	struct http_data* b=io_getcookie(buddyfd);
 	if (b)
@@ -1522,8 +1511,8 @@ usage:
 		  "\t\tuse -C+x to assume executables are CGIs\n"
 #endif
 #ifdef SUPPORT_PROXY
-		  "\t-O [flag]/ip/port/regex\tregex for proxy mode (\"F/127.0.0.1/8001/\\.jsp$\")\n"
-		  "\t\tflags: F - FastCGI mode, J - JSP mode\n"
+		  "\t-O [flag/]ip/port/regex\tregex for proxy mode (\"F/127.0.0.1/8001/\\.jsp$\")\n"
+		  "\t\tflags: F - FastCGI, S - SCGI, J - JSP\n"
 #endif
 #ifdef SUPPORT_SMB
 		  "\t-s\tprovide SMB service (default)\n"
