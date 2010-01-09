@@ -256,7 +256,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
    *   h: http context, used to get to HTTP request
    *   uri: pointer to decoded URI, truncated at '?', after leading '/'
    *   urilen: last char in regex match
-   *     uri="script.php/path_info?query_string"
+   *     uri="script.php/path_info"
    *                    ^ uri+urilen
    *   vhostdir: virtual hosting dir, e.g. "www.fefe.de:80" or "default"
    *   needs global: char serverroot[]
@@ -271,6 +271,8 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
   char tmp[FMT_ULONG];
   size_t n,s;
   s=0;
+
+  while (urilen && uri[0]=='/') { ++uri; --urilen; }
 
   remoteaddr[fmt_ip6c(remoteaddr,h->peerip)]=0;
   myaddr[fmt_ip6c(myaddr,h->myip)]=0;
@@ -320,7 +322,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
     n=fmt_strm(dst,"SCRIPT_FILENAME=",serverroot,"/",vhostdir); s+=n; if (dst) dst+=n;
     n=fmt_strblob(dst,"/",uri,urilen); s+=n; if (dst) dst+=n;
 
-    if (uri[urilen]!='?') {	/* we have a PATH_INFO */
+    if (uri[urilen]=='/') {	/* we have a PATH_INFO */
       /* the situation is like this:
 	 uri="script.cgi/pathinfo"
 	                ^urilen
@@ -422,7 +424,6 @@ static int proxy_connection(int sockfd,char* c,const char* dir,struct http_data*
 	      c[matches.rm_eo]=0;
 	      r=stat(d,&ss);
 	      c[matches.rm_eo]=save;
-	      goto freeandfail;
 	      if (r) goto freeandfail;
 	    } else {
 freeandfail:
