@@ -887,7 +887,7 @@ nextpacket:
       if (x[1]!=6 && x[1]!=7 && x[1]!=3) return -1;
       /* the request ID must be 1, because that is what we sent */
       if (x[2]!=0 || x[3]!=1) return -1;
-      cl=(x[4]<<8)|x[5];
+      cl=((unsigned char)x[4]<<8)|(unsigned char)x[5];
       if (rs<8+cl+(unsigned char)(x[6])) {
 	if (gotone) goto success;
 	return 0;	/* not done, need more data */
@@ -936,7 +936,7 @@ nextpacket:
     /* now, if we got this far, we need to remove the packet from the
      * buffer */
       x=array_start(&H->r);
-      cl+=8;
+      cl+=8+(unsigned char)(x[6]);
       if (rs>cl) byte_copy(x,rs-cl,x+cl);
       array_truncate(&H->r,1,rs-cl);
       if (rs>cl && rs-cl>=8) goto nextpacket;
