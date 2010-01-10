@@ -288,11 +288,12 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
     s+=n; if (dst) dst+=n;
   }
 
-  n=fmt_strm(dst,"SERVER_SOFTWARE=",RELEASE,"\n"); s+=n; if (dst) dst+=n;
+  n=fmt_strm(dst,"SERVER_SOFTWARE=gatling\n"); s+=n; if (dst) dst+=n;
   {
     char* x=http_header(h,"Host");
     if (x) {
-      size_t j=str_chr(x,'\n'); if (j && x[j-1]=='\r') { --j; }
+      size_t j;
+      for (j=0; x[j]!=':' && x[j]!='\r' && x[j]!='\n'; ++j) ;
       n=fmt_strblob(dst,"SERVER_NAME=",x,j);
     } else
       n=fmt_strm(dst,"SERVER_NAME=",remoteaddr,"\n");
@@ -304,6 +305,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
   n=fmt_strm(dst,"REMOTE_ADDR=",remoteaddr,"\n"); s+=n; if (dst) dst+=n;
   tmp[fmt_ulong(tmp,h->peerport)]=0;
   n=fmt_strm(dst,"REMOTE_PORT=",tmp,"\n"); s+=n; if (dst) dst+=n;
+  n=fmt_strm(dst,"DOCUMENT_ROOT=",serverroot,"/",vhostdir,"\n"); s+=n; if (dst) dst+=n;
   n=fmt_strm(dst,"GATEWAY_INTERFACE=CGI/1.1\nSERVER_PROTOCOL=HTTP/1.1\n"); s+=n; if (dst) dst+=n;
   {
     char* x=array_start(&h->r);
@@ -340,9 +342,10 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
   /* now translate all header lines into HTTP_* */
   /* for example Accept: -> HTTP_ACCEPT= */
   {
-    size_t hc=16;
+    size_t hc=17;
     char* x=array_start(&h->r);
-    x=strchr(x,'\n');
+    char* max=x+array_bytes(&h->r);
+    for (; x<max && *x!='\n'; ++x) ;
     while (x) {
       char* olddst=dst;
       ++x;
