@@ -499,7 +499,7 @@ freeandfail:
 	    size_t b;
 	    size_t kl,vl,prev;
 	    for (b=kl=vl=prev=0; b<l; ++b) {
-	      if (y[b]=='=') {
+	      if (y[b]=='=' && kl==0) {
 		kl=b-prev;
 		prev=b+1;
 	      } else if (y[b]=='\n') {
@@ -521,6 +521,7 @@ freeandfail:
 		}
 		byte_copy(x+a,kl,y+b-vl-kl-1); a+=kl;
 		byte_copy(x+a,vl,y+b-vl); a+=vl;
+		kl=0; vl=0;
 	      }
 	    }
 	    x[a]=x[a+1]=0; a+=2;
