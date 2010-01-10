@@ -406,6 +406,7 @@ static int proxy_connection(int sockfd,char* c,const char* dir,struct http_data*
 
       if (!(ctx_for_gatewayfd=(struct http_data*)malloc(sizeof(struct http_data)))) return -1;
       byte_zero(ctx_for_gatewayfd,sizeof(struct http_data));
+      ctx_for_gatewayfd->filefd=-1;
 
       if (!x->file_executable) {
 
@@ -712,6 +713,7 @@ punt2:
 	}
 #endif
       }
+
       ctx_for_gatewayfd->buddy=sockfd;
       ctx_for_sockfd->buddy=fd_to_gateway;
       io_setcookie(fd_to_gateway,ctx_for_gatewayfd);
@@ -861,7 +863,6 @@ eof:
     }
     if (H->buddy) peer->buddy=-1;
     cleanup(sockfd);
-    io_close(sockfd);
     return -3;
   } else {
     int needheader=0;
