@@ -39,6 +39,8 @@
 
 #include "havealloca.h"
 
+char* defaultindex;
+
 MD5_CTX md5_ctx;
 
 char* http_header_blob(char* b,long l,char* h) {
@@ -911,7 +913,7 @@ nextpacket:
 
     if (!H->havefirst) {
       H->havefirst=1;
-      if (H->proxyproto==SCGI) {
+      if (H->proxyproto==SCGI || H->proxyproto==FASTCGI) {
 	if (case_starts(buf,"Status:")) {
 	  --buf; ++i;
 	  memcpy(buf,"HTTP/1.1 ",9);
@@ -1157,7 +1159,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 
   /* first, we need to strip "?.*" from the end */
   i=str_chr(filename,'?');
-  Filename=alloca(i+5);	/* enough space for .gz and .bz2 */
+  Filename=alloca(i+6+(defaultindex?strlen(defaultindex):0));	/* enough space for .gz and .bz2 */
   byte_copy(Filename,i+1,filename);
   if (Filename[i]=='?') { Filename[i]=0; args=filename+i+1; }
   /* second, we need to un-urlencode the file name */
@@ -1236,6 +1238,30 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
 #endif
   if (Filename[(i=str_len(Filename))-1] == '/') {
     /* Damn.  Directory. */
+
+    if (defaultindex) {
+      strcpy(Filename+i,defaultindex);
+      if (stat(Filename+1,ss)==0) {
+	/* check if the new filename matches any proxy rule */
+#ifdef SUPPORT_PROXY
+	if (!noproxy) {
+	  int res;
+	  switch ((res=proxy_connection(sockfd,Filename,dir,h,0,args))) {
+	  case -2: break;
+	  case -1: return -1;
+	  default:
+	    if (res>=0) {
+	      h->buddy=res;
+	      return -3;
+	    }
+	  }
+	}
+#endif
+	goto itsafile;
+      } else
+	Filename[i]=0;
+    }
+
     if (Filename[1] && chdir(Filename+1)==-1) return -1;
 #ifdef SUPPORT_HTACCESS
     if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
@@ -1323,16 +1349,19 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       }
     }
   } else {
+itsafile:
 #ifdef SUPPORT_HTACCESS
-    char* fn=Filename+1;
-    char* x=alloca(strlen(fn)+30);
-    int lso=str_rchr(fn,'/');
-    if (fn[lso]=='/') {
-      byte_copy(x,lso+1,fn);
-      str_copy(x+lso+1,".htaccess");
-      if (http_dohtaccess(h,x,nobody)==0) return -5;
-    } else
-      if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
+    {
+      char* fn=Filename+1;
+      char* x=alloca(strlen(fn)+30);
+      int lso=str_rchr(fn,'/');
+      if (fn[lso]=='/') {
+	byte_copy(x,lso+1,fn);
+	str_copy(x+lso+1,".htaccess");
+	if (http_dohtaccess(h,x,nobody)==0) return -5;
+      } else
+	if (http_dohtaccess(h,".htaccess",nobody)==0) return -5;
+    }
 #endif
 
     /* For /test/t.cgi/fnord open_for_reading fails with ENOTDIR. */

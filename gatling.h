@@ -332,5 +332,6 @@ extern int handle_ssl_error_code(int sock,int code,int reading);
 
 extern char* magicelfvalue;
 extern char serverroot[];
+extern char* defaultindex;
 
 #endif

@@ -1166,7 +1166,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
     found=0;
     for (;;) {
-      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:");
+      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:I:");
       if (c==-1) break;
       switch (c) {
       case 'c':
@@ -1324,7 +1324,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:");
+    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:I:");
     if (c==-1) break;
     switch (c) {
     case 'U':
@@ -1362,6 +1362,9 @@ int main(int argc,char* argv[],char* envp[]) {
 	buffer_puts(buffer_2,optarg+i+1);
 	buffer_putsflush(buffer_2,".\n");
       }
+      break;
+    case 'I':
+      defaultindex=optarg;
       break;
     case 'p':
       if (lastopt==FTP)
@@ -1481,7 +1484,7 @@ usage:
       buffer_putsflush(buffer_2,
 		  "usage: gatling [-hnvVtdDfFUa] [-i bind-to-ip] [-p bind-to-port] [-T seconds]\n"
 		  "               [-u uid] [-c dir] [-w workgroup] [-P bytes] [-O ip/port/regex]\n"
-		  "               [-r redirurl] [-N processes]\n"
+		  "               [-r redirurl] [-N processes] [-I filename]\n"
 		  "\n"
 		  "\t-h\tprint this help\n"
 		  "\t-v\tenable virtual hosting mode\n"
@@ -1510,6 +1513,7 @@ usage:
 		  "\t-C regex\tregex for local CGI execution (\"\\.cgi\")\n"
 		  "\t\tuse -C+x to assume executables are CGIs\n"
 #endif
+		  "\t-I name\talso try name, used for \"index.php\" etc\n"
 #ifdef SUPPORT_PROXY
 		  "\t-O [flag/]ip/port/regex\tregex for proxy mode (\"F/127.0.0.1/8001/\\.jsp$\")\n"
 		  "\t\tflags: F - FastCGI, S - SCGI, J - JSP\n"
