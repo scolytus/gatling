@@ -420,6 +420,7 @@ static int proxy_connection(int sockfd,char* c,const char* dir,struct http_data*
 	printf("got data \"%s\"\n",c+matches.rm_eo);
 #endif
 
+	/* for SCGI and FASTCGI we expect the file to exist */
 	if (x->proxyproto == SCGI || x->proxyproto == FASTCGI) {
 	  struct stat ss;
 	  /* does the file actually exist? */
@@ -476,7 +477,7 @@ freeandfail:
 
 	  /* space calculation with fastcgi boilerplate overhead:
 	   * 16 for {FCGI_BEGIN_REQUEST,   1, {FCGI_RESPONDER, 0}}
-	   * 8 for {FCGI_PARAMS,          1,
+	   * 8 for {FCGI_PARAMS,          1, ...}
 	   * l for the actual params
 	   * 8 for {FCGI_PARAMS,          1, ""}
 	   * 8 for {FCGI_STDIN,           1, ""}
@@ -549,6 +550,13 @@ freeandfail:
 	      }
 	    }
 	  }
+	} else if (x->proxyproto==HTTP) {
+	  size_t size_of_header=header_complete(ctx_for_sockfd);
+	  size_t i;
+	  char* x=array_start(&ctx_for_sockfd->r);
+	  for (i=0; i<size_of_header && x[i]!='\n'; ++i)
+	    if (x[i]==0) x[i]=' ';
+	  array_catb(&ctx_for_gatewayfd->r,x,size_of_header);
 	}
       }
 
@@ -612,6 +620,7 @@ freeandfail:
 punt:
 	  io_close(fd_to_gateway);
 punt2:
+	  array_reset(&ctx_for_gatewayfd->r);
 	  free(ctx_for_gatewayfd);
 	  return -1;
 	}
