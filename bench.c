@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <buffer.h>
 #include <fcntl.h>
+#include <string.h>
 #include "havealloca.h"
 
 void usage() {

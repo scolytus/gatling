@@ -75,10 +75,10 @@ version.h: CHANGES
 	$(CC) -c $< -I. $(CFLAGS)
 
 https.o: http.c
-	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
+	$(CC) -c http.c -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
 
 hitprofile.o: referrer.c
-	$(CC) -c $< -o $@ -I. $(CFLAGS) -DALL
+	$(CC) -c referrer.c -o $@ -I. $(CFLAGS) -DALL
 
 hitprofile: hitprofile.o
 

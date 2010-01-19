@@ -9,6 +9,7 @@ netname:      reserved 10.* range
 
   This format is the convention of the RIPE whois records for IP objects
 */
+#include <string.h>
 #include <buffer.h>
 #include <scan.h>
 #include <unistd.h>
