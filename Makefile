@@ -10,7 +10,7 @@ acc hcat referrer hitprofile matchiprange
 all: $(TARGET)
 
 CC=gcc
-CFLAGS=-pipe -Wall -O -I../libowfat/
+CFLAGS=-pipe -Wall -O -I../libowfat/ -I/usr/local/include
 LDFLAGS=-s -L../libowfat/ -lowfat
 
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
