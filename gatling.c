@@ -2142,6 +2142,7 @@ usage:
   }
 #endif
   io_finishandshutdown();
+  _exit(0);
   return 0;
 }
 

@@ -271,7 +271,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
   char remoteaddr[IP6_FMT];
   char myaddr[IP6_FMT];
   char tmp[FMT_ULONG];
-  size_t n,s;
+  size_t n,s,hc;
   s=0;
 
   while (urilen && uri[0]=='/') { ++uri; --urilen; }
@@ -341,10 +341,22 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
 
   }
 
+  hc=17;
+  if (h->proxyproto==SCGI) {
+    n=fmt_strm(dst,"SCGI=1\n"); s+=n; if (dst) dst+=n;
+    ++hc;
+  }
+
+#ifdef SUPPORT_HTTPS
+  if (h->t == HTTPSPOST) {
+    n=fmt_strm(dst,"HTTPS=1\n"); s+=n; if (dst) dst+=n;
+    ++hc;
+  }
+#endif
+
   /* now translate all header lines into HTTP_* */
   /* for example Accept: -> HTTP_ACCEPT= */
   {
-    size_t hc=17;
     char* x=array_start(&h->r);
     char* max=x+array_bytes(&h->r);
     for (; x<max && *x!='\n'; ++x) ;
@@ -441,7 +453,7 @@ freeandfail:
 	}
 	ctx_for_gatewayfd->proxyproto=x->proxyproto;
 	if (x->proxyproto == SCGI) {
-	  size_t l=fmt_cgivars(0,ctx_for_sockfd,c,matches.rm_eo,dir,0)+sizeof("SCGI=1");
+	  size_t l=fmt_cgivars(0,ctx_for_sockfd,c,matches.rm_eo,dir,0);
 	  char* x,* y;
 	  if (!array_allocate(&ctx_for_gatewayfd->r,1,l+fmt_ulong(0,l)+3))
 	    goto freeandfail;
@@ -450,7 +462,6 @@ freeandfail:
 	  *x++=':';
 	  y=x;
 	  x+=fmt_cgivars(x,ctx_for_sockfd,c,matches.rm_eo,dir,0);
-	  x+=fmt_str(x,"SCGI=1\n");
 
 	  /* fmt_cgivars uses "FOO=bar\n" but we want "FOO\000bar\000" */
 	  while (y<x) {
@@ -680,6 +691,12 @@ punt2:
 	write(forksock[0],ra,strlen(ra));
 	b=ctx_for_sockfd->peerport; write(forksock[0],&b,2);
 	b=ctx_for_sockfd->myport; write(forksock[0],&b,2);
+#ifdef SUPPORT_HTTPS
+	{
+	  char ssl=ctx_for_sockfd->t==HTTPSREQUEST;
+	  write(forksock[0],&ssl,1);
+	}
+#endif
 
 	read(forksock[0],&a,4);		/* code; 0 means OK */
 	read(forksock[0],&len,4);	/* length of error message */
@@ -770,6 +787,11 @@ punt2:
 	  size_t size_of_data_in_packet=array_bytes(&ctx_for_sockfd->r) - size_of_header - 1;
 	    /* the -1 is for the \0 we appended */
 
+#ifdef SUPPORT_HTTPS
+	  if (ctx_for_sockfd->t==HTTPSREQUEST)
+	    changestate(ctx_for_sockfd,HTTPSPOST);
+	  if (ctx_for_sockfd->t!=HTTPSPOST)
+#endif
 	  changestate(ctx_for_sockfd,HTTPPOST);
 	  if (size_of_data_in_packet) {
 	    byte_copy(array_start(&ctx_for_sockfd->r),
@@ -2235,8 +2257,10 @@ kaputt:
 	  cur+=chunk;
 	  l-=chunk;
 	}
-      } else
+      } else {
 	iob_addbuf(&H->iob,array_start(&H->r),l);
+	H->r.initialized=0;
+      }
     }
     handle_write_httppost(i,H);
   } else {
@@ -2391,12 +2415,19 @@ void forkslave(int fd,buffer* in,int savedir) {
       char* remoteaddr=alloca(ralen+1);
       char* servername,* httpversion,* authtype,* contenttype,* contentlength,* remoteuser;
       char* path_translated;
+#ifdef SUPPORT_HTTPS
+      char ssl;
+#endif
 
       if (buffer_get(in,httpreq,reqlen) == reqlen &&
 	  buffer_get(in,path,dirlen) == dirlen &&
 	  buffer_get(in,remoteaddr,ralen) == ralen &&
 	  buffer_get(in,(char*)&port,2) == 2 &&
-	  buffer_get(in,(char*)&myport,2) == 2) {
+	  buffer_get(in,(char*)&myport,2) == 2
+#ifdef SUPPORT_HTTPS
+	  && buffer_get(in,&ssl,1) == 1
+#endif
+	  ) {
 
 	httpreq[reqlen]=0;
 	path[dirlen]=0;
@@ -2557,8 +2588,13 @@ void forkslave(int fd,buffer* in,int savedir) {
 
 		    envc=cgienvneeded(httpreq,reqlen);
 
-		    envp=(char**)alloca(sizeof(char*)*(envc+20));
+		    envp=(char**)alloca(sizeof(char*)*(envc+21));
 		    envc=0;
+
+#ifdef SUPPORT_HTTPS
+		    if (ssl)
+		      envp[envc++]="HTTPS=1";
+#endif
 
 		    for (i=0; _envp[i]; ++i) {
 		      int found=0;
