@@ -52,6 +52,8 @@ char *strndup(const char *s,size_t n) {
 
 int dostats;
 int dosync;
+time_t ims=0;
+int verbose=0;
 
 char* todel;
 
@@ -340,6 +342,25 @@ static int readanswer(int s,const char* filename,const char* curdomain,int onlyp
 	else
 	  goto kaputt;
 	if (onlyprintlocation && (code/10 != 30)) return 0;
+	if (ims) {
+	  /* some crappy web servers (*cough* dl.google.com *cough*) do
+	   * not support If-Modified-Since, so do checking ourselves */
+	  size_t i;
+	  for (i=0; i+sizeof("Last-Modified: Fri, 22 Jan 2010 21:00:00")<j; ++i) {
+	    if (case_starts(buf+i,"Last-Modified:")) {
+	      i+=sizeof("Last-Modified:");
+	      while (i<j && (buf[i]==' ' || buf[i]=='\t')) ++i;
+	      if (buf[i+scan_httpdate(buf+i,&u.actime)]=='\r') {
+		if (u.actime<=ims) {
+		  if (verbose)
+		    buffer_putmflush(buffer_2,"File not modified (but server ignores If-Modified-Since), aborting download...\n");
+		  close(d);
+		  return 0;
+		}
+	      }
+	    }
+	  }
+	}
 	if ((resumeofs && code==206 && io_appendfile(&d,filename)==0) ||
 	    (!resumeofs && code==200 && ((strcmp(filename,""))?io_createfile(&d,filename)==0:((d=1)-1))))
 	  panic("creat");
@@ -546,10 +567,8 @@ static void readnetbios(buffer* b,char* buf,size_t* wanted) {
 }
 
 int main(int argc,char* argv[]) {
-  time_t ims=0;
   int useport=0;
   int usev4=0;
-  int verbose=0;
   int newer=0;
   int resume=0;
   int keepalive=0;
