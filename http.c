@@ -2651,6 +2651,8 @@ void forkslave(int fd,buffer* in,int savedir) {
 		    if (contenttype) envp[envc++]=contenttype;
 		    if (contentlength) envp[envc++]=contentlength;
 
+/* walk through all the headers in the http request and put them in the
+ * environment, e.g. Host: foo:80 -> HTTP_HOST=foo:80 */
 		    {
 		      char* x=httpreq;
 		      char* max=x+reqlen;

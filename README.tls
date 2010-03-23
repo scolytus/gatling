@@ -25,9 +25,9 @@ SSH on the same port.  You still risk losing SSL connections that come
 from very slow connections, so this is not enabled by default.  To
 enable it, run tlsgatling with
 
-  -X 2,/opt/diet/sbin/sshd -u0
+  -X "2,/opt/diet/sbin/sshd -u0"
 
 where -X is the option to enable this, 2 is the timeout in seconds, and
-the rest is the sshd command line you want gatling to run.  Note that
-gatling auto-appends the -i option to this command line, so you do not
-need to specify it here.
+the rest after the comma is the sshd command line you want gatling to
+run.  Note that gatling auto-appends the -i option to this command line,
+so you do not need to specify it here.
