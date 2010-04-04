@@ -13,6 +13,7 @@
 
 #include <sys/stat.h>
 #include <regex.h>
+#include <sys/un.h>
 
 #include <time.h>
 
@@ -250,8 +251,8 @@ struct cgi_proxy {
   regex_t r;
   int file_executable;
   char ip[16];
-  uint16 port;
-  uint32 scope_id;
+  uint32 port,scope_id;
+  struct sockaddr_un uds;
   struct cgi_proxy* next;
 #ifdef SUPPORT_PROXY
   enum proxyprotocol proxyproto;

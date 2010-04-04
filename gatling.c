@@ -1516,6 +1516,7 @@ usage:
 		  "\t-I name\talso try name, used for \"index.php\" etc\n"
 #ifdef SUPPORT_PROXY
 		  "\t-O [flag/]ip/port/regex\tregex for proxy mode (\"F/127.0.0.1/8001/\\.jsp$\")\n"
+		  "\t-O [flag/]|filename|regex\tregex for proxy mode (\"F/|/tmp/php.sock|\\.jsp$\")\n"
 		  "\t\tflags: F - FastCGI, S - SCGI, J - JSP\n"
 #endif
 #ifdef SUPPORT_SMB

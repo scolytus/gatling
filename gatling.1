@@ -96,6 +96,10 @@ for matching.  If no flags are given, HTTP proxying is used.  Otherwise,
 flags specifies the proxying mode: Use S for SCGI and F for FastCGI
 mode.  See README.php for an example.
 
+It is also possible to specify a Unix Domain socket, using the syntax
+-\fB-O [flag/]|filename|regex\fR.  Remember to put the argument in
+quotes when typing it in the shell.
+
 .SH "SIGNALS"
 Sending gatling SIGHUP will make it close all the server sockets (so you
 can start a new gatling process with different options on the same

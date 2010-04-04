@@ -228,12 +228,26 @@ int add_proxy(const char* c) {
       goto nixgut;
     c+=2;
   }
-  i=scan_ip6if(c,x->ip,&x->scope_id);
-  if (c[i]!='/') { nixgut: free(x); return -1; }
-  c+=i+1;
-  i=scan_ushort(c,&x->port);
-  if (c[i]!='/') goto nixgut;
-  c+=i+1;
+  if (*c=='|') {
+    const char* d;
+    ++c;
+    d=strchr(c,'|');
+    if (!d) goto nixgut;
+    if (d-c>sizeof(x->uds.sun_path)) goto nixgut;
+    x->port=-1;
+    x->uds.sun_family=AF_UNIX;
+    memcpy(x->uds.sun_path,c,d-c);
+    c=d+1;
+  } else {
+    uint16 tmp;
+    i=scan_ip6if(c,x->ip,&x->scope_id);
+    if (c[i]!='/') { nixgut: free(x); return -1; }
+    c+=i+1;
+    i=scan_ushort(c,&tmp);
+    x->port=tmp;
+    if (c[i]!='/') goto nixgut;
+    c+=i+1;
+  }
   if (regcomp(&x->r,c,REG_EXTENDED)) goto nixgut;
   if (!last)
     cgis=last=x;
@@ -622,7 +636,10 @@ freeandfail:
       if (x->port) {
 	/* proxy mode */
 	changestate(ctx_for_gatewayfd,PROXYSLAVE);
-	fd_to_gateway=socket_tcp6();
+	if (x->port>0xffff) {	/* unix domain socket mode */
+	  fd_to_gateway=socket(AF_UNIX,SOCK_STREAM,0);
+	} else
+	  fd_to_gateway=socket_tcp6();
 #ifdef STATE_DEBUG
 	ctx_for_gatewayfd->myfd=fd_to_gateway;
 #endif
@@ -637,9 +654,15 @@ punt2:
 	}
 	io_block(fd_to_gateway);
 	io_eagain(fd_to_gateway);
-	if (socket_connect6(fd_to_gateway,x->ip,x->port,x->scope_id)==-1)
-	  if (errno!=EINPROGRESS)
-	    goto punt;
+	if (x->port>0xffff) {
+	  if (connect(fd_to_gateway,(struct sockaddr*)&x->uds,sizeof(x->uds))==-1)
+	    if (errno!=EINPROGRESS)
+	      goto punt;
+	} else {
+	  if (socket_connect6(fd_to_gateway,x->ip,x->port,x->scope_id)==-1)
+	    if (errno!=EINPROGRESS)
+	      goto punt;
+	}
 	if (logging) {
 	  char tmp[100];
 	  char bufsockfd[FMT_ULONG];
@@ -648,10 +671,14 @@ punt2:
 
 	  bufsockfd[fmt_ulong(bufsockfd,sockfd)]=0;
 	  bufs[fmt_ulong(bufs,fd_to_gateway)]=0;
-	  bufport[fmt_ulong(bufport,x->port)]=0;
-	  tmp[fmt_ip6ifc(tmp,x->ip,x->scope_id)]=0;
+	  if (x->port>0xffff) {
+	    buffer_putm(buffer_1,"proxy_connect ",bufsockfd," ",bufs," ",x->uds.sun_path," ");
+	  } else {
+	    bufport[fmt_ulong(bufport,x->port)]=0;
+	    tmp[fmt_ip6ifc(tmp,x->ip,x->scope_id)]=0;
 
-	  buffer_putm(buffer_1,"proxy_connect ",bufsockfd," ",bufs," ",tmp," ",bufport," ");
+	    buffer_putm(buffer_1,"proxy_connect ",bufsockfd," ",bufs," ",tmp,"/",bufport," ");
+	  }
 	  buffer_putlogstr(buffer_1,c);
 	  buffer_putnlflush(buffer_1);
 	}
