@@ -153,7 +153,7 @@ struct smbheader {
 #endif
 
 static int hasandx(unsigned char code) {
-  return !strchr("\x04\x72\x71\x2b\x32\x80",code);
+  return !strchr("\x04\x72\x71\x2b\x32\x80\xa0",code);
 }
 
 static const size_t netbiosheadersize=4;
@@ -779,6 +779,17 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
   return 0;
 }
 
+static int smb_handle_Trans(unsigned char* c,size_t len,struct smb_response* sr) {
+  /* windows 7 calls this when trying to copy a file via cmd.exe copy */
+  /* sambs replies STATUS_NOT_SUPPORTED.  works for me. */
+  if (len<0x34 || c[0]!=23) return -1;
+  if (uint16_read(c+0x25)!=2) return -1;	/* not ioctl */
+  /* we don't really care what ioctl they were trying to call */
+  /* always return the same canned answer */
+  set_smb_error(sr,0xc00000bb,0xa0);
+  return 0;
+}
+
 static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
   uint16_t subcommand;
   uint16_t paramofs,paramcount;
@@ -979,7 +990,7 @@ filenotfound:
   } else if (subcommand==1 ||	// FIND_FIRST2
 	     subcommand==2) {	// FIND_NEXT2
     size_t i,l,rl;
-    size_t maxdatacount;
+    size_t maxdatacount,sizeperrecord=0;
     char* globlatin1,* globutf8;
     uint16_t attr,flags;
     uint16_t* resume;
@@ -1004,10 +1015,14 @@ outofmemory:
       loi=uint16_read((char*)c-smbheadersize+paramofs+6);
     else
       loi=uint16_read((char*)c-smbheadersize+paramofs+4);
-    if (loi!=0x104) {
+    if (loi!=0x104 && loi!=0x102) {
       set_smb_error(sr,ERROR_NOT_SUPPORTED,0x32);
       return 0;
     }
+    if (loi==0x104)
+      sizeperrecord=0x5e;
+    else if (loi==0x102)
+      sizeperrecord=0x44;
     if (subcommand==1) {
       filename=(uint16*)(c-smbheadersize+paramofs+12);
       l=paramcount-12;
@@ -1171,7 +1186,7 @@ outofmemory:
 	    max=sr->buf+sr->allocated;
 	  }
 	  if (max-cur < 0x60 +strlen(de->d_name)*2 ||
-	      !(actualnamelen=utf8toutf16(cur+0x5e,max-cur-0x5e,de->d_name,strlen(de->d_name)))) {
+	      !(actualnamelen=utf8toutf16(cur+sizeperrecord,max-cur-sizeperrecord,de->d_name,strlen(de->d_name)))) {
 	    // not enough space!  abort!  abort!
 	    if (subcommand==1)
 	      trans2[28]=0;
@@ -1190,7 +1205,7 @@ outofmemory:
 	      printf("%c",resume[i]);
 	    printf("\"), actual length: %u, name %s\n",actualnamelen,de->d_name);
 #endif
-	    if (byte_equal(cur+0x5e,rl,resume)) {
+	    if (byte_equal(cur+sizeperrecord,rl,resume)) {
 //	      printf("match!\n");
 	      resume=0;
 	    }
@@ -1198,8 +1213,8 @@ outofmemory:
 	  }
 
 	  last=cur;
-	  if (loi==0x104) {
-	    size_t padlen=0x5e +actualnamelen;
+	  if (loi==0x104 || loi==0x102) {
+	    size_t padlen=sizeperrecord +actualnamelen;
 	    if (padlen%4) padlen+=2;
 	    uint32_pack(cur,padlen);
 	    cur+=4;
@@ -1213,11 +1228,15 @@ outofmemory:
 	    uint32_pack(cur,S_ISDIR(ss.st_mode)?0x10:0x80); cur+=4;
 	    uint32_pack(cur,actualnamelen); cur+=4;
 	    uint32_pack(cur,0); cur+=4;	// ea list length
-	    cur[0]=0;	// short file name len
-	    cur[1]=0;	// reserved
-	    cur+=2;
-	    byte_zero(cur,24);	// the short name
-	    cur+=24+actualnamelen;
+	    if (loi==0x104) {
+	      cur[0]=0;	// short file name len
+	      cur[1]=0;	// reserved
+	      cur+=2;
+	      byte_zero(cur,24);	// the short name
+	      cur+=24+actualnamelen;
+	    } else {
+	      cur+=actualnamelen;
+	    }
 	    if ((uintptr_t)cur%4) cur+=2;
 	    ++searchcount;
 	    sr->used=cur-sr->buf;
@@ -1400,6 +1419,11 @@ int smbresponse(struct http_data* h,int64 s) {
 
     case 0x80:
       if (smb_handle_QueryDiskInfo(c+cur,len-cur,&sr)==-1)
+	goto kaputt;
+      break;
+
+    case 0xa0:
+      if (smb_handle_Trans(c+cur,len-cur,&sr)==-1)
 	goto kaputt;
       break;
 
