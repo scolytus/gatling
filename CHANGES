@@ -1,4 +1,8 @@
 0.12:
+  close ftp-uploaded files in cleanup() (Johannes Ziemke)
+  fix some bizarre ftp races that caused assertion failures (Johannes Ziemke)
+  look for theora in .ogg files and say they are video/ogg (requires
+    SUPPORT_MIMEMAGIC)
   fix http ranges for Range: bytes=0-, would trigger 416 before
     (Sebastian Köhler)
   win7 does some new strange ioctl call when copying files; return error
@@ -8,10 +12,6 @@
   add proxy support to dl ($http_proxy and $ftp_proxy like libwww)
   setuid in the forkslave, too
   fix the symlink to directory entries (Olaf Dreesen)
-  close ftp-uploaded files in cleanup() (Johannes Ziemke)
-  fix some bizarre ftp races that caused assertion failures (Johannes Ziemke)
-  look for theora in .ogg files and say they are video/ogg (requires
-    SUPPORT_MIMEMAGIC)
 
 0.10:
   add multi-ranges (only used by the Acrobat Reader plugin AFAIK)

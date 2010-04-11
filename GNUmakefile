@@ -167,7 +167,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1 $(DESTDIR)$(man1dir)/bench.1
 
 clean:
-	rm -f $(ALLTARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib
+	rm -f $(ALLTARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib havealloca.h
 
 VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
 CURNAME=$(notdir $(shell pwd))
@@ -177,7 +177,7 @@ rename:
 
 tar: clean rename
 	rm -f dep libdep
-	cd ..; tar cvvf $(VERSION).tar.bz2 --use=bzip2 --exclude CVS $(VERSION)
+	cd ..; tar cvvf $(VERSION).tar.bz2 --use=bzip2 --exclude CVS --exclude default $(VERSION)
 
 cert: server.pem
 
