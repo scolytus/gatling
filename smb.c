@@ -633,13 +633,6 @@ static int smb_handle_CreateAndX(struct http_data* h,const unsigned char* c,size
     "\x00\x00";	// byte count 0
 
   if (len<2*24 || c[0]!=24) return -1;
-  /* see if it is an open for reading */
-  if ((c[16]&7)!=1) {
-    /* we only support read access */
-//    printf("non-read-access requested: %x!\n",uint32_read(c+16));
-    set_smb_error(sr,ERROR_ACCESS_DENIED,0xa2);
-    return 0;
-  }
   /* now look at file name */
   {
     size_t fnlen=uint16_read((char*)c+6);
@@ -651,6 +644,17 @@ static int smb_handle_CreateAndX(struct http_data* h,const unsigned char* c,size
     if (uint16_read((char*)c+0x31)<fnlen) return -1;
     if (fnlen%2) --fnlen;
     if (fnlen>2046 || ((uintptr_t)remotefilename%2)) return -1;
+    if (fnlen==14 && !memcmp(remotefilename,"\\\x00s\x00r\x00v\x00s\x00v\x00""c\x00",14)) {
+      set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0xa2);
+      return 0;
+    }
+    /* see if it is an open for reading */
+    if ((c[16]&7)!=1) {
+      /* we only support read access */
+  //    printf("non-read-access requested: %x!\n",uint32_read(c+16));
+      set_smb_error(sr,ERROR_ACCESS_DENIED,0xa2);
+      return 0;
+    }
     hdl=alloc_handle(&h->h);
     if (!hdl) {
 //      printf("could not open file handle!");
@@ -1185,7 +1189,7 @@ outofmemory:
 	    cur=base=sr->buf+sr->used;
 	    max=sr->buf+sr->allocated;
 	  }
-	  if (max-cur < 0x60 +strlen(de->d_name)*2 ||
+	  if (max-cur < 100+0x60 +strlen(de->d_name)*2 ||
 	      !(actualnamelen=utf8toutf16(cur+sizeperrecord,max-cur-sizeperrecord,de->d_name,strlen(de->d_name)))) {
 	    // not enough space!  abort!  abort!
 	    if (subcommand==1)
@@ -1254,7 +1258,7 @@ outofmemory:
 	uint16_pack(trans2+9,trans2+20-sr->buf);
 	uint16_pack(trans2+13,cur-base);
 	uint16_pack(trans2+15,base-smbhdr);
-	uint16_pack(trans2+21,base-smbhdr-12);
+	uint16_pack(trans2+21,cur-base+13);
 	if (subcommand==1) {
 	  uint16_pack(trans2+26,searchcount);	// search count...!?
 	  uint16_pack(trans2+32,last-base);
@@ -1271,6 +1275,10 @@ outofmemory:
 
   } else
     return -1;
+}
+
+static int smb_handle_close2(unsigned char* c,size_t len,struct smb_response* sr) {
+  return add_smb_response(sr,"\x00\x00\x00",3,0x52);
 }
 
 static int smb_handle_Close(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
@@ -1389,6 +1397,12 @@ int smbresponse(struct http_data* h,int64 s) {
     case 0x32:
       /* Trans2 Request; hopefully QUERY_FILE_INFO */
       if (smb_handle_Trans2(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
+	goto kaputt;
+      break;
+
+    case 0x52:
+      /* Find Close2 */
+      if (smb_handle_close2(c+cur,len-cur,&sr)==-1)
 	goto kaputt;
       break;
 
