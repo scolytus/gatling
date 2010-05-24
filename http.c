@@ -1981,7 +1981,7 @@ rangekaputt:
 	}
 
 	c+=fmt_str(c,"\r\nDate: ");
-	c+=fmt_httpdate(c,now.sec.x&0xfffffffffffull);
+	c+=fmt_httpdate(c,now.sec.x-4611686018427387914ULL);
 
 	c+=fmt_str(c,"\r\nLast-Modified: ");
 	c+=fmt_httpdate(c,ss.st_mtime);
@@ -2429,6 +2429,7 @@ void forkslave(int fd,buffer* in,int savedir) {
       exit(127);
     }
     close(s);
+    --https_connections;
     return;
   }
 #endif
