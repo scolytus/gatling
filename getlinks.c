@@ -130,7 +130,7 @@ again:
     dashes=0;
     for (;;) {
       if ((r=get())==-1) return -1;
-      if (r=='>' && dashes==2) {
+      if (r=='>' && dashes>=2) {
 	if (eatwhitespace()==-1) return -1;
 	while ((r=get())!='<' && r!=-1) ;
 	unget(r);
