@@ -785,9 +785,11 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
 
 static int smb_handle_Trans(unsigned char* c,size_t len,struct smb_response* sr) {
   /* windows 7 calls this when trying to copy a file via cmd.exe copy */
-  /* sambs replies STATUS_NOT_SUPPORTED.  works for me. */
+  /* samba replies STATUS_NOT_SUPPORTED.  works for me. */
+#if 0
   if (len<0x34 || c[0]!=23) return -1;
   if (uint16_read(c+0x25)!=2) return -1;	/* not ioctl */
+#endif
   /* we don't really care what ioctl they were trying to call */
   /* always return the same canned answer */
   set_smb_error(sr,0xc00000bb,0xa0);
