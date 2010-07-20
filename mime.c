@@ -221,6 +221,7 @@ struct mimeentry mimetab[] = {
   { "jpeg",	"image/jpeg" },
   { "bild",	"image/jpeg" },
   { "jpg",	"image/jpeg" },
+  { "svg",	"image/svg+xml" },
   { "mpeg",	"video/mpeg" },
   { "mpg",	"video/mpeg" },
   { "avi",	"video/x-msvideo" },
