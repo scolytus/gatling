@@ -566,6 +566,28 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
       buffer_putulong(buffer_1,port);
       buffer_puts(buffer_1," ");
       buffer_putulong(buffer_1,connections-1);
+      buffer_puts(buffer_1," ");
+      {
+	const char* service;
+	switch (H->t) {
+	case HTTPSERVER4:
+	case HTTPSERVER6: service="http"; break;
+#ifdef SUPPORT_HTTPS
+	case HTTPSSERVER4:
+	case HTTPSSERVER6: service="https"; break;
+#endif
+#ifdef SUPPORT_FTP
+	case FTPSERVER4:
+	case FTPSERVER6: service="ftp"; break;
+#endif
+#ifdef SUPPORT_SMB
+	case SMBSERVER4:
+	case SMBSERVER6: service="smb"; break;
+#endif
+	default: service="unk";
+	}
+	buffer_puts(buffer_1,service);
+      }
       buffer_putnlflush(buffer_1);
     }
     if (punk && !timeout_secs) {
