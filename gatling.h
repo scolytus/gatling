@@ -85,6 +85,7 @@ enum conntype {
   HTTPSSERVER4,	/* call socket_accept6() */
   HTTPSSERVER6,	/* call socket_accept4() */
   HTTPSACCEPT,	/* call SSL_accept() */
+  HTTPSACCEPT_CHECK,	/* check whether input looks like SSL, then call SSL_accept() */
   HTTPSREQUEST,	/* read and handle https request */
   HTTPSRESPONSE,	/* write response to https request */
   HTTPSPOST,	/* like HTTPPOST but using SSL */

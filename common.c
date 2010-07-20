@@ -192,6 +192,7 @@ const char* state2string(enum conntype t) {
   case HTTPSSERVER6: return "HTTPSSERVER6";
   case HTTPSSERVER4: return "HTTPSSERVER4";
   case HTTPSACCEPT: return "HTTPSACCEPT";
+  case HTTPSACCEPT_CHECK: return "HTTPSACCEPT_CHECK";
   case HTTPSREQUEST: return "HTTPSREQUEST";
   case HTTPSRESPONSE: return "HTTPSRESPONSE";
   case HTTPSPOST: return "HTTPSPOST";

@@ -677,7 +677,8 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	    cleanup(n);
 	    continue;
 	  }
-	  changestate(h,HTTPSACCEPT);
+
+	  changestate(h,HTTPSACCEPT_CHECK);
 //	  h->t=HTTPSACCEPT;
 	  if (timeout_secs)
 	    io_timeout(n,nextftp);
@@ -768,7 +769,31 @@ int handle_ssl_error_code(int sock,int code,int reading) {
 }
 
 void do_sslaccept(int sock,struct http_data* h,int reading) {
-  int r=SSL_get_error(h->ssl,SSL_accept(h->ssl));
+  int r;
+  if (h->t == HTTPSACCEPT_CHECK) {
+    char buf[10];
+    changestate(h,HTTPSACCEPT);
+    /* now, try to peek into the buffer, and see if it looks like an SSL
+     * handshake */
+    r=recv(sock,buf,sizeof(buf),MSG_PEEK);
+    if (r>5) {
+      /* first packet must be handshake */
+      if (buf[0]!=0x16 ||	/* content type: handshake */
+	  (unsigned char)(buf[1])>3 ||	/* version major */
+	  (unsigned char)(buf[2])>1 ||	/* version minor */
+	  (unsigned char)(buf[3])>1) {	/* length > 0x100 */
+	/* this does not look like an SSL packet. */
+	if (logging) {
+	  buffer_puts(buffer_1,"not_ssl_traffic ");
+	  buffer_putulong(buffer_1,sock);
+	  buffer_putnlflush(buffer_1);
+	}
+	cleanup(sock);
+	return;
+      }
+    }
+  }
+  r=SSL_get_error(h->ssl,SSL_accept(h->ssl));
 //  printf("do_sslaccept -> %d\n",r);
   if (r==SSL_ERROR_NONE) {
 #if 0
@@ -1921,7 +1946,7 @@ usage:
 	while ((i=io_timeouted())!=-1) {
 	  struct http_data* x;
 #if defined(SUPPORT_HTTPS) && !defined(SUPPORT_MULTIPROC)
-	  if (ssh_timeout && (x=io_getcookie(i)) && x->t == HTTPSACCEPT) {
+	  if (ssh_timeout && (x=io_getcookie(i)) && x->t == HTTPSACCEPT_CHECK) {
 	    if (logging) {
 	      char numbuf[FMT_ULONG];
 	      numbuf[fmt_ulong(numbuf,i)]=0;
@@ -2041,7 +2066,7 @@ usage:
       else
 #endif
 #ifdef SUPPORT_HTTPS
-      if (H->t==HTTPSACCEPT)
+      if (H->t==HTTPSACCEPT || H->t==HTTPSACCEPT_CHECK)
 	do_sslaccept(i,H,1);
       else
 #endif
