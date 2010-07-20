@@ -289,6 +289,8 @@ const char* mimetype(const char* filename,int fd) {
 		return "application/rss+xml";
 	      else if (c<buf+r-8 && byte_equal(c,5,"<rss "))
 		return "application/rss+xml";
+	      else if (c<buf+r-8 && byte_equal(c,5,"<svg "))
+		return "image/svg+xml";
 	    }
 	  }
 	return "text/xml";
