@@ -576,7 +576,7 @@ freeandfail:
 	    }
 	  }
 	} else if (x->proxyproto==HTTP) {
-	  size_t size_of_header=header_complete(ctx_for_sockfd);
+	  size_t size_of_header=header_complete(ctx_for_sockfd,sockfd);
 	  size_t i;
 	  char* x=array_start(&ctx_for_sockfd->r);
 	  for (i=0; i<size_of_header && x[i]!='\n'; ++i)
@@ -810,7 +810,7 @@ punt2:
 
 	/* figure out how much data we have */
 	{
-	  size_t size_of_header=header_complete(ctx_for_sockfd);
+	  size_t size_of_header=header_complete(ctx_for_sockfd,sockfd);
 	  size_t size_of_data_in_packet=array_bytes(&ctx_for_sockfd->r) - size_of_header - 1;
 	    /* the -1 is for the \0 we appended */
 

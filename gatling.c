@@ -308,7 +308,7 @@ void cleanup(int64 fd) {
   }
 }
 
-size_t header_complete(struct http_data* r) {
+size_t header_complete(struct http_data* r,int64 sock) {
   long i;
   long l=array_bytes(&r->r);
   const char* c=array_start(&r->r);
@@ -321,6 +321,31 @@ size_t header_complete(struct http_data* r) {
 #endif
      )
   {
+    /* first of all, in case someone is bombarding me with crap, detect
+     * that early so we can drop the connection */
+    if (l>10) {
+      tai6464 tarpit;
+      for (i=0; i<l; ++i) {
+	if (c[i]==' ') goto ok;
+	if (c[i]<'A' || c[i]>'Z') break;
+      }
+      /* detected invalid HTTP request */
+      if (logging) {
+	buffer_puts(buffer_1,"not_http_traffic ");
+	buffer_putulong(buffer_1,sock);
+	buffer_putnlflush(buffer_1);
+      }
+      io_dontwantread(sock);
+      io_dontwantwrite(sock);
+      --http_connections;
+      changestate(r,PUNISHMENT);
+      tarpit=now;
+      tarpit.sec.x+=60;
+      io_timeout(sock,tarpit);
+      return 0;
+    }
+ok:
+
     /* Erdgeist nudged me into optimizing this :-)
      * I'd be surprised if this optimization has any measurable
      * advantage, but it sure is impressive */
@@ -782,6 +807,7 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 	  (unsigned char)(buf[1])>3 ||	/* version major */
 	  (unsigned char)(buf[2])>1 ||	/* version minor */
 	  (unsigned char)(buf[3])>1) {	/* length > 0x100 */
+	tai6464 tarpit;
 	/* this does not look like an SSL packet. */
 	if (logging) {
 	  buffer_puts(buffer_1,"not_ssl_traffic ");
@@ -790,7 +816,11 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 	}
 	io_dontwantread(sock);
 	io_dontwantwrite(sock);
-	io_timeout(sock,60);
+	--https_connections;
+	changestate(h,PUNISHMENT);
+	tarpit=now;
+	tarpit.sec.x+=60;
+	io_timeout(sock,tarpit);
 	return;
       }
     }
@@ -917,7 +947,7 @@ emerge:
 	httperror(H,"500 request too long","You sent too much header data",0);
 	array_reset(&H->r);
 	goto emerge;
-      } else if ((l=header_complete(H))) {
+      } else if ((l=header_complete(H,i))) {
 	long alen;
 pipeline:
 	/* The H->mimetype reference is here so that we don't count both the HTTP
@@ -974,7 +1004,7 @@ pipeline:
 	    char* c=array_start(&H->r);
 	    byte_copy(c,alen-l,c+l);
 	    array_truncate(&H->r,1,alen-l);
-	    l=header_complete(H);
+	    l=header_complete(H,i);
 
 #if 0
 	    write(1,"\n\n",2);

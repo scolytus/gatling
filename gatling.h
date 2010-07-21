@@ -289,7 +289,7 @@ extern void handle_write_httppost(int64 i,struct http_data* h);
 extern void handle_write_proxyslave(int64 i,struct http_data* h);
 
 extern void cleanup(int64 sock);
-extern size_t header_complete(struct http_data* r);
+extern size_t header_complete(struct http_data* r,int64 sock);
 
 extern void httperror_realm(struct http_data* r,const char* title,const char* message,const char* realm,int nobody);
 extern void httperror(struct http_data* r,const char* title,const char* message,int nobody);
