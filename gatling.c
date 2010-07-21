@@ -343,7 +343,7 @@ size_t header_complete(struct http_data* r,int64 sock) {
       --http_connections;
       changestate(r,PUNISHMENT);
       tarpit=now;
-      tarpit.sec.x+=60;
+      tarpit.sec.x+=10;
       io_timeout(sock,tarpit);
       return 0;
     }
@@ -825,7 +825,7 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 	--https_connections;
 	changestate(h,PUNISHMENT);
 	tarpit=now;
-	tarpit.sec.x+=60;
+	tarpit.sec.x+=10;
 	io_timeout(sock,tarpit);
 	return;
       }
