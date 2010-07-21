@@ -788,7 +788,9 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 	  buffer_putulong(buffer_1,sock);
 	  buffer_putnlflush(buffer_1);
 	}
-	cleanup(sock);
+	io_dontwantread(sock);
+	io_dontwantwrite(sock);
+	io_timeout(sock,60);
 	return;
       }
     }
