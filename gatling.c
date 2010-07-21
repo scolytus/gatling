@@ -331,8 +331,11 @@ size_t header_complete(struct http_data* r,int64 sock) {
       }
       /* detected invalid HTTP request */
       if (logging) {
+	char buf[100];
 	buffer_puts(buffer_1,"close/not_http_traffic ");
 	buffer_putulong(buffer_1,sock);
+	buffer_putspace(buffer_1);
+	buffer_put(buffer_1,buf,fmt_ip6c(buf,r->peerip));
 	buffer_putnlflush(buffer_1);
       }
       io_dontwantread(sock);
@@ -810,8 +813,11 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 	tai6464 tarpit;
 	/* this does not look like an SSL packet. */
 	if (logging) {
+	  char tmp[100];
 	  buffer_puts(buffer_1,"close/not_ssl_traffic ");
 	  buffer_putulong(buffer_1,sock);
+	  buffer_putspace(buffer_1);
+	  buffer_put(buffer_1,tmp,fmt_ip6c(tmp,h->peerip));
 	  buffer_putnlflush(buffer_1);
 	}
 	io_dontwantread(sock);
