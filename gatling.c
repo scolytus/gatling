@@ -273,7 +273,7 @@ void cleanup(int64 fd) {
 #endif
 #ifdef SUPPORT_HTTPS
     if (h->t==HTTPSREQUEST || h->t==HTTPSPOST || h->t==HTTPSACCEPT ||
-	h->t==HTTPSRESPONSE) --https_connections;
+	h->t==HTTPSACCEPT_CHECK || h->t==HTTPSRESPONSE) --https_connections;
 #endif
 
 #if defined(SUPPORT_FTP)
