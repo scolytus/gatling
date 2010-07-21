@@ -799,35 +799,42 @@ int handle_ssl_error_code(int sock,int code,int reading) {
 void do_sslaccept(int sock,struct http_data* h,int reading) {
   int r;
   if (h->t == HTTPSACCEPT_CHECK) {
-    char buf[10];
+    unsigned char buf[10];
     changestate(h,HTTPSACCEPT);
     /* now, try to peek into the buffer, and see if it looks like an SSL
      * handshake */
     r=recv(sock,buf,sizeof(buf),MSG_PEEK);
     if (r>5) {
+      /* Apparently the packets look radically different depending on
+       * whether it's TLS or SSLv2.  GREAT! */
       /* first packet must be handshake */
       if (buf[0]!=0x16 ||	/* content type: handshake */
-	  (unsigned char)(buf[1])>3 ||	/* version major */
-	  (unsigned char)(buf[2])>1 ||	/* version minor */
-	  (unsigned char)(buf[3])>1) {	/* length > 0x100 */
-	tai6464 tarpit;
-	/* this does not look like an SSL packet. */
-	if (logging) {
-	  char tmp[100];
-	  buffer_puts(buffer_1,"close/not_ssl_traffic ");
-	  buffer_putulong(buffer_1,sock);
-	  buffer_putspace(buffer_1);
-	  buffer_put(buffer_1,tmp,fmt_ip6c(tmp,h->peerip));
-	  buffer_putnlflush(buffer_1);
+	  buf[1]>3 ||	/* version major */
+	  buf[2]>1 ||	/* version minor */
+	  buf[3]>1) {	/* length > 0x100 */
+	if (buf[0]!=0x80 ||
+	    buf[2]!=1 ||	/* Client Hello */
+	    buf[3]>3 ||	/* version major */
+	    buf[4]>1) {	/* version minor */
+	  tai6464 tarpit;
+	  /* this does not look like an SSL packet. */
+	  if (logging) {
+	    char tmp[100];
+	    buffer_puts(buffer_1,"close/not_ssl_traffic ");
+	    buffer_putulong(buffer_1,sock);
+	    buffer_putspace(buffer_1);
+	    buffer_put(buffer_1,tmp,fmt_ip6c(tmp,h->peerip));
+	    buffer_putnlflush(buffer_1);
+	  }
+	  io_dontwantread(sock);
+	  io_dontwantwrite(sock);
+	  --https_connections;
+	  changestate(h,PUNISHMENT);
+	  tarpit=now;
+	  tarpit.sec.x+=10;
+	  io_timeout(sock,tarpit);
+	  return;
 	}
-	io_dontwantread(sock);
-	io_dontwantwrite(sock);
-	--https_connections;
-	changestate(h,PUNISHMENT);
-	tarpit=now;
-	tarpit.sec.x+=10;
-	io_timeout(sock,tarpit);
-	return;
       }
     }
   }
