@@ -1645,6 +1645,7 @@ usage:
 #endif
     wglen=str_len(workgroup);
     wglen16=sizeof(workgroup_utf16)-Y;
+    iconv_close(i);
 
   }
   {
@@ -2235,6 +2236,14 @@ usage:
   }
 #endif
   io_finishandshutdown();
+#ifdef SUPPORT_SMB
+  {
+    extern iconv_t wc2utf8;
+    extern iconv_t utf82wc2;
+    iconv_close(wc2utf8);
+    iconv_close(utf82wc2);
+  }
+#endif
   _exit(0);
   return 0;
 }
