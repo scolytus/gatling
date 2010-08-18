@@ -551,6 +551,8 @@ char* sshd;
 unsigned long ssh_timeout;
 #endif
 
+int limit_to_lan;
+
 static void accept_server_connection(int64 i,struct http_data* H,unsigned long ftptimeout_secs,tai6464 nextftp) {
   /* This is an FTP or HTTP(S) or SMB server connection.
     * This read event means that someone connected to us.
@@ -617,6 +619,34 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	buffer_puts(buffer_1,service);
       }
       buffer_putnlflush(buffer_1);
+    }
+    if (limit_to_lan) {
+      int passed;
+      /* if the -L option is given, only accept connections from local
+       * or reserved IP ranges */
+      if (byte_equal(ip,12,V4mappedprefix)) {
+	unsigned char* ip4=(unsigned char*)ip+12;
+	passed = ip4[0]==127 ||	/* 127.0.0.1/8 */
+	    ip4[0]==10 ||	/* RFC1918: 10.0.0.0/8 */
+	    (ip4[0]==192 && ip4[1]==168) ||	/* RFC1918: 192.168.0.0/16 */
+	    (ip4[0]==172 && ip4[1]>=16 && ip4[1]<=31) ||	/* RFC1918: 172.16.0.0/12 */
+	    (ip4[0]==169 && ip4[1]==254 && ip4[2]!=0 && ip4[2]!=255);	/* RFC 5735: 169.254.0.0/16 */
+      } else {	/* IPv6 */
+	unsigned char* ip6=(unsigned char*)ip;
+	passed = byte_equal(ip6,16,V6loopback) ||	/* ::1 */
+	  (ip6[0]==0xfc && (ip6[1]&0xfe)==0) ||	/* RF4193 ULA fc00::/7 */
+	  (ip6[0]==0xfe && (ip6[1]&0xfc)==0xc0) ||	/* deprecated site-local */
+	  (ip6[0]==0xfe && (ip6[1]&0xfc)==0x80);	/* RFC5735 link-local */
+      }
+      if (!passed) {
+	timeout_secs=0;
+	punk=1;
+	if (logging) {
+	  buffer_puts(buffer_1,"close/outside_lan_drop ");
+	  buffer_putulong(buffer_1,n);
+	  buffer_putnlflush(buffer_1);
+	}
+      }
     }
     if (punk && !timeout_secs) {
       io_close(n);
@@ -1258,7 +1288,7 @@ int main(int argc,char* argv[],char* envp[]) {
 
     found=0;
     for (;;) {
-      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:I:");
+      int c=getopt(_argc,_argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:lLeEr:o:N:m:A:X:I:");
       if (c==-1) break;
       switch (c) {
       case 'c':
@@ -1416,9 +1446,12 @@ int main(int argc,char* argv[],char* envp[]) {
 
   for (;;) {
     int i;
-    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:leEr:o:N:m:A:X:I:");
+    int c=getopt(argc,argv,"HP:hnfFi:p:vVdDtT:c:u:Uaw:sSO:C:lLeEr:o:N:m:A:X:I:");
     if (c==-1) break;
     switch (c) {
+    case 'L':
+      limit_to_lan=1;
+      break;
     case 'U':
       nouploads=1;
       break;
@@ -1625,6 +1658,7 @@ usage:
 #ifdef SUPPORT_FALLBACK_REDIR
 		  "\t-r url\tinstead of a 404, generate a redirect to url+localpart\n"
 #endif
+		  "\t-L\tonly accept connections from localhost or link/site local reserved IP addresses\n"
 		  );
       return 0;
     }

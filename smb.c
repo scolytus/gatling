@@ -153,7 +153,7 @@ struct smbheader {
 #endif
 
 static int hasandx(unsigned char code) {
-  return !strchr("\x04\x72\x71\x2b\x32\x80\xa0",code);
+  return !strchr("\x04\x72\x71\x2b\x32\x80\xa0\x23",code);
 }
 
 static const size_t netbiosheadersize=4;
@@ -792,7 +792,7 @@ static int smb_handle_Trans(unsigned char* c,size_t len,struct smb_response* sr)
 #endif
   /* we don't really care what ioctl they were trying to call */
   /* always return the same canned answer */
-  set_smb_error(sr,0xc00000bb,0xa0);
+  set_smb_error(sr,ERROR_NOT_SUPPORTED,0xa0);
   return 0;
 }
 
@@ -939,7 +939,7 @@ filenotfound:
 	  uint32_pack(buf+64,0);
 	} else if (loi==0x102) {
 	  uint16_pack(buf+21,datacount+5);
-	  uint64_pack(buf+28,(unsigned long long)ss.st_blocks*ss.st_blksize);
+	  uint64_pack(buf+28,(unsigned long long)ss.st_blocks*512);
 	  uint64_pack(buf+28+8,ss.st_size);
 	  uint32_pack(buf+28+8+8,ss.st_nlink);
 	  buf[28+8+8+4]=0;
@@ -980,7 +980,7 @@ filenotfound:
 	uint64_pack_ntdate(buf+28+8+8,ss.st_mtime);
 	uint64_pack_ntdate(buf+28+8+8+8,ss.st_mtime);
 	uint32_pack(buf+60,attr);	// normal file
-	uint64_pack(buf+68,(unsigned long long)ss.st_blocks*ss.st_blksize);
+	uint64_pack(buf+68,(unsigned long long)ss.st_blocks*512);
 	uint64_pack(buf+76,ss.st_size);
 	uint32_pack(buf+84,ss.st_nlink);
 	byte_zero(buf+88,8);
@@ -995,7 +995,7 @@ filenotfound:
     }
   } else if (subcommand==1 ||	// FIND_FIRST2
 	     subcommand==2) {	// FIND_NEXT2
-    size_t i,l,rl;
+    size_t i,l,rl=0;
     size_t maxdatacount,sizeperrecord=0;
     char* globlatin1,* globutf8;
     uint16_t attr,flags;
@@ -1230,7 +1230,7 @@ outofmemory:
 	    uint64_pack_ntdate(cur,ss.st_mtime); cur+=8;
 	    uint64_pack_ntdate(cur,ss.st_mtime); cur+=8;
 	    uint64_pack(cur,ss.st_size); cur+=8;
-	    uint64_pack(cur,ss.st_blksize*ss.st_blocks); cur+=8;
+	    uint64_pack(cur,512*ss.st_blocks); cur+=8;
 	    uint32_pack(cur,S_ISDIR(ss.st_mode)?0x10:0x80); cur+=4;
 	    uint32_pack(cur,actualnamelen); cur+=4;
 	    uint32_pack(cur,0); cur+=4;	// ea list length
@@ -1283,7 +1283,7 @@ static int smb_handle_close2(unsigned char* c,size_t len,struct smb_response* sr
   return add_smb_response(sr,"\x00\x00\x00",3,0x52);
 }
 
-static int smb_handle_Close(struct http_data* h,unsigned char* c,size_t len,uint32_t pid,struct smb_response* sr) {
+static int smb_handle_Close(struct http_data* h,unsigned char* c,size_t len,struct smb_response* sr) {
   struct handle* hdl;
   if (len<2*3 || c[0]!=3) return -1;
   if (!(hdl=deref_handle(&h->h,uint16_read((char*)c+1)))) {
@@ -1292,6 +1292,42 @@ static int smb_handle_Close(struct http_data* h,unsigned char* c,size_t len,uint
   }
   close_handle(hdl);
   return add_smb_response(sr,"\x00\x00\x00",3,0x4);
+}
+
+static void fmt_dostime(char* d,time_t t) {
+  struct tm lt;
+  localtime_r(&t,&lt);
+  /* date + time as 16-bit values */
+  uint16_pack(d,lt.tm_mday + ((lt.tm_mon+1)<<5) + ((lt.tm_year-80)<<9));
+  uint16_pack(d+2,(lt.tm_sec/2) + (lt.tm_min<<5) + (lt.tm_hour<<11));
+}
+
+static int smb_handle_Query_Information2(struct http_data* h,unsigned char* c,size_t len,struct smb_response* sr) {
+  struct handle* hdl;
+  struct stat ss;
+  char buf[100];
+  if (len<2 || c[0]!=1) return -1;
+  if (!(hdl=deref_handle(&h->h,uint16_read((char*)c+1)))) {
+    set_smb_error(sr,STATUS_INVALID_HANDLE,0x23);
+    return 0;
+  }
+  if (fstat(hdl->fd,&ss)==-1) {
+    /* can't happen */
+    set_smb_error(sr,ERROR_OBJECT_NAME_NOT_FOUND,0x23);
+    return 0;
+  }
+  buf[0]=12;	/* word count */
+  /* ctime, atime, mtime, size, allocation size, attributes (2), byte count */
+  fmt_dostime(buf+1,ss.st_ctime);
+  fmt_dostime(buf+1+4,ss.st_atime);
+  fmt_dostime(buf+1+4+4,ss.st_mtime);
+  uint32_pack(buf+1+4+4+4,ss.st_size);
+  uint32_pack(buf+1+4+4+4+4,ss.st_blocks*512);
+  buf[1+4+4+4+4+4]=0x80+S_ISDIR(ss.st_mode)?0x10:0;
+  buf[1+4+4+4+4+4+1]=0;
+  buf[1+4+4+4+4+4+2]=0;
+  buf[1+4+4+4+4+4+3]=0;
+  return add_smb_response(sr,buf,1+4+4+4+4+4+3,0x23);
 }
 
 static int smb_handle_QueryDiskInfo(unsigned char* c,size_t len,struct smb_response* sr) {
@@ -1371,12 +1407,18 @@ int smbresponse(struct http_data* h,int64 s) {
     switch (andxtype) {
     case 0x04:
       /* Close Request */
-      if (smb_handle_Close(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
+      if (smb_handle_Close(h,c+cur,len-cur,&sr)==-1)
 	goto kaputt;
       break;
 
     case 0x10:
       /* Check Directory Request */
+      break;
+
+    case 0x23:
+      /* Query Information2 */
+      if (smb_handle_Query_Information2(h,c+cur,len-cur,&sr)==-1)
+	goto kaputt;
       break;
 
     case 0x2b:
@@ -1446,7 +1488,10 @@ int smbresponse(struct http_data* h,int64 s) {
     case 0xa2:
       if (smb_handle_CreateAndX(h,c+cur,len-cur,uint16_read((char*)smbheader+0x1a),&sr)==-1)
 	goto kaputt;
+      break;
 
+    default:
+      set_smb_error(&sr,ERROR_NOT_SUPPORTED,andxtype);
     }
     if (!hasandx(andxtype)) break;
     andxtype=c[cur+1];
