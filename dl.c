@@ -12,6 +12,7 @@
 #include "case.h"
 #include "stralloc.h"
 #include "textcode.h"
+#include "uint16.h"
 #include "uint64.h"
 #include <sys/types.h>
 #include <unistd.h>
@@ -566,6 +567,76 @@ static void readnetbios(buffer* b,char* buf,size_t* wanted) {
 	  (unsigned char)buf[3];
 }
 
+static int negotiatesocksconnection(int sock,const char* host,unsigned short port,char* sockname,unsigned short* socknameport) {
+  char buf[300];
+  size_t hl=strlen(host);
+  if (verbose)
+    buffer_putsflush(buffer_1,"SOCKS handshake... ");
+  /* version 5, 1 auth method, auth method none */
+  if (write(sock,"\x05\x01\x00",3)!=3 ||
+      read(sock,buf,2)!=2 ||
+      buf[0]!=5 || buf[1]!=0) {
+    buffer_putsflush(buffer_2,"dl: SOCKS handshake failed\n");
+    return -1;
+  }
+  if (verbose)
+    buffer_putsflush(buffer_1,"SOCKS connect... ");
+  /* version 5, command: connect (1), reserved (0), address type: domain name (3) */
+  memcpy(buf,"\x05\x01\x00\x03",4);
+  if (hl>255) {
+    buffer_putsflush(buffer_2,"dl: host name too long (SOCKS only supports up to 255)\n");
+    return -1;
+  }
+  buf[4]=hl;
+  memcpy(buf+5,host,hl);
+  uint16_pack_big(buf+5+hl,port);
+  if (write(sock,buf,5+hl+2)!=5+hl+2 ||
+    read(sock,buf,4)!=4 ||
+    buf[0]!=5 || buf[2]!=0) {
+kaputt:
+    buffer_putsflush(buffer_2,"dl: received invalid reply to SOCKS connect request\n");
+    return -1;
+  }
+  switch (buf[1]) {
+  case 0: errno=0; break;
+  case 2: errno=EACCES; break;
+  case 3: errno=ENETUNREACH; break;
+  case 4: errno=EHOSTUNREACH; break;
+  case 5: errno=ECONNREFUSED; break;
+  case 6: errno=ETIMEDOUT; break;
+  default: errno=EINVAL;
+  }
+  if (errno) panic("SOCKS connect");
+  {
+    size_t r;
+    switch (buf[3]) {
+    case 1: r=6; break;
+    case 4: r=18; break;
+    default:
+      goto kaputt;
+    }
+    if (read(sock,buf+4,r)!=r) goto kaputt;
+    if (verbose) {
+      if (buf[3]==1) {
+	if (sockname) {
+	  memcpy(sockname,V4mappedprefix,12);
+	  memcpy(sockname+12,buf+4,4);
+	}
+	if (socknameport) *socknameport=uint16_read_big(buf+4+4);
+	buf[100+fmt_ip4(buf+100,buf+4)]=0;
+	buf[200+fmt_ulong(buf+200,uint16_read_big(buf+4+4))]=0;
+      } else if (buf[3]==4) {
+	if (sockname) memcpy(sockname,buf+4,16);
+	if (socknameport) *socknameport=uint16_read_big(buf+4+16);
+	buf[100+fmt_ip6(buf+100,buf+4)]=0;
+	buf[200+fmt_ulong(buf+200,uint16_read_big(buf+4+16))]=0;
+      }
+      buffer_putmflush(buffer_1,"success! Bound to ",buf+100," port ",buf+200,".\n");
+    }
+  }
+  return 0;
+}
+
 int main(int argc,char* argv[]) {
   int useport=0;
   int usev4=0;
@@ -576,7 +647,7 @@ int main(int argc,char* argv[]) {
   int longlist=0;
   int onlyprintlocation=0;
   char ip[16];
-  uint16 port=80, proxyport=80, connport=0;
+  uint16 port=80, proxyport=80, connport=0, socksport=1080;
   uint32 scope_id=0;
   stralloc ips={0};
   int s;
@@ -591,6 +662,9 @@ int main(int argc,char* argv[]) {
   int skip;
   buffer ftpbuf;
   char* host,* proxyhost=0,* connhost=0;
+  char* socksproxyhost=0;
+  char externalsocksip[16];
+  unsigned short externalsocksport;
 
 #if 0
   addcookie("Set-cookie: RMID=0478b6d1254f4816a29724b0; expires=Wednesday, 29-Apr-2009 04:22:47 GMT; path=/; domain=.nytimes.com\r\n","www.nytimes.com");
@@ -723,9 +797,21 @@ again:
     }
   } else
     proxyhost=getenv("ftp_proxy");
+  socksproxyhost=getenv("SOCKS5_SERVER");
+  if (!socksproxyhost) socksproxyhost=getenv("SOCKS_SERVER");
+  if (socksproxyhost) {
+    char* c=strchr(socksproxyhost,':');
+    if (c) {
+      *c=0;
+      if (c[1+scan_ushort(c+1,&socksport)]) {
+	buffer_putsflush(buffer_2,"invalid socks proxy environment syntax\n");
+	return 1;
+      }
+    }
+  }
 
   /* do we have a proxy? */
-  if (proxyhost && !connhost) {
+  if (proxyhost) {
     size_t i;
     /* expect format "http://localhost:3128" */
     if (byte_equal(proxyhost,7,"http://")) proxyhost+=7;
@@ -802,8 +888,9 @@ again:
       hints.ai_family=AF_UNSPEC;
       hints.ai_flags=0;
       hints.ai_socktype=0;
+
       if (verbose) buffer_putsflush(buffer_1,"DNS lookup... ");
-      if ((gaierr = getaddrinfo(connhost,p,&hints,&aitop)) != 0 || !aitop) {
+      if ((gaierr = getaddrinfo(socksproxyhost?socksproxyhost:connhost,p,&hints,&aitop)) != 0 || !aitop) {
 	buffer_puts(buffer_2,"dl: could not resolve IP: ");
 	buffer_puts(buffer_2,connhost);
 	buffer_putnlflush(buffer_2);
@@ -900,10 +987,10 @@ again:
 	buffer_puts(buffer_1,"connecting to ");
 	buffer_put(buffer_1,buf,fmt_ip6c(buf,ips.s+i));
 	buffer_puts(buffer_1," port ");
-	buffer_putulong(buffer_1,connport);
+	buffer_putulong(buffer_1,socksproxyhost?socksport:connport);
 	buffer_putnlflush(buffer_1);
       }
-      s=make_connection(ips.s+i,connport,scope_id);
+      s=make_connection(ips.s+i,socksproxyhost?socksport:connport,scope_id);
       if (s!=-1) {
 	byte_copy(ip,16,ips.s+i);
 	break;
@@ -912,6 +999,11 @@ again:
     if (s==-1)
       return 1;
   }
+  /* connected; if we are in socks mode, negotiate connection */
+  if (socksproxyhost)
+    if (negotiatesocksconnection(s,connhost,connport,externalsocksip,&externalsocksport))
+      return 1;
+
   if (mode==HTTP) {
     if (write(s,request,rlen)!=rlen) panic("write");
     switch (readanswer(s,filename,host,onlyprintlocation,port)) {
@@ -1019,6 +1111,7 @@ again:
       char buf[200];
       if (usev4) {
 	int i,j;
+	/* TODO: if (socksproxyhost) socks_bind_request (rfc1928) */
 	srv=socket_tcp4b();
 	if (srv==-1) panic("socket");
 	socket_listen(srv,1);
@@ -1038,6 +1131,7 @@ again:
 	if (ftpcmd(s,&ftpbuf,buf) != 200) panic("PORT reply is not 200\n");
       } else {
 	int i;
+	/* TODO: if (socksproxyhost) socks_bind_request (rfc1928) */
 	srv=socket_tcp6b();
 	if (srv==-1) panic("socket");
 	socket_listen(srv,1);
@@ -1071,6 +1165,7 @@ tryv4:
 	      port=port*256+j;
 	  }
 	}
+	/* TODO: if (socksproxyhost) socks_connect (rfc1928) */
 	if ((srv=socket_tcp4b())==-1) panic("socket");
 	if (verbose) buffer_putsflush(buffer_1,"connecting... ");
 	if (socket_connect4(srv,ip+12,port)==-1) panic("connect");
@@ -1093,6 +1188,7 @@ tryv4:
 	    }
 	  }
 	}
+	/* TODO: if (socksproxyhost) socks_connect (rfc1928) */
 	if ((srv=socket_tcp6b())==-1) panic("socket");
 	if (verbose) buffer_putsflush(buffer_1,"connecting... ");
 	if (socket_connect6(srv,ip,port,scope_id)==-1) panic("connect");

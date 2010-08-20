@@ -2270,6 +2270,9 @@ usage:
   }
 #endif
   io_finishandshutdown();
+#ifdef SUPPORT_HTTPS
+  ERR_free_strings();
+#endif
 #ifdef SUPPORT_SMB
   {
     extern iconv_t wc2utf8;
