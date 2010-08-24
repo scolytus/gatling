@@ -2083,6 +2083,7 @@ rangekaputt:
 	  buffer_putlogstr(buffer_1,(tmp=http_header(h,"Host"))?tmp:buf);
 	  buffer_putsflush(buffer_1,"\n");
 	}
+	h->filefd=-1;	/* iob_addfile_close closes the file for us, we don't want cleanup to close it again */
       }
     }
   }

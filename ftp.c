@@ -139,6 +139,7 @@ static int ftp_retrstor(struct http_data* h,const char* s,int64 sock,int forwrit
       buffer_putulonglong(buffer_1,range_last-range_first);
       buffer_putspace(buffer_1);
     }
+    b->filefd=-1;	/* iob_addfile_close will close the fd, we don't want cleanup() to close it twice */
   }
 
   if (logging) {
