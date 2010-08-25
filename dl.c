@@ -1202,7 +1202,7 @@ tryv4:
 	buffer_puts(buffer_1,pathname);
 	buffer_putsflush(buffer_1,"... ");
       }
-      if ((ftpcmd2(s,&ftpbuf,"CWD ",pathname)/100)!=2) panic("CWD failed\n");
+      if ((ftpcmd2(s,&ftpbuf,"CWD ",pathname)/100)!=2) goto tryretr;
       if (longlist) {
 	if (verbose) buffer_putsflush(buffer_2,"\nLIST\n");
 	if (((i=ftpcmd(s,&ftpbuf,"LIST\r\n"))!=150) && i!=125) panic("No 125/150 response to LIST\n");
@@ -1210,7 +1210,9 @@ tryv4:
 	if (verbose) buffer_putsflush(buffer_2,"\nNLST\n");
 	if (((i=ftpcmd(s,&ftpbuf,"NLST\r\n"))!=150) && i!=125) panic("No 125/150 response to NLST\n");
       }
-    } else {
+    } else
+tryretr:
+    {
       int i;
       if (verbose) {
 	buffer_puts(buffer_1,"RETR ");
