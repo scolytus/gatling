@@ -55,17 +55,21 @@ int open_for_writing(int64* fd,const char* name) {
  * "/foo/./" -> "/foo"
  * "/foo/.." -> "/" */
 int canonpath(char* s) {
-  int i,j;
+  int i,j;	/* i: read index, j: write index */
   char c;
   for (i=j=0; (c=s[i]); ++i) {
     if (c=='/') {
       while (s[i+1]=='/') ++i;			/* "//" */
     } else if (c=='.' && j && s[j-1]=='/') {
-      if (s[i+1]=='.' && (s[i+2]=='/' || s[i+2]==0)) {		/* /../ */
+      if (s[i+1]=='.' && (s[i+2]=='/' || s[i+2]==0)) {		/* "/../" */
 	if (j>1)
 	  for (j-=2; s[j]!='/' && j>0; --j);	/* remove previous dir */
-	i+=2;
-      } else if (s[i+1]=='/' || s[i+1]==0) {
+	/* s = "/foo/.."
+	 *      ^j   ^i
+	 */
+	++i;
+	continue;
+      } else if (s[i+1]=='/' || s[i+1]==0) {	/* "/./" */
 	++i;
 	continue;
       } else
