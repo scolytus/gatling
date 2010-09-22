@@ -7,6 +7,7 @@
     (Sebastian Köhler)
   win7 does some new strange ioctl call when copying files; return error
     instead of dropping connection
+  fix off-by-ones in http byte ranges
 
 0.11:
   add proxy support to dl ($http_proxy and $ftp_proxy like libwww)
