@@ -257,6 +257,7 @@ struct mimeentry mimetab[] = {
   { "mp4",	"video/mp4" },
   { "m4a",	"audio/mp4" },
   { "nzb",	"application/x-nzb" },
+  { "webm",	"video/webm" },
 #ifndef SUPPORT_MIMEMAGIC
   { "ogv",	"video/ogg" },
 #endif
