@@ -1894,7 +1894,7 @@ e404:
 	  if (byte_equal(c,6,"bytes=")) {
 	    size_t i;
 	    c+=6;
-	    n=scan_range(c,ranges,sizeof(ranges)/sizeof(ranges[0])/2,ss.st_size);
+	    n=scan_range(c,ranges,sizeof(ranges)/sizeof(ranges[0])/2,ss.st_size-1);
 
 	    /* the ranges could still be bogus, i.e. 4-2, or the sum
 	      * could be more than just sending the whole file. */
@@ -1977,7 +1977,7 @@ rangekaputt:
 	} else {
 	  c+=fmt_str(c,h->mimetype);
 	  c+=fmt_str(c,"\r\nContent-Length: ");
-	  c+=fmt_ulonglong(c,range_last-range_first);
+	  c+=fmt_ulonglong(c,range_last-range_first+1);
 	}
 
 	c+=fmt_str(c,"\r\nDate: ");
@@ -1997,7 +1997,7 @@ rangekaputt:
 	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
 	  c+=fmt_ulonglong(c,range_first);
 	  c+=fmt_str(c,"-");
-	  c+=fmt_ulonglong(c,range_last-1);
+	  c+=fmt_ulonglong(c,range_last);
 	  c+=fmt_str(c,"/");
 	  c+=fmt_ulonglong(c,ss.st_size);
 	}
@@ -2044,7 +2044,7 @@ rangekaputt:
 	      }
 	      iob_addbuf_free(&h->iob,buf,flen);
 	    } else
-	      iob_addfile_close(&h->iob,fd,range_first,range_last-range_first);
+	      iob_addfile_close(&h->iob,fd,range_first,range_last-range_first+1);
 	  } else
 	    if (fd!=-1) io_close(fd);
 	  if (logging) {
