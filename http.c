@@ -1977,6 +1977,7 @@ rangekaputt:
 	} else {
 	  c+=fmt_str(c,h->mimetype);
 	  c+=fmt_str(c,"\r\nContent-Length: ");
+	  if (range_last==ss.st_size) --range_last;
 	  c+=fmt_ulonglong(c,range_last-range_first+1);
 	}
 
