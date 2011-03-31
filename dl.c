@@ -55,6 +55,7 @@ int dostats;
 int dosync;
 time_t ims=0;
 int verbose=0;
+int ignoreeof;
 
 char* todel;
 
@@ -446,10 +447,11 @@ kaputt:
       if (r==-1)
 	carp("read from HTTP socket");
       else {
+	if (ignoreeof) nocl=1;
 	if (nocl) break;
 	buffer_puts(buffer_2,"early HTTP EOF; expected ");
 	buffer_putulong(buffer_2,rest);
-	buffer_putsflush(buffer_2,"more bytes!\n");
+	buffer_putsflush(buffer_2," more bytes!\n");
 	return -1;
       }
     } else {
@@ -689,11 +691,14 @@ int main(int argc,char* argv[]) {
 #endif
 
   for (;;) {
-    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:lsL");
+    int c=getopt(argc,argv,"i:ko4nvra:O:U:R:lsLI");
     if (c==-1) break;
     switch (c) {
     case 'k':
       keepalive=1;
+      break;
+    case 'I':
+      ignoreeof=1;
       break;
     case 'n':
       newer=1;
@@ -762,6 +767,7 @@ usage:
 		       "	-l	just print value of Location: header\n"
 		       "	-L	long ftp directory listing, not just names\n"
 		       "	-s	sync after local write\n"
+		       "	-I	do not treat early HTTP EOF as error\n"
 		       "	-v	be verbose\n");
       return 0;
     }
