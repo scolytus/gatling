@@ -15,6 +15,11 @@
 #define SUPPORT_CGI
 #define SUPPORT_HTACCESS
 
+/* if a user asks for /foo but foo is a directory, then the default
+ * behavior of gatling is 404.  Apache generates a redirect to /foo/.
+ * #define this if you want gatling to generate a redirect, too */
+#define SUPPORT_DIR_REDIRECT
+
 /* SUPPORT_BZIP2 means gatling will also look for foo.html.bz2 and not
  * just foo.html.gz; however, almost no browsers support this, and if
  * you don't have .bz2 files lying around, it wastes performance, so

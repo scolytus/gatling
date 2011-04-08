@@ -1,10 +1,13 @@
+0.13:
+  add SUPPORT_DIR_REDIRECT in gatling_features.h
+
 0.12:
   close ftp-uploaded files in cleanup() (Johannes Ziemke)
   fix some bizarre ftp races that caused assertion failures (Johannes Ziemke)
   look for theora in .ogg files and say they are video/ogg (requires
     SUPPORT_MIMEMAGIC)
   fix http ranges for Range: bytes=0-, would trigger 416 before
-    (Sebastian Köhler)
+    (Sebastian KÃ¶hler)
   win7 does some new strange ioctl call when copying files; return error
     instead of dropping connection
   fix off-by-ones in http byte ranges

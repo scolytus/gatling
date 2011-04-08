@@ -1176,6 +1176,51 @@ int http_redirect(struct http_data* h,const char* Filename) {
   return 0;
 }
 
+#ifdef SUPPORT_DIR_REDIRECT
+void do_dir_redirect(struct http_data* h,const char* filename,int64 s) {
+  char* nh;
+  int i;
+  char* host=http_header(h,"Host");
+#ifdef SUPPORT_HTTPS
+  const char* proto=h->t==HTTPSREQUEST?"https://":"http://";
+#else
+  const char* proto="http://";
+#endif
+  size_t hl;
+  if (!host) return;
+  hl=str_chr(host,'\n');
+  if (hl && host[hl-1]=='\r') --hl;
+  nh=malloc((strlen(filename)+hl)*2+300);
+  if (!nh) {
+    if (logging) {
+      char numbuf[FMT_ULONG];
+      numbuf[fmt_ulong(numbuf,s)]=0;
+      buffer_putmflush(buffer_1,"outofmemory ",numbuf,"\n");
+    }
+    cleanup(s);
+    return;
+  }
+  i=fmt_str(nh,"HTTP/1.0 302 Over There\r\nServer: " RELEASE "\r\nLocation: ");
+  i+=fmt_str(nh+i,proto);
+  i+=fmt_strn(nh+i,host,hl);
+  i+=fmt_str(nh+i,filename);
+  i+=fmt_str(nh+i,"/\r\nContent-Type: text/html\r\nContent-Length: ");
+  i+=fmt_ulong(nh+i,strlen(filename)+hl+23);
+  i+=fmt_str(nh+i,"\r\n\r\n");
+  i+=fmt_str(nh+i,"Look <a href=");
+  i+=fmt_str(nh+i,proto);
+  i+=fmt_strn(nh+i,host,hl);
+  i+=fmt_str(nh+i,filename);
+  i+=fmt_str(nh+i,"/>here!</a>\n");
+  if (logging) {
+    char numbuf[FMT_ULONG];
+    numbuf[fmt_ulong(numbuf,s)]=0;
+    buffer_putmflush(buffer_1,"dir_redirect ",numbuf,"\n");
+  }
+  iob_addbuf_free(&h->iob,nh,strlen(nh));
+}
+#endif
+
 int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockfd,int nobody) {
 #ifdef SUPPORT_PROXY
   int noproxy=0;
@@ -1454,6 +1499,15 @@ itsafile:
       }
       return -1;
     }
+#ifdef SUPPORT_DIR_REDIRECT
+    if (S_ISDIR(ss->st_mode)) {
+      /* someone asked for http://example.com/foo
+       * when he should have asked for http://example.com/foo/
+       * redirect */
+      do_dir_redirect(h,Filename,sockfd);
+      return -4;
+    }
+#endif
     h->mimetype=mimetype(Filename,fd);
 foundcgi:
 #ifdef SUPPORT_PROXY
