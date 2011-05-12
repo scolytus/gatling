@@ -73,15 +73,20 @@ pthreadbench: pthreadbench.o
 forksbench: forkbench.o
 	$(CC) -static -o $@ forkbench.o $(LDFLAGS) $(LDLIBS)
 
-gatling.o tlsgatling: havesetresuid.h
+gatling.o tlsgatling ptlsgatling: havesetresuid.h
 
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
 HTTPS_OBJS=mime.o ftp.o https.o smb.o common.o connstat.o
+PHTTPS_OBJS=mime.o ftp.o phttps.o smb.o common.o connstat.o
 
 $(OBJS) https.o gatling.o: gatling.h version.h gatling_features.h
 
 tlsgatling: gatling.c ssl.o $(HTTPS_OBJS)
 	-$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+
+ptlsgatling: gatling.c pssl.o $(PHTTPS_OBJS)
+	-$(CC) -o $@ gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
+
 
 gatling: gatling.o $(OBJS) md5lib
 	$(CC) $(LDFLAGS) $@.o $(OBJS) -o $@ $(LDLIBS) `cat md5lib`
@@ -105,6 +110,9 @@ version.h: CHANGES
 
 https.o: http.c
 	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS
+
+phttps.o: http.c
+	$(CC) -c $< -o $@ -I. $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL
 
 %: %.o
 	$(CC) $(LDFLAGS) $@.o -o $@ $(LDLIBS)
@@ -167,7 +175,7 @@ uninstall:
 	rm -f $(DESTDIR)$(BINDIR)/gatling $(DESTDIR)$(BINDIR)/tlsgatling $(DESTDIR)$(man1dir)/gatling.1 $(DESTDIR)$(man1dir)/bench.1
 
 clean:
-	rm -f $(ALLTARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib havealloca.h
+	rm -f $(ALLTARGETS) *.o version.h core *.core libsocket libsocketkludge.a dummy.c libiconv libcrypt havesetresuid.h md5lib havealloca.h ptlsgatling
 
 VERSION=gatling-$(shell head -n 1 CHANGES|sed 's/://')
 CURNAME=$(notdir $(shell pwd))

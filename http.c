@@ -1029,10 +1029,16 @@ int read_http_post(int sockfd,struct http_data* H) {
   if (l>sizeof(buf)) l=sizeof(buf);
 #ifdef SUPPORT_HTTPS
   if (H->t==HTTPSPOST) {
+#ifdef USE_OPENSSL
     i=SSL_read(H->ssl,buf,l);
     if (i<0) {
       i=SSL_get_error(H->ssl,i);
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+#elif defined(USE_POLARSSL)
+    i=ssl_read(&H->ssl,buf,l);
+    if (i<0) {
+      if (l==POLARSSL_ERR_NET_TRY_AGAIN) {
+#endif
 	io_eagain(sockfd);
 	if (handle_ssl_error_code(sockfd,i,1)==-1)
 	  return -1;

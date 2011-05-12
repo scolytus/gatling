@@ -97,11 +97,26 @@ enum conntype {
 };
 
 #ifdef SUPPORT_HTTPS
+
+#ifdef USE_POLARSSL
+#undef USE_OPENSSL
+#else
+#define USE_OPENSSL
+#endif
+
+#ifdef USE_OPENSSL
 /* in ssl.c */
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 extern int init_serverside_tls(SSL** ssl,int sock);
-extern int init_clientside_tls(SSL** ssl,int sock);
+#endif
+
+#ifdef USE_POLARSSL
+/* in pssl.c */
+#include <polarssl/ssl.h>
+extern int init_serverside_tls(ssl_context* ssl,ssl_session* ssn,int sock);
+#endif
+
 #endif
 
 /* the tree id is always 1 (we export exactly one tree in TreeConnectAndX)
@@ -154,7 +169,13 @@ struct http_data {
   char* oldheader;	/* old, unmodified request */
 #endif
 #ifdef SUPPORT_HTTPS
+#ifdef USE_POLARSSL
+  ssl_context ssl;
+  ssl_session ssn;
+#endif
+#ifdef USE_OPENSSL
   SSL* ssl;
+#endif
 #if 0
   int writefail;
 #endif

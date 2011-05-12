@@ -293,7 +293,12 @@ void cleanup(int64 fd) {
     free(h->ftppath);
 #endif
 #ifdef SUPPORT_HTTPS
+#ifdef USE_OPENSSL
     if (h->ssl) SSL_free(h->ssl);
+#endif
+#ifdef USE_POLARSSL
+    ssl_free(&h->ssl);
+#endif
 #endif
 #ifdef SUPPORT_SMB
     close_all_handles(&h->h);
@@ -726,7 +731,12 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #else
 	  fchdir(origdir);
 #endif
-	  if (init_serverside_tls(&h->ssl,n)) {
+#ifdef USE_OPENSSL
+	  if (init_serverside_tls(&h->ssl,n))
+#elif defined(USE_POLARSSL)
+	  if (init_serverside_tls(&h->ssl,&h->ssn,n))
+#endif
+	  {
 	    if (logging) {
 	      char a[FMT_ULONG];
 	      a[fmt_ulong(a,n)]=0;
@@ -790,9 +800,11 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 }
 
 #ifdef SUPPORT_HTTPS
+
 int handle_ssl_error_code(int sock,int code,int reading) {
 //  printf("handle_ssl_error_code(sock %d,code %d,reading %d)\n",sock,code,reading);
   switch (code) {
+#ifdef USE_OPENSSL
   case SSL_ERROR_WANT_READ:
     io_wantread(sock);
     io_dontwantwrite(sock);
@@ -801,7 +813,24 @@ int handle_ssl_error_code(int sock,int code,int reading) {
     io_wantwrite(sock);
     io_dontwantread(sock);
     return 0;
+#elif defined(USE_POLARSSL)
+  case POLARSSL_ERR_NET_TRY_AGAIN:
+    if (reading) {
+      io_wantread(sock);
+      io_dontwantwrite(sock);
+    } else {
+      io_wantwrite(sock);
+      io_dontwantread(sock);
+    }
+    return 0;
+#endif
+#ifdef USE_OPENSSL
   case SSL_ERROR_SYSCALL:
+#elif defined(USE_POLARSSL)
+  case POLARSSL_ERR_NET_RECV_FAILED:
+  case POLARSSL_ERR_NET_SEND_FAILED:
+  case POLARSSL_ERR_NET_CONN_RESET:
+#endif
     if (logging) {
       int olderrno=errno;
       buffer_puts(buffer_1,"io_error ");
@@ -868,9 +897,16 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
       }
     }
   }
+
+#ifdef USE_OPENSSL
   r=SSL_get_error(h->ssl,SSL_accept(h->ssl));
 //  printf("do_sslaccept -> %d\n",r);
-  if (r==SSL_ERROR_NONE) {
+  if (r==SSL_ERROR_NONE)
+#elif defined(USE_POLARSSL)
+  r=ssl_handshake(&h->ssl);
+  if (r==0)
+#endif
+  {
 #if 0
     h->writefail=1;
 #endif
@@ -899,12 +935,21 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
 #ifdef SUPPORT_HTTPS
   assert(H->t != HTTPSRESPONSE);
   if (H->t == HTTPSREQUEST) {
+#ifdef USE_OPENSSL
     l=SSL_read(H->ssl,buf,sizeof(buf));
+#elif defined(USE_POLARSSL)
+    l=ssl_read(&H->ssl,buf,sizeof(buf));
+#endif
 //    printf("SSL_read(sock %d,buf %p,n %d) -> %d\n",i,buf,sizeof(buf),l);
+#ifdef USE_OPENSSL
     if (l==-1) {
       l=SSL_get_error(H->ssl,l);
-//      printf("  error %d %s\n",l,ERR_error_string(l,0));
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+#elif defined(USE_POLARSSL)
+    if (l<0) {
+      if (l==POLARSSL_ERR_NET_TRY_AGAIN) {
+#endif
+//      printf("  error %d %s\n",l,ERR_error_string(l,0));
 	io_eagain(i);
 	if (handle_ssl_error_code(i,l,1)==-1) {
 	  cleanup(i);
@@ -1079,14 +1124,23 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
   if (H->writefail) { errno=EAGAIN; return -1; }
 #endif
   if (n>65536) n=65536;
+#ifdef USE_OPENSSL
   l=SSL_write(H->ssl,buf,n);
   if (l<0) {
     l=SSL_get_error(H->ssl,l);
+#elif defined(USE_POLARSSL)
+  l=ssl_write(&H->ssl,buf,n);
+  if (l<0) {
+#endif
     if (handle_ssl_error_code(sock,l,0)==-1) {
       cleanup(sock);
       return -3;
     }
+#ifdef USE_OPENSSL
     if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+#elif defined(USE_POLARSSL)
+    if (l==POLARSSL_ERR_NET_TRY_AGAIN) {
+#endif
       l=-1; errno=EAGAIN;
     } else
       l=-3;
@@ -1273,7 +1327,9 @@ int main(int argc,char* argv[],char* envp[]) {
   pid_t* Instances;
 
 #ifdef SUPPORT_HTTPS
+#ifdef USE_OPENSSL
   SSL_load_error_strings();
+#endif
 #endif
 
 #if defined(SUPPORT_CGI) || defined(SUPPORT_PROXY)
@@ -2271,7 +2327,9 @@ usage:
 #endif
   io_finishandshutdown();
 #ifdef SUPPORT_HTTPS
+#ifdef USE_OPENSSL
   ERR_free_strings();
+#endif
 #endif
 #ifdef SUPPORT_SMB
   {
