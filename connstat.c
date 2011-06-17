@@ -53,7 +53,7 @@ int new_request_from_ip(const char ip[16],time_t now) {
   }
   x=base=root+hash(ip);
   while (*x) {
-    if (byte_equal((*x)->ip,sizeof(ip),ip)) {
+    if (byte_equal((*x)->ip,16,ip)) {
       int res;
       (*x)->last=now;
       res = (++(*x)->connections > max_requests_per_minute);
@@ -70,7 +70,7 @@ int new_request_from_ip(const char ip[16],time_t now) {
   *x=malloc(sizeof(**x));
   if (!*x) return -1;
   (*x)->last=now;
-  byte_copy((*x)->ip,sizeof(ip),ip);
+  byte_copy((*x)->ip,16,ip);
   (*x)->connections=1;
   return 0;
 }
