@@ -55,7 +55,9 @@
 
 char serverroot[1024];
 
+#ifdef SUPPORT_MULTIPROC
 unsigned long instances=1;
+#endif
 unsigned long timeout_secs=23;
 tai6464 now,next;
 
@@ -830,6 +832,7 @@ int handle_ssl_error_code(int sock,int code,int reading) {
   case POLARSSL_ERR_NET_RECV_FAILED:
   case POLARSSL_ERR_NET_SEND_FAILED:
   case POLARSSL_ERR_NET_CONN_RESET:
+    errno=ECONNRESET;
 #endif
     if (logging) {
       int olderrno=errno;
@@ -938,7 +941,7 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
 #ifdef USE_OPENSSL
     l=SSL_read(H->ssl,buf,sizeof(buf));
 #elif defined(USE_POLARSSL)
-    l=ssl_read(&H->ssl,buf,sizeof(buf));
+    l=ssl_read(&H->ssl,(unsigned char*)buf,sizeof(buf));
 #endif
 //    printf("SSL_read(sock %d,buf %p,n %d) -> %d\n",i,buf,sizeof(buf),l);
 #ifdef USE_OPENSSL
@@ -956,7 +959,13 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
 	  return;
 	}
 	l=-1;
-      } else l=-3;
+      } else if (l==POLARSSL_ERR_NET_RECV_FAILED) {
+	l=0;
+      } else {
+	printf("got polarssl error %x\n",l);
+	errno=ECONNRESET;
+	l=-3;
+      }
     }
   } else
 #endif
@@ -1324,7 +1333,9 @@ int main(int argc,char* argv[],char* envp[]) {
   char* new_uid=0;
   char* chroot_to=0;
   unsigned long long prefetchquantum=0;
+#ifdef SUPPORT_MULTIPROC
   pid_t* Instances;
+#endif
 
 #ifdef SUPPORT_HTTPS
 #ifdef USE_OPENSSL
@@ -1958,8 +1969,10 @@ usage:
 
   } else {
 #endif
+#ifdef SUPPORT_MULTIPROC
     Instances=0;
     instances=0;
+#endif
 
 #ifdef __broken_itojun_v6__
     prepare_listen(s,&ct);

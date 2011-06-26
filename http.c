@@ -1035,7 +1035,7 @@ int read_http_post(int sockfd,struct http_data* H) {
       i=SSL_get_error(H->ssl,i);
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
 #elif defined(USE_POLARSSL)
-    i=ssl_read(&H->ssl,buf,l);
+    i=ssl_read(&H->ssl,(unsigned char*)buf,l);
     if (i<0) {
       if (l==POLARSSL_ERR_NET_TRY_AGAIN) {
 #endif

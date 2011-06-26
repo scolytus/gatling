@@ -173,7 +173,7 @@ fail:
   ssl_set_endpoint( ssl, SSL_IS_SERVER );
   ssl_set_authmode( ssl, SSL_VERIFY_NONE );
   ssl_set_rng( ssl, havege_rand, &hs );
-  ssl_set_bio( ssl, my_net_recv, (void*)sock, my_net_send, (void*)sock );
+  ssl_set_bio( ssl, my_net_recv, (void*)(uintptr_t)sock, my_net_send, (void*)(uintptr_t)sock );
   ssl_set_scb( ssl, my_get_session, my_set_session );
   ssl_set_ciphersuites( ssl, my_ciphersuites );
   ssl_set_session( ssl, 1, 0, ssn );
