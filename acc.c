@@ -136,7 +136,7 @@ int main() {
     }
     /* element two is the unique key */
     {
-      char* fields[20];
+      char* fields[21];
       char* x=dat;
       int i;
 

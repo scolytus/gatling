@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <utime.h>
+#include <string.h>
 #include "havealloca.h"
 
 static int canonicalize(stralloc* url,const char* baseurl) {
