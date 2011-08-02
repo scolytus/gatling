@@ -975,7 +975,6 @@ nextpacket:
 	if (case_starts(buf,"Status:")) {
 	  --buf; ++i;
 	  memcpy(buf,"HTTP/1.1 ",9);
-	  ++i;
 	} else
 	  needheader=1;
       } else if (byte_diff(buf,5,"HTTP/"))
