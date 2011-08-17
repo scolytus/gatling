@@ -1486,15 +1486,25 @@ int main(int argc,char* argv[],char* envp[]) {
   }
 
   if (!geteuid()) {
-    struct rlimit rl;
+    struct rlimit orig,rl;
     long l;
+    getrlimit(RLIMIT_NOFILE,&orig);
 #ifdef RLIMIT_NPROC
     rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
     setrlimit(RLIMIT_NPROC,&rl);
 #endif
     for (l=0; l<20000; l+=500) {
       rl.rlim_cur=l; rl.rlim_max=l;
-      if (setrlimit(RLIMIT_NOFILE,&rl)==-1) break;
+      if (setrlimit(RLIMIT_NOFILE,&rl)==-1) {
+	if (errno==EPERM) {
+	  /* We run as root but we still get EPERM?  That only happens
+	   * on linux-vserver.  There is no good way to handle this, so
+	   * we'll set the soft limit to the hard limit */
+	  orig.rlim_cur=orig.rlim_max;
+	  setrlimit(RLIMIT_NOFILE,&orig);
+	}
+	break;
+      }
     }
   }
 #endif
