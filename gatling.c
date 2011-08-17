@@ -959,8 +959,10 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
 	  return;
 	}
 	l=-1;
+#ifdef USE_POLARSSL
       } else if (l==POLARSSL_ERR_NET_RECV_FAILED) {
 	l=0;
+#endif
       } else {
 	printf("got polarssl error %x\n",l);
 	errno=ECONNRESET;
