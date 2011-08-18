@@ -1458,7 +1458,7 @@ int main(int argc,char* argv[],char* envp[]) {
     rl.rlim_cur=RLIM_INFINITY; rl.rlim_max=RLIM_INFINITY;
     setrlimit(RLIMIT_NPROC,&rl);
 #endif
-    for (l=0; l<20000; l+=500) {
+    for (l=orig.rlim_max; l<20000; l+=500) {
       rl.rlim_cur=l; rl.rlim_max=l;
       if (setrlimit(RLIMIT_NOFILE,&rl)==-1) {
 	if (errno==EPERM) {
