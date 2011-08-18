@@ -270,7 +270,7 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
     {
       size_t bytecountofs=1+*x*2;
       size_t bytecount;
-      bytecount=uint16_read(x+bytecountofs);
+      bytecount=uint16_read((const char*)x+bytecountofs);
       if (bytecount>len || x+bytecountofs+2+bytecount>pkt+len) return -1;
     }
     if (!hasandx(pkt[4])) return 0;
@@ -282,7 +282,7 @@ static int validate_smb_packet(unsigned char* pkt,unsigned long len) {
 	return -1;
       /* we know that the byte count is within the packet */
       /* read it and check whether it's ok, too */
-      bytecount=uint16_read(x+1+*x*2);
+      bytecount=uint16_read((const char*)x+1+*x*2);
       if (!range_arrayinbuf(pkt,len,x+3+bytecount,*x,2))
 	return -1;
       if (x[1]==0xff) return 0;
@@ -998,7 +998,7 @@ filenotfound:
     size_t i,l,rl=0;
     size_t maxdatacount,sizeperrecord=0;
     char* globlatin1,* globutf8;
-    uint16_t attr,flags;
+    uint16_t attr;
     uint16_t* resume;
     DIR* d;
 #if 0
@@ -1016,7 +1016,6 @@ outofmemory:
       return -1;		// need at least six chars for "/*" in unicode
     maxdatacount=uint16_read((char*)c+7);
     attr=uint16_read((char*)c-smbheadersize+paramofs);
-    flags=uint16_read((char*)c-smbheadersize+paramofs+4);
     if (subcommand==1)
       loi=uint16_read((char*)c-smbheadersize+paramofs+6);
     else

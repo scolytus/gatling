@@ -145,6 +145,8 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
   array_cats(&c,path);
   {
     char* tmp=http_header(h,"User-Agent");
+    /* don't give wget the column sorting interface so wget -m does not
+     * mirror it needlessly */
     if (tmp && byte_equal(tmp,5,"Wget/"))
       array_cats(&c,"</h1>\n<table><tr><th>Name<th>Last Modified<th>Size\n");
     else {
@@ -224,6 +226,8 @@ int add_proxy(const char* c) {
       x->proxyproto=FASTCGI;
     else if (c[0]=='S')
       x->proxyproto=SCGI;
+    else if (c[0]=='H')
+      x->proxyproto=HTTP;
     else
       goto nixgut;
     c+=2;
@@ -383,7 +387,7 @@ static size_t fmt_cgivars(char* dst,struct http_data* h,const char* uri,size_t u
       }
       while (*x!=':') {
 	char c=*x;
-	if (c>='a' && c<='z') c-='a'-'A';
+	if (c>='a' && c<='z') c-='a'-'A';	/* toupper */
 	if (c=='-') c='_'; else
 	if (c<'A' || c>'Z') {
 	  dst=olddst;
@@ -469,7 +473,9 @@ freeandfail:
 	if (x->proxyproto == SCGI) {
 	  size_t l=fmt_cgivars(0,ctx_for_sockfd,c,matches.rm_eo,dir,0);
 	  char* x,* y;
-	  if (!array_allocate(&ctx_for_gatewayfd->r,1,l+fmt_ulong(0,l)+3))
+	  /* array_allocate gets the index of the last element you want
+	   * to access, not the number of bytes; so +1, not +2 */
+	  if (!array_allocate(&ctx_for_gatewayfd->r,1,l+fmt_ulong(0,l)+1))
 	    goto freeandfail;
 	  x=array_start(&ctx_for_gatewayfd->r);
 	  x+=fmt_ulong(x,l);
@@ -635,7 +641,6 @@ freeandfail:
 
       if (x->port) {
 	/* proxy mode */
-	changestate(ctx_for_gatewayfd,PROXYSLAVE);
 	if (x->port>0xffff) {	/* unix domain socket mode */
 	  fd_to_gateway=socket(AF_UNIX,SOCK_STREAM,0);
 	} else
@@ -644,6 +649,7 @@ freeandfail:
 	ctx_for_gatewayfd->myfd=fd_to_gateway;
 #endif
 	if (fd_to_gateway==-1) goto punt2;
+	changestate(ctx_for_gatewayfd,PROXYSLAVE);
 	if (!io_fd(fd_to_gateway)) {
 punt:
 	  io_close(fd_to_gateway);
@@ -804,6 +810,17 @@ punt2:
 	    const char contmsg[]="HTTP/1.1 100 Continue\r\n\r\n";
 	    /* if this fails, tough luck.  I'm not bloating my state
 	      * engine for this crap. */
+#ifdef SUPPORT_HTTPS
+	    if (ctx_for_sockfd->t==HTTPSREQUEST)
+#if defined(USE_OPENSSL)
+	      SSL_write(ctx_for_sockfd->ssl,contmsg,sizeof(contmsg)-1);
+#elif defined(USE_POLARSSL)
+	      ssl_write(&ctx_for_sockfd->ssl,contmsg,sizeof(contmsg)-1);
+#else
+#warn fixme update SSL code in http.c
+#endif
+	    else
+#endif
 	    io_trywrite(sockfd,contmsg,sizeof(contmsg)-1);
 	  }
 	}
@@ -1047,23 +1064,35 @@ int read_http_post(int sockfd,struct http_data* H) {
   } else
 #endif
   i=read(sockfd,buf,l);
-//  printf("read_http_post: want to read %ld bytes from %d; got %d\n",l,sockfd,i);
+#ifdef MOREDEBUG
+  printf("read_http_post: want to read %ld bytes from %d; got %d\n",(long)l,sockfd,i);
+#endif
   if (i<1) return -1;
 
   H->received+=i;
   H->still_to_copy-=i;
-//  printf("still_to_copy read_http_post: %p %llu -> %llu\n",H,H->still_to_copy+i,H->still_to_copy);
+#ifdef MOREDEBUG
+  printf("still_to_copy read_http_post: %p %llu -> %llu\n",H,H->still_to_copy+i,H->still_to_copy);
+#ifdef STATE_DEBUG
+  {
+    struct http_data* mybuddy=io_getcookie(H->buddy);
+    printf("read_http_post: my state is %s, my buddy's state is %s\n",state2string(H->t),state2string(mybuddy->t));
+  }
+#endif
+#endif
   /* we got some data.  Now, for FastCGI we need to add a header before
    * writing it to the proxy */
   if (H->proxyproto==FASTCGI) {
     char tmp[8]="\x01\x05\x00\x01\x00\x00\x00\x00";
     tmp[4]=i>>8;
     tmp[5]=i&0xff;
+
     array_catb(&H->r,tmp,8); /* FCGI_Record: FCGI_STDIN (5) */
   }
   array_catb(&H->r,buf,i);
-  if (H->proxyproto==FASTCGI && H->still_to_copy==0)
+  if (H->proxyproto==FASTCGI && H->still_to_copy==0) {
     array_catb(&H->r,"\x01\x05\x00\x01\x00\x00\x00\x00",8); /* FCGI_Record: FCGI_STDIN (5) */
+  }
   if (array_failed(&H->r))
     return -1;
   return 0;
@@ -2172,10 +2201,14 @@ void handle_read_proxypost(int64 i,struct http_data* H) {
 
 void handle_read_httppost(int64 i,struct http_data* H) {
   /* read POST data. */
-//	printf("read POST data state for %d\n",i);
+#ifdef MOREDEBUG
+	printf("read POST data state for %d\n",(int)i);
+#endif
   if (H->still_to_copy) {
     if (array_bytes(&H->r)>0) {
-//	    printf("  but there was still data in H->r!\n");
+#ifdef MOREDEBUG
+	    printf("  but there was still data in H->r!\n");
+#endif
       io_dontwantread(i);
       io_wantwrite(H->buddy);
     } else if (read_http_post(i,H)==-1) {
@@ -2186,23 +2219,31 @@ void handle_read_httppost(int64 i,struct http_data* H) {
       }
       cleanup(i);
     } else {
-//	    printf("  read something\n");
+#ifdef MOREDEBUG
+	    printf("  read something\n");
+#endif
       io_dontwantread(i);
       io_wantwrite(H->buddy);
     }
   } else {
     /* should not happen */
     io_dontwantread(i);
-//	  printf("ARGH!!!\n");
+#ifdef MOREDEBUG
+	  printf("ARGH!!!\n");
+#endif
   }
 }
 
 void handle_write_proxypost(int64 i,struct http_data* h) {
   struct http_data* H=io_getcookie(h->buddy);
   /* do we have some POST data to write? */
-//	printf("event: write POST data (%llu) to proxy on %d\n",h->still_to_copy,i);
+#ifdef MOREDEBUG
+	printf("event: write POST data (%llu) to proxy on %d\n",h->still_to_copy,(int)i);
+#endif
   if (!array_bytes(&H->r)) {
-//	  printf("  but nothing here to write!\n");
+#ifdef MOREDEBUG
+	  printf("  but nothing here to write!\n");
+#endif
     io_dontwantwrite(i);	/* nope */
     io_wantread(h->buddy);
   } else {
@@ -2211,11 +2252,24 @@ void handle_write_proxypost(int64 i,struct http_data* h) {
       char* c=array_start(&H->r);
       long alen=array_bytes(&H->r);
       long l;
-//	    printf("%ld bytes still in H->r (%ld in h->r), still to copy: %lld (%lld in h)\n",alen,(long)array_bytes(&h->r),H->still_to_copy,h->still_to_copy);
-      if (alen>h->still_to_copy) alen=h->still_to_copy;
+#ifdef MOREDEBUG
+      printf("%ld bytes still in H->r (%ld in h->r), still to copy: %lld (%lld in h)\n",alen,(long)array_bytes(&h->r),H->still_to_copy,h->still_to_copy);
+#endif
+
+      if (h->proxyproto!=FASTCGI) {
+	/* this looks like the right thing to sanity-check but it is not
+	 * in the fastcgi case.  For fastcgi, we have to append an 8
+	 * byte header for each chunk, and if it's the last chunk, we
+	 * have to append another 8 byte header.  So alen can be 8 or 16
+	 * bytes off. */
+	if (alen>h->still_to_copy) alen=h->still_to_copy;
+      }
+
       if (alen==0) goto nothingmoretocopy;
       l=write(i,c,alen);
-//	    printf("wrote %ld bytes (wanted to write %ld; had %lld still to copy)\n",l,alen,H->still_to_copy);
+#ifdef MOREDEBUG
+	    printf("wrote %ld bytes (wanted to write %ld; had %lld still to copy)\n",l,alen,H->still_to_copy);
+#endif
       if (l<1) {
 	/* ARGH!  Proxy crashed! *groan* */
 	if (logging) {
@@ -2321,7 +2375,9 @@ kaputt:
   }
   /* it worked.  We wrote the header.  Now see if there is
     * POST data to write.  h->still_to_copy is Content-Length. */
-//	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
+#ifdef MOREDEBUG
+	printf("wrote header to %d for %d; Content-Length: %d\n",(int)i,(int)h->buddy,(int)h->still_to_copy);
+#endif
   changestate(h,PROXYPOST);
   array_trunc(&h->r);
   if (h->still_to_copy) {

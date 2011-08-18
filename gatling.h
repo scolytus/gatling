@@ -357,4 +357,88 @@ extern char* magicelfvalue;
 extern char serverroot[];
 extern char* defaultindex;
 
+#ifdef DEBUG_EVENTS
+#include "fmt.h"
+
+static void new_io_wantwrite(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  char c[100];
+#ifdef STATE_DEBUG
+  struct http_data* h=io_getcookie(s);
+  if (h)
+    c[fmt_strm(c," [state ",state2string(h->t),"]")]=0;
+  else
+    strcpy(c," [cookie is NULL]");
+#else
+  c[0]=0;
+#endif
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_wantwrite(",a,")",c,"\n");
+  io_wantwrite(s);
+}
+
+static void new_io_dontwantwrite(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  char c[100];
+#ifdef STATE_DEBUG
+  struct http_data* h=io_getcookie(s);
+  if (h)
+    c[fmt_strm(c," [state ",state2string(h->t),"]")]=0;
+  else
+    strcpy(c," [cookie is NULL]");
+#else
+  c[0]=0;
+#endif
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_dontwantwrite(",a,")",c,"\n");
+  io_dontwantwrite(s);
+}
+
+static void new_io_wantread(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  char c[100];
+#ifdef STATE_DEBUG
+  struct http_data* h=io_getcookie(s);
+  if (h)
+    c[fmt_strm(c," [state ",state2string(h->t),"]")]=0;
+  else
+    strcpy(c," [cookie is NULL]");
+#else
+  c[0]=0;
+#endif
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_wantread(",a,")",c,"\n");
+  io_wantread(s);
+}
+
+static void new_io_dontwantread(int64 s,const char* file,unsigned int line) {
+  char a[FMT_ULONG];
+  char b[FMT_ULONG];
+  struct http_data* h=io_getcookie(s);
+  char c[100];
+  c[0]=0;
+#ifdef STATE_DEBUG
+  if (h)
+    c[fmt_strm(c," [state ",state2string(h->t),"]")]=0;
+  else
+    strcpy(c," [cookie is NULL]");
+#endif
+  a[fmt_ulong(a,s)]=0;
+  b[fmt_ulong(b,line)]=0;
+  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_dontwantread(",a,")",c,"\n");
+  io_dontwantread(s);
+}
+
+#define io_wantwrite(s) new_io_wantwrite(s,__FILE__,__LINE__)
+#define io_wantread(s) new_io_wantread(s,__FILE__,__LINE__)
+#define io_dontwantwrite(s) new_io_dontwantwrite(s,__FILE__,__LINE__)
+#define io_dontwantread(s) new_io_dontwantread(s,__FILE__,__LINE__)
+#endif
+
 #endif

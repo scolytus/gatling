@@ -1,5 +1,7 @@
 0.13:
   add SUPPORT_DIR_REDIRECT in gatling_features.h
+  several SCGI and FASTCGI fixes
+  support PolarSSL, see http://www.polarssl.org/
 
 0.12:
   close ftp-uploaded files in cleanup() (Johannes Ziemke)

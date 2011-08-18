@@ -19,6 +19,8 @@ CC=$(CROSS)gcc
 CFLAGS=-pipe -Wall
 LDFLAGS=
 
+#CFLAGS+=-DSTATE_DEBUG -DMOREDEBUG -DDEBUG_EVENTS -DSMDEBUG
+
 path = $(subst :, ,$(PATH))
 diet_path = $(foreach dir,$(path),$(wildcard $(dir)/diet))
 ifeq ($(strip $(diet_path)),)

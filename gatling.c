@@ -87,49 +87,6 @@ int64 new_io_timeouted() {
 #define io_timeouted new_io_timeouted
 #endif
 
-#ifdef DEBUG_EVENTS
-void new_io_wantwrite(int64 s,const char* file,unsigned int line) {
-  char a[FMT_ULONG];
-  char b[FMT_ULONG];
-  a[fmt_ulong(a,s)]=0;
-  b[fmt_ulong(b,line)]=0;
-  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_wantwrite(",a,")\n");
-  io_wantwrite(s);
-}
-
-void new_io_dontwantwrite(int64 s,const char* file,unsigned int line) {
-  char a[FMT_ULONG];
-  char b[FMT_ULONG];
-  a[fmt_ulong(a,s)]=0;
-  b[fmt_ulong(b,line)]=0;
-  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_dontwantwrite(",a,")\n");
-  io_dontwantwrite(s);
-}
-
-void new_io_wantread(int64 s,const char* file,unsigned int line) {
-  char a[FMT_ULONG];
-  char b[FMT_ULONG];
-  a[fmt_ulong(a,s)]=0;
-  b[fmt_ulong(b,line)]=0;
-  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_wantread(",a,")\n");
-  io_wantread(s);
-}
-
-void new_io_dontwantread(int64 s,const char* file,unsigned int line) {
-  char a[FMT_ULONG];
-  char b[FMT_ULONG];
-  a[fmt_ulong(a,s)]=0;
-  b[fmt_ulong(b,line)]=0;
-  buffer_putmflush(buffer_2,"DEBUG: ",file,":",b,": io_dontwantread(",a,")\n");
-  io_dontwantread(s);
-}
-
-#define io_wantwrite(s) new_io_wantwrite(s,__FILE__,__LINE__)
-#define io_wantread(s) new_io_wantread(s,__FILE__,__LINE__)
-#define io_dontwantwrite(s) new_io_dontwantwrite(s,__FILE__,__LINE__)
-#define io_dontwantread(s) new_io_dontwantread(s,__FILE__,__LINE__)
-#endif
-
 const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
 
 #ifdef SUPPORT_CGI
@@ -1337,6 +1294,12 @@ int main(int argc,char* argv[],char* envp[]) {
   unsigned long long prefetchquantum=0;
 #ifdef SUPPORT_MULTIPROC
   pid_t* Instances;
+#endif
+
+#if defined(DEBUG_EVENTS) || defined(MOREDEBUG) || defined(SMDEBUG) || defined(STATE_DEBUG)
+#ifdef __dietlibc__
+  fflush(stdout);
+#endif
 #endif
 
 #ifdef SUPPORT_HTTPS

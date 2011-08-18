@@ -61,9 +61,9 @@ int main(int argc,char* argv[],char* envp[]) {
   buffer_puts(buffer_1,"Content-Type: text/plain\r\n\r\n");
   l=do_cgi(&c);
   if (l>0) {
-    buffer_puts(buffer_1,"CGI arguments:\n\n--------\n");
+    buffer_puts(buffer_1,"CGI arguments:\n\n  --==[snip]==--\n");
     buffer_put(buffer_1,c,l);
-    buffer_puts(buffer_1,"\n\n--------\n\n");
+    buffer_puts(buffer_1,"\n\n  --==[snip]==--\n\n");
   }
   for (i=0; envp[i]; ++i)
     buffer_putm(buffer_1,envp[i],"\n");
