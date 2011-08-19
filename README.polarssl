@@ -1,0 +1,20 @@
+PolarSSL is a small SSL/TLS library suitable for embedded use.
+You can find it at http://www.polarssl.org/
+
+At the time of this writing (August 2011), the author has added several
+patches I suggested in the SVN trunk version, so you need the trunk
+version.
+
+To compile polarssl with dietlibc, just go to polarssl/library and do
+this:
+
+  $ diet -Os gcc -nostdinc -c *.c -I ../include
+  $ ar rsu libpolarssl.a *.o
+  $ cp libpolarssl.a `diet -L gcc`
+  $ mkdir -p /opt/diet/include/polarssl
+  $ cp -p ../include/polarssl/*.h /opt/diet/include/polarssl
+
+After that, in the gatling source tree, run
+
+  $ make ptlsgatling
+
