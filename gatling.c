@@ -773,14 +773,13 @@ int handle_ssl_error_code(int sock,int code,int reading) {
     io_dontwantread(sock);
     return 0;
 #elif defined(USE_POLARSSL)
-  case POLARSSL_ERR_NET_TRY_AGAIN:
-    if (reading) {
-      io_wantread(sock);
-      io_dontwantwrite(sock);
-    } else {
-      io_wantwrite(sock);
-      io_dontwantread(sock);
-    }
+  case POLARSSL_ERR_NET_WANT_READ:
+    io_wantread(sock);
+    io_dontwantwrite(sock);
+    return 0;
+  case POLARSSL_ERR_NET_WANT_WRITE:
+    io_wantwrite(sock);
+    io_dontwantread(sock);
     return 0;
 #endif
 #ifdef USE_OPENSSL
@@ -907,7 +906,7 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
 #elif defined(USE_POLARSSL)
     if (l<0) {
-      if (l==POLARSSL_ERR_NET_TRY_AGAIN) {
+      if (l==POLARSSL_ERR_NET_WANT_READ || l==POLARSSL_ERR_NET_WANT_WRITE) {
 #endif
 //      printf("  error %d %s\n",l,ERR_error_string(l,0));
 	io_eagain(i);
@@ -1107,7 +1106,7 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
 #ifdef USE_OPENSSL
     if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
 #elif defined(USE_POLARSSL)
-    if (l==POLARSSL_ERR_NET_TRY_AGAIN) {
+    if (l==POLARSSL_ERR_NET_WANT_READ || l==POLARSSL_ERR_NET_WANT_WRITE) {
 #endif
       l=-1; errno=EAGAIN;
     } else

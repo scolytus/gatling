@@ -10,6 +10,10 @@
 #include <polarssl/ssl.h>
 #include "mmap.h"
 
+#ifdef POLARSSL_ERR_NET_TRY_AGAIN
+#error polarssl version too old, try the svn trunk
+#endif
+
 static int library_inited;
 
 const char* ssl_server_cert="server.pem";
@@ -113,12 +117,12 @@ static int my_set_session( ssl_context *ssl )
     return( 0 );
 }
 
-static int my_net_recv( void *ctx, unsigned char *buf, int len ) {
+static int my_net_recv( void *ctx, unsigned char *buf, size_t len ) {
   int sock=(int)(uintptr_t)ctx;
   return net_recv(&sock,buf,len);
 };
 
-static int my_net_send( void *ctx, unsigned char *buf, int len ) {
+static int my_net_send( void *ctx, const unsigned char *buf, size_t len ) {
   int sock=(int)(uintptr_t)ctx;
   return net_send(&sock,buf,len);
 };

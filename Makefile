@@ -67,6 +67,7 @@ matchiprange: matchiprange.o
 	$(CC) -o $@ matchiprange.o $(LDFLAGS)
 
 gatling.o: version.h gatling.h havesetresuid.h
+tlsgatling ptlsgatling: havesetresuid.h libsocket libiconv libcrypt
 
 version.h: CHANGES
 	(head -n 1 CHANGES | sed 's/\([^:]*\):/#define VERSION "\1"/') > version.h

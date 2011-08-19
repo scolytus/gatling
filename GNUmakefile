@@ -83,10 +83,10 @@ PHTTPS_OBJS=mime.o ftp.o phttps.o smb.o common.o connstat.o
 
 $(OBJS) https.o gatling.o: gatling.h version.h gatling_features.h
 
-tlsgatling: gatling.c ssl.o $(HTTPS_OBJS)
+tlsgatling: gatling.c ssl.o $(HTTPS_OBJS) libsocket libiconv libcrypt
 	-$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
-ptlsgatling: gatling.c pssl.o $(PHTTPS_OBJS)
+ptlsgatling: gatling.c pssl.o $(PHTTPS_OBJS) libsocket libiconv libcrypt
 	-$(CC) -o $@ gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
 
 
