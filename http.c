@@ -2309,14 +2309,7 @@ nothingmoretocopy:
   }
 }
 
-void handle_write_httppost(int64 i,struct http_data* h) {
-  int64 r;
-#ifdef SUPPORT_HTTPS
-  if (h->t==HTTPSPOST)
-    r=iob_write(i,&h->iob,https_write_callback);
-  else 
-#endif
-  r=iob_send(i,&h->iob);
+static void handle_write_error(int64 i,struct http_data* h,int64 r) {
   if (r==-1)
     io_eagain(i);
   else if (r<=0) {
@@ -2350,6 +2343,17 @@ void handle_write_httppost(int64 i,struct http_data* h) {
     }
   } else
     h->sent+=r;
+}
+
+void handle_write_httppost(int64 i,struct http_data* h) {
+  int64 r;
+#ifdef SUPPORT_HTTPS
+  if (h->t==HTTPSPOST)
+    r=iob_write(i,&h->iob,https_write_callback);
+  else 
+#endif
+  r=iob_send(i,&h->iob);
+  handle_write_error(i,h,r);
 }
 
 void handle_write_proxyslave(int64 i,struct http_data* h) {
@@ -2406,7 +2410,7 @@ kaputt:
 	H->r.initialized=0;
       }
     }
-    handle_write_httppost(i,H);
+    handle_write_error(i,H,iob_send(i,&H->iob));
   } else {
     io_dontwantwrite(i);
     io_wantread(i);
