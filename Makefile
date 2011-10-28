@@ -14,7 +14,7 @@ CFLAGS=-pipe -Wall -O -I../libowfat/ -I/usr/local/include
 LDFLAGS=-s -L../libowfat/ -lowfat
 
 OBJS=mime.o ftp.o http.o smb.o common.o connstat.o
-HTTPS_OBJS=mime.o ftp.o https.o smb.o common.o connstat.o
+HTTPS_OBJS=mime.o ftp.c https.o smb.c common.c connstat.o
 
 $(OBJS) https.o gatling.o: gatling.h version.h gatling_features.h
 
