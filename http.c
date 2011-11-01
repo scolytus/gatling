@@ -2082,7 +2082,7 @@ rangekaputt:
 	  c+=fmt_str(c,"gzip");
 #endif
 	}
-	if ((range_first || range_last!=ss.st_size)) {
+	if (!head && (range_first || range_last!=ss.st_size)) {
 	  c+=fmt_str(c,"\r\nContent-Range: bytes ");
 	  c+=fmt_ulonglong(c,range_first);
 	  c+=fmt_str(c,"-");
