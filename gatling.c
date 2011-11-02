@@ -53,6 +53,10 @@
 #include "havealloca.h"
 #include "havesetresuid.h"
 
+#if !defined(__OPTIMIZE__) && defined(__linux__)
+#include <sys/prctl.h>
+#endif
+
 char serverroot[1024];
 
 #ifdef SUPPORT_MULTIPROC
@@ -1154,6 +1158,7 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 #endif
       cleanup(i);
     } else {	/* returned 0, i.e. we wrote it all */
+wroteitall:
 #ifdef SUPPORT_HTTPS
       if (h->t == HTTPSRESPONSE) h->t = HTTPSREQUEST;
 #endif
@@ -1201,7 +1206,7 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 	  struct http_data* b=io_getcookie(h->buddy);
 	  if (b) {
 	    b->buddy=-1;
-	    iob_reset(&b->iob);
+//	    iob_reset(&b->iob);
 	    iob_adds(&b->iob,"226 Done.\r\n");
 	    io_dontwantread(h->buddy);
 	    io_wantwrite(h->buddy);
@@ -1223,6 +1228,8 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
 	h->prefetched_until+=2*prefetchquantum;
       }
     }
+    if (iob_bytesleft(&h->iob)==0)	/* optimization, not strictly necessary */
+      goto wroteitall;
   }
 }
 
@@ -1890,6 +1897,7 @@ usage:
   }
   if (new_uid && switch_uid()==-1)
     panic("switch_uid");
+
 #endif
 
 #ifdef __MINGW32__
@@ -2007,6 +2015,18 @@ usage:
   }
 
   connections=1;
+
+#if !defined(__OPTIMIZE__) && defined(__linux__)
+  /* make sure we can dump core even if we switched uid */
+  printf("dump flag is: %d\nsetting process to dumpable...\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
+  prctl(PR_SET_DUMPABLE,1,0,0);
+  printf("dump flag is now: %d\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
+  {
+    struct rlimit orig;
+    orig.rlim_cur=orig.rlim_max=RLIM_INFINITY;
+    setrlimit(RLIMIT_CORE,&orig);
+  }
+#endif
 
   for (;;) {
     int events;		/* accept new connections asap */
