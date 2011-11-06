@@ -2091,7 +2091,7 @@ rangekaputt:
 	  c+=fmt_ulonglong(c,ss.st_size);
 	}
 	if (range_first>ss.st_size) {
-	  free(c);
+	  free(h->hdrbuf);
 	  httperror(h,"416 Bad Range","The requested range can not be satisfied.",head);
 	  buffer_puts(buffer_1,"error_416 ");
 	} else {
