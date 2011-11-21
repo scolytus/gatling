@@ -794,17 +794,8 @@ int handle_ssl_error_code(int sock,int code,int reading) {
   case POLARSSL_ERR_NET_CONN_RESET:
     errno=ECONNRESET;
 #endif
-    if (logging) {
-      int olderrno=errno;
-      buffer_puts(buffer_1,"io_error ");
-      buffer_putulong(buffer_1,sock);
-      buffer_putspace(buffer_1);
-      buffer_puterror(buffer_1);
-      buffer_puts(buffer_1,"\nclose/readerr ");
-      buffer_putulong(buffer_1,sock);
-      buffer_putnlflush(buffer_1);
-      errno=olderrno;
-    }
+    // we already signal the error up and upsteam will then write an
+    // error message
     return -1;
   default:
     if (logging) {
@@ -1104,7 +1095,7 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
   if (l<0) {
 #endif
     if (handle_ssl_error_code(sock,l,0)==-1) {
-      cleanup(sock);
+//      cleanup(sock);
       return -3;
     }
 #ifdef USE_OPENSSL
@@ -2018,9 +2009,9 @@ usage:
 
 #if !defined(__OPTIMIZE__) && defined(__linux__)
   /* make sure we can dump core even if we switched uid */
-  printf("dump flag is: %d\nsetting process to dumpable...\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
+//  printf("dump flag is: %d\nsetting process to dumpable...\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
   prctl(PR_SET_DUMPABLE,1,0,0);
-  printf("dump flag is now: %d\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
+//  printf("dump flag is now: %d\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
   {
     struct rlimit orig;
     orig.rlim_cur=orig.rlim_max=RLIM_INFINITY;

@@ -3,6 +3,7 @@
   several SCGI and FASTCGI fixes
   support PolarSSL, see http://www.polarssl.org/
   remove spurious Content-Range header in 304 HTTP responses
+  fix crash bug on I/O errors inside SSL connections
 
 0.12:
   close ftp-uploaded files in cleanup() (Johannes Ziemke)

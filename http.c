@@ -22,6 +22,12 @@
 #include <dirent.h>
 #ifdef __dietlibc__
 #include <md5.h>
+#elif defined(USE_POLARSSL)
+#include <polarssl/md5.h>
+#define MD5_CTX md5_context
+#define MD5Init md5_starts
+#define MD5Update md5_update
+#define MD5Final md5_finish
 #else
 #include <openssl/md5.h>
 #define MD5Init MD5_Init
