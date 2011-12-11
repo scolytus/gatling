@@ -152,6 +152,37 @@ struct smbheader {
 };
 #endif
 
+static int globmatch_int(const char* pattern,const char* string,const char* ldot) {
+  while (*pattern) {
+    switch (*pattern) {
+    case '?':
+      if (!*string) return *pattern==0;
+      break;
+    case '<':
+      if (string>ldot)
+	return 0;
+    case '*':
+      /* pattern="*.x" and string=".x"? */
+      if (globmatch_int(pattern+1,string,ldot)) return 1;
+      /* pattern="*.x" and string="a.x"? */
+      ++string;
+      continue;
+    default:
+      if (tolower(*string) != tolower(*pattern)) return 0;
+      if (!*string) return 1;
+    }
+    ++pattern;
+    ++string;
+  }
+  return *string==0;
+}
+
+static int globmatch(const char* pattern,const char* string) {
+  const char* ldot=strrchr(string,'.');
+  if (!ldot) ldot=string+strlen(string);
+  return globmatch_int(pattern,string,ldot);
+}
+
 static int hasandx(unsigned char code) {
   return !strchr("\x04\x72\x71\x2b\x32\x80\xa0\x23",code);
 }
@@ -433,6 +464,7 @@ enum {
   STATUS_INVALID_HANDLE=0xC0000008,
   ERROR_NO_MEMORY=0xc0000017,
   ERROR_ACCESS_DENIED=0xC0000022,
+  STATUS_OBJECT_NAME_INVALID=0xC0000033,
   ERROR_OBJECT_NAME_NOT_FOUND=0xc0000034,
   ERROR_NOT_SUPPORTED=0xc00000bb,
   ERROR_NETWORK_ACCESS_DENIED=0xc00000ca,
@@ -1030,7 +1062,7 @@ outofmemory:
       sizeperrecord=0x44;
     if (subcommand==1) {
       filename=(uint16*)(c-smbheadersize+paramofs+12);
-      l=paramcount-12;
+      l=(paramcount-12)/2;
       if ((h->ftppath=malloc(l+l+4))) {
 	memcpy(h->ftppath+2,filename,l+l+2);
 	((uint16*)h->ftppath)[0]=l;
@@ -1093,12 +1125,17 @@ outofmemory:
 
     if ((uintptr_t)filename % 2)
       goto filenotfound;
-    if (filename[l-1])
+    if (l==0 || filename[l-1])
       return -1;		// want null terminated filename
     if (uint16_read((char*)&filename[l-1])=='\\' || uint16_read((char*)&filename[l-1])=='/')
       goto filenotfound;	// can't glob if filename ends in \ or /
     if (uint16_read((char*)&(filename[0]))!='\\')
       goto filenotfound;
+    for (i=0; i+2<l; ++i)
+      if (uint16_read((char*)&filename[i])<0x1f) {
+	set_smb_error(sr,STATUS_OBJECT_NAME_INVALID,0x32);
+	return 0;
+      }
     for (i=l; i>0; --i)
       if (uint16_read((char*)&filename[i])=='\\') {
 	filename[i]=0;
@@ -1109,7 +1146,18 @@ outofmemory:
       goto filenotfound;
     filename+=i+1; l-=i;
     globlatin1=alloca(l+1);
-    if (utf16tolatin1(globlatin1,l-i+1,filename,(l+1)*2)) {
+
+#if 0
+    {
+      int j;
+      printf("convert \"");
+      for (j=0; filename[j]; ++j)
+	printf("%c",filename[j]);
+      printf("\" (source size: %d, dest size %d)\n",(l+1)*2,l+1);
+    }
+#endif
+
+    if (utf16tolatin1(globlatin1,l+1,filename,(l+1)*2)) {
       globlatin1=0;
 //      puts("could not convert glob expression to latin1!");
     } // else
@@ -1143,8 +1191,8 @@ outofmemory:
 //	  printf("matching %s vs %s\n",globlatin1,de->d_name);
 //	if (globutf8)
 //	  printf("matching %s vs %s\n",globutf8,de->d_name);
-	if ((globlatin1 && !fnmatch(globlatin1,de->d_name,0)) ||
-	    (globutf8 && !fnmatch(globutf8,de->d_name,0))) {
+	if ((globlatin1 && globmatch(globlatin1,de->d_name)) ||
+	    (globutf8 && globmatch(globutf8,de->d_name))) {
 	  if (stat(de->d_name,&ss)==-1) continue;
 //	  printf("globbed ok: %s\n",de->d_name);
 	  if (!base) {
@@ -1331,7 +1379,7 @@ static int smb_handle_Query_Information2(struct http_data* h,unsigned char* c,si
 
 static int smb_handle_QueryDiskInfo(unsigned char* c,size_t len,struct smb_response* sr) {
   struct statvfs sv;
-  char buf[11];
+  char buf[13];
   unsigned long long l,k;
   size_t i;
   if (len<3 || c[0]!=0) return -1;
@@ -1365,8 +1413,8 @@ static int smb_handle_QueryDiskInfo(unsigned char* c,size_t len,struct smb_respo
       uint16_pack(buf+3,1<<(i-15));
     }
   }
-  uint16_pack(buf+9,0);
-  return add_smb_response(sr,buf,11,0x80);
+  uint32_pack(buf+9,0);
+  return add_smb_response(sr,buf,13,0x80);
 }
 
 int smbresponse(struct http_data* h,int64 s) {
