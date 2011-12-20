@@ -19,6 +19,7 @@
 #include <sys/statvfs.h>
 #include <fnmatch.h>
 #include <dirent.h>
+#include <ctype.h>
 
 #include <stdio.h>
 
@@ -511,16 +512,34 @@ static size_t utf16toutf8(char* dest,size_t dsize,uint16_t* src,size_t ssize) {
   return dsize-Y;
 }
 
-static size_t utf8toutf16(char* dest,size_t dsize,char* src,size_t ssize) {
-  size_t X,Y;
-  char* x,* y;
-  x=src;
-  y=dest;
-  X=ssize;
-  Y=dsize;
-  memset(dest,0,dsize);
-  if (iconv(utf82wc2,&x,&X,&y,&Y)) return 0;
-  return dsize-Y;
+static size_t utf8toutf16(char* dest,size_t dsize,const char* src) {
+  /* src is a filename, so it might be either latin1 or utf8.
+     try to parse it as utf8, but if we fail on a char, we assume it's latin1 */
+  size_t c;
+  char* orig=dest;
+  while (*src) {
+    if ((src[0]&0x80)==0) {
+      c=src[0];
+      ++src;
+    } else if ((src[0]&0xe0)==0xc0 && (src[1]&0xc0)==0x80) {
+      c=((src[0]&0x1f) << 6) + (src[1]&0x3f);
+      src+=2;
+    } else if ((src[0]&0xf0)==0xe0 && (src[1]&0xc0)==0x80 && (src[2]&0xc0)==0x80) {
+      c=((src[0]&0xf) << 12) + ((src[1]&0x3f) << 6) + (src[2]&0x3f);
+      src+=3;
+    } else {
+      /* we don't support longer UTF-8 sequences because you'd need more
+       * than the 16 bits Windows has for them. */
+      c=(unsigned char)src[0];
+      ++src;
+    }
+    if (dsize<2) return 0;
+    dest[0]=c&0xff;
+    dest[1]=(c>>8);
+    dest+=2;
+    dsize-=2;
+  }
+  return dest-orig;
 }
 
 
@@ -876,6 +895,7 @@ static int smb_handle_Trans2(struct http_data* h,unsigned char* c,size_t len,uin
       if (hdl->filename) {
 	fnlen=hdl->filename[0];
 	filename=hdl->filename+1;
+	if (fnlen && filename[fnlen-1]==0 && filename[fnlen-2]==0) fnlen-=2;
       }
       loi=uint16_read((char*)c-smbheadersize+paramofs+2);
     } else if (subcommand==5) {
@@ -990,7 +1010,7 @@ filenotfound:
     case 0x0107:	// SMB_QUERY_FILE_ALL_INFO
       {
 	char* buf;
-	size_t datacount=78+fnlen;
+	size_t datacount=72+fnlen;
 	buf=alloca(20+100+datacount);
 	byte_copy(buf,21,
 	  "\x0a"		// word count
@@ -1025,7 +1045,7 @@ filenotfound:
 	uint32_pack(buf+96,fnlen);
 	if (fnlen)
 	  byte_copy(buf+100,fnlen,filename);
-	return add_smb_response(sr,buf,21+datacount,0x32);
+	return add_smb_response(sr,buf,28+datacount,0x32);
       }
     default:
       set_smb_error(sr,ERROR_ACCESS_DENIED,0x32);
@@ -1245,7 +1265,7 @@ outofmemory:
 	    max=sr->buf+sr->allocated;
 	  }
 	  if (max-cur < 100+0x60 +strlen(de->d_name)*2 ||
-	      !(actualnamelen=utf8toutf16(cur+sizeperrecord,max-cur-sizeperrecord,de->d_name,strlen(de->d_name)))) {
+	      !(actualnamelen=utf8toutf16(cur+sizeperrecord,max-cur-sizeperrecord,de->d_name))) {
 	    // not enough space!  abort!  abort!
 	    if (subcommand==1)
 	      trans2[28]=0;
@@ -1376,11 +1396,11 @@ static int smb_handle_Query_Information2(struct http_data* h,unsigned char* c,si
   fmt_dostime(buf+1+4+4,ss.st_mtime);
   uint32_pack(buf+1+4+4+4,ss.st_size);
   uint32_pack(buf+1+4+4+4+4,ss.st_blocks*512);
-  buf[1+4+4+4+4+4]=0x80+S_ISDIR(ss.st_mode)?0x10:0;
+  buf[1+4+4+4+4+4]=1+(S_ISDIR(ss.st_mode)?0x10:0);	/* the 1 is for read-only */
   buf[1+4+4+4+4+4+1]=0;
   buf[1+4+4+4+4+4+2]=0;
   buf[1+4+4+4+4+4+3]=0;
-  return add_smb_response(sr,buf,1+4+4+4+4+4+3,0x23);
+  return add_smb_response(sr,buf,1+4+4+4+4+4+5,0x23);
 }
 
 static int smb_handle_QueryDiskInfo(unsigned char* c,size_t len,struct smb_response* sr) {
