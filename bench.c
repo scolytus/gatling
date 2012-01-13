@@ -18,7 +18,7 @@
 
 void usage() {
   die(0,"usage: bench [-n requests] [-c concurrency] [-t timeout] [-k] [-K count]\n"
-        "       [-C cookie-file] [http://]host[:port]/uri");
+        "       [-C cookie-file] ([http://]host[:port]/uri|@host:port)");
 }
 
 unsigned long r[10];
