@@ -27,7 +27,7 @@
 #define MD5_CTX md5_context
 #define MD5Init md5_starts
 #define MD5Update md5_update
-#define MD5Final md5_finish
+#define MD5Final(out,ctx) md5_finish(ctx,out)
 #else
 #include <openssl/md5.h>
 #define MD5Init MD5_Init
@@ -793,8 +793,8 @@ punt2:
       *   - the header and possibly some data left in ctx_for_sockfd->r.
       * Want:
       *   - leave the data (not the header) in ctx_for_sockfd->r.
-      *   - set ctl_for_gatewayfd->still_to_copy to Content-Length.
-      *   - set ctl_for_sockfd->still_to_copy to Content-Length -
+      *   - set ctx_for_gatewayfd->still_to_copy to Content-Length.
+      *   - set ctx_for_sockfd->still_to_copy to Content-Length -
       *     the size of the copied data.  If that is non-zero, set t to
       *     HTTPPOST.
       */
@@ -837,27 +837,30 @@ punt2:
 	  size_t size_of_data_in_packet=array_bytes(&ctx_for_sockfd->r) - size_of_header - 1;
 	    /* the -1 is for the \0 we appended */
 
+//	  printf("proxy_connection: size_of_header=%lu, size_of_data_in_packet=%lu, content_length=%lu\n",size_of_header,size_of_data_in_packet,content_length);
+
 #ifdef SUPPORT_HTTPS
 	  if (ctx_for_sockfd->t==HTTPSREQUEST)
 	    changestate(ctx_for_sockfd,HTTPSPOST);
 	  if (ctx_for_sockfd->t!=HTTPSPOST)
 #endif
 	  changestate(ctx_for_sockfd,HTTPPOST);
+
+	  /* slight complication: we might have more data already than
+	   * we need for this request, if the content length is small
+	   * and the client uses pipelining and added the next request
+	   * already. */
+	  if (size_of_data_in_packet > content_length)
+	    size_of_data_in_packet = content_length;
+
 	  if (size_of_data_in_packet) {
 	    byte_copy(array_start(&ctx_for_sockfd->r),
 		      size_of_data_in_packet,
 		      array_start(&ctx_for_sockfd->r)+size_of_header);
 	    array_truncate(&ctx_for_sockfd->r,1,size_of_data_in_packet);
-/*
-	    if (content_length>size_of_data_in_packet)
-	      ctx_for_sockfd->still_to_copy-=size_of_data_in_packet;
-	    else
-	      ctx_for_sockfd->still_to_copy=0;
-*/
-	  } else {
+	  } else
 	    array_trunc(&ctx_for_sockfd->r);
-	    ctx_for_sockfd->still_to_copy=content_length;
-	  }
+	  ctx_for_sockfd->still_to_copy=content_length;
 
 	  if (ctx_for_gatewayfd->still_to_copy && array_bytes(&ctx_for_sockfd->r))
 	    io_wantwrite(fd_to_gateway);
@@ -868,6 +871,8 @@ punt2:
 	    io_wantread(sockfd);
 	  else
 	    io_dontwantread(sockfd);
+
+//	  printf("proxy_connection: ctx_for_sockfd->still_to_copy=%lu, ctx_for_gatewayfd->still_to_copy=%lu\n",ctx_for_sockfd->still_to_copy, ctx_for_gatewayfd->still_to_copy);
 
 	}
       }
@@ -2189,8 +2194,8 @@ fini:
 
 
 #ifdef SUPPORT_PROXY
-void handle_read_proxypost(int64 i,struct http_data* H) {
-  switch (proxy_is_readable(i,H)) {
+void handle_read_proxypost(int64 i,struct http_data* h) {
+  switch (proxy_is_readable(i,h)) {
   case -1:
     {
       if (logging) {
@@ -2205,19 +2210,19 @@ void handle_read_proxypost(int64 i,struct http_data* H) {
   }
 }
 
-void handle_read_httppost(int64 i,struct http_data* H) {
+void handle_read_httppost(int64 i,struct http_data* h) {
   /* read POST data. */
 #ifdef MOREDEBUG
 	printf("read POST data state for %d\n",(int)i);
 #endif
-  if (H->still_to_copy) {
-    if (array_bytes(&H->r)>0) {
+  if (h->still_to_copy) {
+    if (array_bytes(&h->r)>0) {
 #ifdef MOREDEBUG
-	    printf("  but there was still data in H->r!\n");
+	    printf("  but there was still data in h->r!\n");
 #endif
       io_dontwantread(i);
-      io_wantwrite(H->buddy);
-    } else if (read_http_post(i,H)==-1) {
+      io_wantwrite(h->buddy);
+    } else if (read_http_post(i,h)==-1) {
       if (logging) {
 	char a[FMT_ULONG];
 	a[fmt_ulong(a,i)]=0;
@@ -2229,7 +2234,7 @@ void handle_read_httppost(int64 i,struct http_data* H) {
 	    printf("  read something\n");
 #endif
       io_dontwantread(i);
-      io_wantwrite(H->buddy);
+      io_wantwrite(h->buddy);
     }
   } else {
     /* should not happen */
@@ -2359,6 +2364,30 @@ void handle_write_httppost(int64 i,struct http_data* h) {
   else 
 #endif
   r=iob_send(i,&h->iob);
+  if (r > 0 && iob_bytesleft(&h->iob)==0) {
+    /* We wrote something and there is no more data left in the iob. */
+    /* Since we do not buffer the whole data from the proxy, there could
+     * be more data incoming from the proxy.  If this was the last
+     * batch, then the proxy connection has closed itself and set our
+     * buddy to -1. */
+    if (h->buddy==-1) {
+      if (logging) {
+	char a[FMT_ULONG];
+	char r[FMT_ULONG];
+	char s[FMT_ULONG];
+	a[fmt_ulong(a,i)]=0;
+	r[fmt_ulonglong(r,h->received)]=0;
+	s[fmt_ulonglong(s,h->sent)]=0;
+	buffer_putmflush(buffer_1,"close/proxydone ",a," ",r," ",s,"\n");
+      }
+      cleanup(i);
+    } else {
+      /* The proxy has more data for us */
+      io_dontwantwrite(i);
+      io_wantread(h->buddy);
+    }
+    return;
+  }
   handle_write_error(i,h,r);
 }
 

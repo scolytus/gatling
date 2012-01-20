@@ -441,9 +441,9 @@ static uid_t __uid;
 static gid_t __gid;
 
 static int prepare_switch_uid(const char* new_uid) {
+  uid_t u=0;
+  gid_t g=0;
   if (new_uid) {
-    uid_t u=0;
-    gid_t g=0;
     if (new_uid[0]>='0' && new_uid[0]<='9') {
       unsigned long l;
       const char *c=new_uid+scan_ulong(new_uid,&l);
@@ -463,20 +463,30 @@ static int prepare_switch_uid(const char* new_uid) {
     }
     __uid=u;
     __gid=g;
+  } else {
+    /* default to chown(nobody) and chgrp(nogroup) */
+    __uid=-1;
+    __gid=-1;
   }
   return 0;
 }
 
 int switch_uid() {
 #ifdef LIBC_HAS_SETRESUID
-  if (setresgid(__gid,__gid,__gid)) return -1;
-  if (setgroups(1,&__gid)) return -1;
-  if (setresuid(__uid,__uid,__uid)) return -1;
+  if (setresgid(__gid,__gid,__gid) ||
+      setgroups(1,&__gid) ||
+      setresuid(__uid,__uid,__uid))
 #else
-  if (setgid(__gid)) return -1;
-  if (setgroups(1,&__gid)) return -1;
-  if (setuid(__uid)) return -1;
+  if (setgid(__gid) ||
+      setgroups(1,&__gid) ||
+      setuid(__uid))
 #endif
+  {
+    /* if dropping privileges failed with EPERM, we are already running
+     * with reduced privileges.  Don't make a fuss about it then. */
+    if (errno==EPERM) return 0;
+    return -1;
+  }
   return 0;
 }
 #endif
@@ -879,7 +889,7 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
 }
 #endif
 
-static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeout_secs,tai6464 nextftp) {
+static void handle_read_misc(int64 i,struct http_data* h,unsigned long ftptimeout_secs,tai6464 nextftp) {
   /* This is a TCP client connection waiting for input, i.e.
     *   - an HTTP connection waiting for a HTTP request, or
     *   - an FTP connection waiting for a command, or
@@ -888,21 +898,25 @@ static void handle_read_misc(int64 i,struct http_data* H,unsigned long ftptimeou
   char buf[8192];
   int l;
 #ifdef SUPPORT_HTTPS
-  assert(H->t != HTTPSRESPONSE);
-  if (H->t == HTTPSREQUEST) {
+  assert(h->t != HTTPSRESPONSE);
+  if (h->t == HTTPSREQUEST) {
 #ifdef USE_OPENSSL
-    l=SSL_read(H->ssl,buf,sizeof(buf));
+    l=SSL_read(h->ssl,buf,sizeof(buf));
 #elif defined(USE_POLARSSL)
-    l=ssl_read(&H->ssl,(unsigned char*)buf,sizeof(buf));
+    l=ssl_read(&h->ssl,(unsigned char*)buf,sizeof(buf));
+#else
+#error fixme
 #endif
 //    printf("SSL_read(sock %d,buf %p,n %d) -> %d\n",i,buf,sizeof(buf),l);
 #ifdef USE_OPENSSL
     if (l==-1) {
-      l=SSL_get_error(H->ssl,l);
+      l=SSL_get_error(h->ssl,l);
       if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
 #elif defined(USE_POLARSSL)
     if (l<0) {
       if (l==POLARSSL_ERR_NET_WANT_READ || l==POLARSSL_ERR_NET_WANT_WRITE) {
+#else
+#error fixme
 #endif
 //      printf("  error %d %s\n",l,ERR_error_string(l,0));
 	io_eagain(i);
@@ -941,20 +955,20 @@ ioerror:
       buffer_putnlflush(buffer_1);
     }
 #ifdef SUPPORT_FTP
-    if (H->t==FTPSLAVE) {
+    if (h->t==FTPSLAVE) {
       /* This is an FTP upload, it just finished. */
-      struct http_data* b=io_getcookie(H->buddy);
+      struct http_data* b=io_getcookie(h->buddy);
       assert(b);
       b->buddy=-1;
       iob_reset(&b->iob);
       iob_adds(&b->iob,"226 Got it.\r\n");
-      io_dontwantread(H->buddy);
-      io_wantwrite(H->buddy);
+      io_dontwantread(h->buddy);
+      io_wantwrite(h->buddy);
       if (chmoduploads)
-	fchmod(H->filefd,0644);
+	fchmod(h->filefd,0644);
       if (logging) {
 	struct stat ss;
-	if (fstat(H->filefd,&ss)==0) {
+	if (fstat(h->filefd,&ss)==0) {
 	  char a[FMT_ULONG];
 	  char b[FMT_ULONG];
 	  a[fmt_ulong(a,i)]=0;
@@ -967,10 +981,10 @@ ioerror:
     cleanup(i);
   } else if (l>0) {
     /* successfully read some data (l bytes) */
-    H->received+=l;
+    h->received+=l;
     tin1+=l;
 #ifdef SUPPORT_FTP
-    if (H->t==FTPCONTROL4 || H->t==FTPCONTROL6) {
+    if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
       if (ftptimeout_secs)
 	io_timeout(i,nextftp);
     } else {
@@ -978,39 +992,40 @@ ioerror:
 	io_timeout(i,next);
     }
 
-    if (H->t==FTPSLAVE) {
+    if (h->t==FTPSLAVE) {
       /* receive an upload */
       if (ftptimeout_secs)
-	io_timeout(H->buddy,nextftp);
-      if (write(H->filefd,buf,l)!=l)
+	io_timeout(h->buddy,nextftp);
+      if (write(h->filefd,buf,l)!=l)
 	goto ioerror;
     } else
 #endif
     {
       /* received a request */
-      array_catb(&H->r,buf,l);
-      if (array_failed(&H->r)) {
-	httperror(H,"500 Server Error","request too long.",0);
+      array_catb(&h->r,buf,l);
+      if (array_failed(&h->r)) {
+	httperror(h,"500 Server Error","request too long.",0);
 emerge:
 	io_dontwantread(i);
 	io_wantwrite(i);
-      } else if (array_bytes(&H->r)>MAX_HEADER_SIZE) {
-	httperror(H,"500 request too long","You sent too much header data",0);
-	array_reset(&H->r);
+      } else if (array_bytes(&h->r)>MAX_HEADER_SIZE) {
+	httperror(h,"500 request too long","You sent too much header data",0);
+	array_reset(&h->r);
 	goto emerge;
-      } else if ((l=header_complete(H,i))) {
+      } else if ((l=header_complete(h,i))) {
+	/* at this point we saw a \r\n\r\n */
 	long alen;
 pipeline:
-	/* The H->mimetype reference is here so that we don't count both the HTTP
+	/* The h->mimetype reference is here so that we don't count both the HTTP
 	 * connection and the first request on it as a dos attack. */
-	if (H->mimetype && new_request_from_ip(H->peerip,now.sec.x-4611686018427387914ULL)==1) {
-	  changestate(H,PUNISHMENT);
-//	  H->t=PUNISHMENT;
+	if (h->mimetype && new_request_from_ip(h->peerip,now.sec.x-4611686018427387914ULL)==1) {
+	  changestate(h,PUNISHMENT);
+//	  h->t=PUNISHMENT;
 	  if (logging) {
 	    char buf[IP6_FMT];
 	    char n[FMT_LONG];
 	    n[fmt_ulong(n,i)]=0;
-	    buf[fmt_ip6c(buf,H->peerip)]=0;
+	    buf[fmt_ip6c(buf,h->peerip)]=0;
 
 	    buffer_putmflush(buffer_1,"dos_tarpit2 ",n," ",buf,"\n");
 	  }
@@ -1018,23 +1033,22 @@ pipeline:
 	    io_dontwantread(i);
 	    io_dontwantwrite(i);
 	  } else
-	    /* if we don't have timeouts enabled, just drop the
-	     * connection */
+	    /* if we don't have timeouts enabled, just drop the connection */
 	    cleanup(i);
 	  return;
 	}
 #ifdef SUPPORT_HTTPS
-	if (H->t==HTTPREQUEST || H->t==HTTPSREQUEST) {
-	  httpresponse(H,i,l);
-	  if (H->t == HTTPSREQUEST) changestate(H,HTTPSRESPONSE); // H->t=HTTPSRESPONSE;
+	if (h->t==HTTPREQUEST || h->t==HTTPSREQUEST) {
+	  httpresponse(h,i,l);
+	  if (h->t == HTTPSREQUEST) changestate(h,HTTPSRESPONSE); // h->t=HTTPSRESPONSE;
 	}
 #else
-	if (H->t==HTTPREQUEST)
-	  httpresponse(H,i,l);
+	if (h->t==HTTPREQUEST)
+	  httpresponse(h,i,l);
 #endif
 #ifdef SUPPORT_SMB
-	else if (H->t==SMBREQUEST) {
-	  if (smbresponse(H,i)==-1) {
+	else if (h->t==SMBREQUEST) {
+	  if (smbresponse(h,i)==-1) {
 	    cleanup(i);
 	    return;
 	  }
@@ -1042,33 +1056,33 @@ pipeline:
 #endif
 #ifdef SUPPORT_FTP
 	else
-	  ftpresponse(H,i);
+	  ftpresponse(h,i);
 #endif
 #ifdef SUPPORT_PROXY
-	if (H->t != HTTPPOST
+	if (h->t != HTTPPOST
 #ifdef SUPPORT_HTTPS
-	 && H->t != HTTPSPOST
+	 && h->t != HTTPSPOST
 #endif
 	                     ) {
 #endif
-	  if (l < (alen=array_bytes(&H->r))) {
-	    char* c=array_start(&H->r);
+	  if (l < (alen=array_bytes(&h->r))) {
+	    char* c=array_start(&h->r);
 	    byte_copy(c,alen-l,c+l);
-	    array_truncate(&H->r,1,alen-l);
-	    l=header_complete(H,i);
+	    array_truncate(&h->r,1,alen-l);
+	    l=header_complete(h,i);
 
 #if 0
 	    write(1,"\n\n",2);
-	    write(1,array_start(&H->r),array_bytes(&H->r));
+	    write(1,array_start(&h->r),array_bytes(&h->r));
 	    write(1,"\n\n",2);
 #endif
 
 	    if (l) {
-	      if (H->r.initialized) --H->r.initialized;
+	      if (h->r.initialized) --h->r.initialized;
 	      goto pipeline;
 	    }
 	  } else
-	    array_reset(&H->r);
+	    array_reset(&h->r);
 #ifdef SUPPORT_PROXY
 	}
 #endif
@@ -1082,6 +1096,7 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
   int l;
   struct http_data* H=io_getcookie(sock);
   if (!H) return -3;
+
 #if 0
   H->writefail=!H->writefail;
   if (H->writefail) { errno=EAGAIN; return -1; }
@@ -1360,9 +1375,7 @@ int main(int argc,char* argv[],char* envp[]) {
 	  buffer fsb;
 #ifndef __MINGW32__
 	  if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
-	  if (new_uid) {
-	    prepare_switch_uid(new_uid);
-	  }
+	  prepare_switch_uid(new_uid);
 #endif
 	  if (!io_readfile(&savedir,".")) panic("open()");
 	  buffer_init(&fsb,(void*)read,forksock[1],fsbuf,sizeof fsbuf);
@@ -2215,6 +2228,8 @@ usage:
       }
       else {
 #ifdef SUPPORT_HTTPS
+	/* This looks wrong but isn't.  SSL has renegotiation.
+	   If that happens, we can be waiting for read when we are actually trying to write something */
 	if (H->t == HTTPSRESPONSE)
 	  handle_write_misc(i,H,prefetchquantum);
 	else

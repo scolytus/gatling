@@ -802,7 +802,7 @@ again:
       port=21;
     }
   } else
-    proxyhost=getenv("ftp_proxy");
+    proxyhost=getenv("http_proxy");
   socksproxyhost=getenv("SOCKS5_SERVER");
   if (!socksproxyhost) socksproxyhost=getenv("SOCKS_SERVER");
   if (socksproxyhost) {
