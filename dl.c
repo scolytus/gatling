@@ -649,7 +649,7 @@ int main(int argc,char* argv[]) {
   int longlist=0;
   int onlyprintlocation=0;
   char ip[16];
-  uint16 port=80, proxyport=80, connport=0, socksport=1080;
+  uint16 port=80, proxyport=0, connport=0, socksport=1080;
   uint32 scope_id=0;
   stralloc ips={0};
   int s;
@@ -817,7 +817,7 @@ again:
   }
 
   /* do we have a proxy? */
-  if (proxyhost) {
+  if (proxyhost && !proxyport) {
     size_t i;
     /* expect format "http://localhost:3128" */
     if (byte_equal(proxyhost,7,"http://")) proxyhost+=7;
