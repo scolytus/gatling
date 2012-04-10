@@ -4,6 +4,7 @@
   support PolarSSL, see http://www.polarssl.org/
   remove spurious Content-Range header in 304 HTTP responses
   fix crash bug on I/O errors inside SSL connections
+  make use of new libowfat API to reduce syscalls
 
 0.12:
   close ftp-uploaded files in cleanup() (Johannes Ziemke)

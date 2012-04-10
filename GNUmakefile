@@ -5,8 +5,8 @@ BINDIR=${prefix}/bin
 MANDIR=${prefix}/man
 man1dir=$(MANDIR)/man1
 
-TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling \
-pthreadbench cgi
+TARGETS=gatling httpbench bindbench dl ioerr bench tlsgatling_nofail \
+pthreadbench cgi ptlsgatling_nofail
 TARGETS2=mktestdata mmapbench manymapbench forkbench forksbench
 ALLTARGETS=$(TARGETS) acc hcat referrer hitprofile matchiprange getlinks \
 rellink $(TARGETS2)
@@ -84,11 +84,16 @@ PHTTPS_OBJS=mime.o ftp.o phttps.o smb.o common.o connstat.o
 $(OBJS) https.o gatling.o: gatling.h version.h gatling_features.h
 
 tlsgatling: gatling.c ssl.o $(HTTPS_OBJS) libsocket libiconv libcrypt
+	$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+
+tlsgatling_nofail: gatling.c ssl.o $(HTTPS_OBJS) libsocket libiconv libcrypt
 	-$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 ptlsgatling: gatling.c pssl.o $(PHTTPS_OBJS) libsocket libiconv libcrypt
-	-$(CC) -o $@ gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
+	$(CC) -o $@ gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
 
+ptlsgatling_nofail: gatling.c pssl.o $(PHTTPS_OBJS) libsocket libiconv libcrypt
+	-$(CC) -o $@ gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
 
 gatling: gatling.o $(OBJS) md5lib
 	$(CC) $(LDFLAGS) $@.o $(OBJS) -o $@ $(LDLIBS) `cat md5lib`

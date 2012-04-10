@@ -151,7 +151,7 @@ struct http_data {
   int keepalive;	/* 1 if we want the TCP connection to stay connected */
 			/* this is always 1 for FTP except after the client said QUIT */
   int filefd;		/* -1 or the descriptor of the file we are sending out */
-  int buddy;		/* descriptor for the other connection, only used for FTP */
+  int buddy;		/* descriptor for the other connection, used for FTP and proxy/CGI */
   char peerip[16];	/* needed for active FTP */
   unsigned long long received,sent;
   enum encoding encoding;

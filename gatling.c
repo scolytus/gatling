@@ -652,7 +652,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #warning TCP_NODELAY not defined
 #endif
 
-    if (io_fd(n)) {
+    if (io_fd_canwrite(n)) {
       struct http_data* h;
       h=(struct http_data*)malloc(sizeof(struct http_data));
       if (h) {
@@ -2293,16 +2293,19 @@ usage:
       if (h->t==FTPCONTROL4 || h->t==FTPCONTROL6) {
 	if (ftptimeout_secs)
 	  io_timeout(i,nextftp);
-      } else if (timeout_secs) {
+      } else
+#endif
+      if (timeout_secs) {
 	io_timeout(i,next);
-	if (h->t==FTPSLAVE) {
-	  io_timeout(h->buddy,nextftp);
+	if (h->buddy>0) {
+#ifdef SUPPORT_FTP
+	  if (h->t==FTPSLAVE) {
+	    io_timeout(h->buddy,nextftp);
+	  } else
+#endif
+	    io_timeout(h->buddy,next);
 	}
       }
-#else
-      if (timeout_secs)
-	io_timeout(i,next);
-#endif
 
 #ifdef SUPPORT_PROXY
       if (h->t==PROXYSLAVE)

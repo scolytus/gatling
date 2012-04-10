@@ -675,6 +675,7 @@ punt2:
 	    if (errno!=EINPROGRESS)
 	      goto punt;
 	}
+	io_fd_canwrite(fd_to_gateway);
 	if (logging) {
 	  char tmp[100];
 	  char bufsockfd[FMT_ULONG];
@@ -758,7 +759,7 @@ punt2:
 	    free(ctx_for_gatewayfd);
 	    return -1;
 	  }
-	  if (!io_fd(fd_to_gateway)) {
+	  if (!io_fd_canwrite(fd_to_gateway)) {
 	    httperror(ctx_for_sockfd,"502 Gateway Broken",c,*ctx_for_sockfd->r.p=='H'?1:0);
 	    io_close(fd_to_gateway);
 	    free(ctx_for_gatewayfd);

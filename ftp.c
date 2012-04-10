@@ -872,7 +872,7 @@ pasverror:
     free(H);
     io_close(i);
   } else {
-    if (!io_fd(n)) goto pasverror;
+    if (!io_fd_canwrite(n)) goto pasverror;
     io_nonblock(n);
     if (logging) {
       buffer_puts(buffer_1,"pasv_accept ");
