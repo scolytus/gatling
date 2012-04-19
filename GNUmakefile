@@ -87,13 +87,13 @@ tlsgatling: gatling.c ssl.o $(HTTPS_OBJS) libsocket libiconv libcrypt
 	$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 tlsgatling_nofail: gatling.c ssl.o $(HTTPS_OBJS) libsocket libiconv libcrypt
-	-$(CC) -o $@ gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
+	-$(CC) -o tlsgatling gatling.c ssl.o $(HTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS $(LDFLAGS) -lssl -lcrypto $(LDLIBS)
 
 ptlsgatling: gatling.c pssl.o $(PHTTPS_OBJS) libsocket libiconv libcrypt
 	$(CC) -o $@ gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
 
 ptlsgatling_nofail: gatling.c pssl.o $(PHTTPS_OBJS) libsocket libiconv libcrypt
-	-$(CC) -o $@ gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
+	-$(CC) -o ptlsgatling gatling.c pssl.c $(PHTTPS_OBJS) $(CFLAGS) -DSUPPORT_HTTPS -DUSE_POLARSSL $(LDFLAGS) -lpolarssl $(LDLIBS)
 
 gatling: gatling.o $(OBJS) md5lib
 	$(CC) $(LDFLAGS) $@.o $(OBJS) -o $@ $(LDLIBS) `cat md5lib`
