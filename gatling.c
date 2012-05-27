@@ -834,12 +834,12 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
       /* first packet must be handshake */
       if (buf[0]!=0x16 ||	/* content type: handshake */
 	  buf[1]>3 ||	/* version major */
-	  buf[2]>1 ||	/* version minor */
+	  buf[2]>3 ||	/* version minor */
 	  buf[3]>1) {	/* length > 0x100 */
 	if (buf[0]!=0x80 ||
 	    buf[2]!=1 ||	/* Client Hello */
 	    buf[3]>3 ||	/* version major */
-	    buf[4]>1) {	/* version minor */
+	    buf[4]>3) {	/* version minor */
 	  tai6464 tarpit;
 	  /* this does not look like an SSL packet. */
 	  if (logging) {
