@@ -66,7 +66,7 @@ char* http_header(struct http_data* r,char* h) {
 }
 
 static inline int issafe(unsigned char c) {
-  return (c!='"' && c!='%' && c>=' ' && c!='+' && c!=':' && c!='#');
+  return (c!='"' && c!='%' && (c>=' ' && c<0x7f) && c!='+' && c!=':' && c!='#');
 }
 
 size_t fmt_urlencoded(char* dest,const char* src,size_t len) {
@@ -98,6 +98,47 @@ void cathtml(array* a,char* s) {
   char* buf=alloca(fmt_html(0,s,len));
   array_catb(a,buf,fmt_html(buf,s,len));
 }
+
+void cathtmlutf8(array* a,char* s) {
+  /* The purpose of this function is to convert a file name into UTF-8
+   * and escape HTML-relevant characters such as '<' and '&'. Chars that
+   * are not valid UTF-8 are assumed to be latin1 and converted */
+  size_t i,l,r;
+  char* buf;
+  r=0;
+  /* This will be a short string, a file name, so assuming all chars are
+   * '&', the max expansion is '&amp;', i.e. *5. */
+  l=strlen(s);
+  buf=alloca(l*5);
+  for (i=0; i<l; ++i) {
+    if (s[i]&0x80) {
+      size_t n=scan_utf8(s+i,l-i,NULL);
+      if (n==0) {
+	r+=fmt_utf8(buf+r,(unsigned char)(s[i]));
+      } else {
+	memcpy(buf+r,s+i,n);
+	i+=n-1;
+	r+=n;
+      }
+    } else {
+      const char* x=0;
+      size_t n;
+      switch (s[i]) {
+      case '&': x="&amp;"; n=5; break;
+      case '<': x="&lt;"; n=4; break;
+      case '>': x="&gt;"; n=4; break;
+      case '\n': x="<br>"; n=4; break;
+      }
+      if (x) {
+	memcpy(buf+r,x,n);
+	r+=n;
+      } else
+	buf[r++]=s[i];
+    }
+  }
+  array_catb(a,buf,r);
+}
+
 
 int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg) {
   long i,o,n;
@@ -181,7 +222,7 @@ int http_dirlisting(struct http_data* h,DIR* D,const char* path,const char* arg)
     catencoded(&c,base+ab[i].name);
     if (S_ISDIR(ab[i].ss.st_mode) || ab[i].todir) array_cats(&c,"/");
     array_cats(&c,"\">");
-    cathtml(&c,base+ab[i].name);
+    cathtmlutf8(&c,base+ab[i].name);
 #ifndef __MINGW32__
     if (S_ISLNK(ab[i].ss.st_mode)) array_cats(&c,"@"); else
 #endif
@@ -1946,7 +1987,7 @@ e404:
 	    buffer_putsflush(buffer_1,"\n");
 	  }
 
-	  c+=fmt_str(c,"HTTP/1.1 200 Here you go\r\nContent-Type: text/html\r\nConnection: ");
+	  c+=fmt_str(c,"HTTP/1.1 200 Here you go\r\nContent-Type: text/html; charset=utf-8\r\nConnection: ");
 	  c+=fmt_str(c,h->keepalive?"keep-alive":"close");
 	  c+=fmt_str(c,"\r\nServer: " RELEASE "\r\nContent-Length: ");
 	  c+=fmt_ulong(c,h->blen);
