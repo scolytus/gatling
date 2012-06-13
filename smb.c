@@ -198,23 +198,26 @@ struct smb_response {
 };
 
 #ifdef DEBUG
-void hexdump(char* buf,size_t len) {
+static void hexdump(char* buf,size_t len) {
   size_t i,j;
-  char y[9];
-  y[8]=0;
-  printf("sending:\n");
+  char y[17];
+  y[16]=0;
+//  printf("sending:\n");
   for (i=j=0; i<len; ++i) {
+    if (j==16) j=0;
     y[j]=buf[i];
-    if (y[j]<' ') y[j]='.';
-    if (++j==8) j=0;
+    if (y[j]<' ' || y[j]==0x7f) y[j]='.';
+    ++j;
     printf("%02x",(unsigned char)(buf[i]));
-    if (i%8<7)
-      putchar(' ');
-    else
-      printf("   %s\n",y);
+    switch (i%16) {
+    case 15: printf("   %s\n",y); break;
+    case 7: putchar(' ');	// fallthrough
+    default: putchar(' '); break;
+    }
   }
   y[j]=0;
-  printf("%*s%s\n",(int)((9-j)*3-1),"",y);
+  if (j<16)
+    printf("%*s%s\n",(int)((17-j)*3)-1,"",y);
 }
 #endif
 
@@ -794,6 +797,7 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
   hdl->cur=uint32_read((char*)c+7);
   if (c[0]==12)
     hdl->cur |= ((unsigned long long)uint32_read((char*)c+21))<<32;
+
 #if 0
   relofs=uint32_read((char*)c+7);
 
@@ -814,13 +818,19 @@ static int smb_handle_ReadAndX(struct http_data* h,unsigned char* c,size_t len,u
     count=mymax(uint16_read((char*)c+13),uint16_read((char*)c+11));
   if (count>65500) count=65500;
 
+#if 0
+  printf("read: %i bytes from ofs %llu (file has %llu bytes)\n",count,hdl->cur,hdl->size);
+#endif
+
   if (hdl->cur>hdl->size)
     count=0;
   else
     if (count>hdl->size-hdl->cur) count=hdl->size-hdl->cur;
 
   oldused=sr->used;
-  if (!(x=add_smb_response2(sr,nr,12*2+3,0x2e))) return -1;
+  if (!(x=add_smb_response2(sr,nr,12*2+3,0x2e))) {
+    return -1;
+  }
   uint16_pack(x+OFS16(nr,"w0"),0);	// no andx for read
   {
     off_t rem=hdl->size-hdl->cur-count;
@@ -1459,10 +1469,19 @@ int smbresponse(struct http_data* h,int64 s) {
     /* if it's good enough for samba, it's good enough for me. */
     return 0;
   len=uint32_read_big((char*)c)&0xffffff;
-  if (len<smbheadersize) return 0;
+  if (len<smbheadersize) {
+//    printf("netbios len (%u) < smbheadersize (%u)\n",len,smbheadersize);
+    return 0;
+  }
 
-  if (validate_smb_packet(c+netbiosheadersize,len)==-1)
+//  hexdump(c,len+netbiosheadersize);
+
+  if (validate_smb_packet(c+netbiosheadersize,len)==-1) {
+//    printf("invalid smb packet!\n");
+//    hexdump(c,len+netbiosheadersize);
+//    validate_smb_packet(c+netbiosheadersize,len);
     return -1;
+  }
 
   /* is it a request?  Discard replies. */
   if (c[13]&0x80) return 0;
