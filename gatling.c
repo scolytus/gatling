@@ -340,7 +340,10 @@ ok:
      * byte 0: 0 ("session message"),
      * bytes 1-3: message length (big endian) */
     uint32 len;
-    if (c[0]!=0) return 1;
+    if (c[0]!=0) {
+//      printf("can't happen error: netbios byte 0 was not 0!?\n");
+      return 1;
+    }
     len=uint32_read_big(c) & 0x00ffffff;
     if (l>=len+4) return len+4;
 #endif
@@ -1002,6 +1005,7 @@ ioerror:
 #endif
     {
       /* received a request */
+//      printf("previous size: %lu, adding %lu bytes.\n",(unsigned long)array_bytes(&h->r),(unsigned long)l);
       array_catb(&h->r,buf,l);
       if (array_failed(&h->r)) {
 	httperror(h,"500 Server Error","request too long.",0);
@@ -1067,6 +1071,12 @@ pipeline:
 #endif
 	  if (l < (alen=array_bytes(&h->r))) {
 	    char* c=array_start(&h->r);
+
+#if 0
+	    printf("continuation: consumed %lu bytes from buffer (%lu still there)\n",
+		   (unsigned long)l,
+		   (unsigned long)(alen-l));
+#endif
 	    byte_copy(c,alen-l,c+l);
 	    array_truncate(&h->r,1,alen-l);
 	    l=header_complete(h,i);
@@ -1078,7 +1088,8 @@ pipeline:
 #endif
 
 	    if (l) {
-	      if (h->r.initialized) --h->r.initialized;
+	      /* this breaks SMB: */
+//	      if (h->r.initialized) --h->r.initialized;
 	      goto pipeline;
 	    }
 	  } else
