@@ -229,7 +229,8 @@ struct mimeentry mimetab[] = {
   { "qt",	"video/quicktime" },
   { "mp3",	"audio/mpeg" },
 #ifndef SUPPORT_MIMEMAGIC
-  { "ogg",	"application/ogg" },
+  { "ogg",	"audio/ogg" },
+  { "opus",	"audio/ogg" },
 #endif
   { "wav",	"audio/x-wav" },
   { "pac",	"application/x-ns-proxy-autoconfig" },
@@ -312,7 +313,7 @@ const char* mimetype(const char* filename,int fd) {
       for (i=0; i<200-6; ++i)
 	if (buf[i]=='t' && byte_equal(buf+i+1,5,"heora"))
 	  return "video/ogg";
-      return "application/ogg";
+      return "audio/ogg";
     } else if (r>=4 && byte_equal(buf,4,"RIFF")) {
       if (r>=16 && byte_equal(buf+8,3,"AVI"))
 	return "video/x-msvideo";
