@@ -30,16 +30,19 @@
 #endif
 #include <sys/stat.h>
 #include <errno.h>
+#ifdef __MINGW32__
+#include "windows.h"
+#include <malloc.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <netdb.h>
 #include "havealloca.h"
+#endif
 #include <assert.h>
 #include <ctype.h>
 #include <string.h>
-
-#include "havealloca.h"
 
 #ifndef __linux__
 char *strndup(const char *s,size_t n) {
@@ -102,7 +105,9 @@ void printstats(unsigned long long nextchunk,int fd) {
     char received[FMT_ULONG], totalsize[FMT_ULONG], timedone[FMT_ULONG], percent[10];
     char speed[FMT_ULONG+20];
     size_t i,j;
+#ifndef __MINGW32__
     if (dosync) fsync(fd);
+#endif
     if (!dostats) return;
     if (total) {
       if (total>1000000000)
@@ -191,6 +196,11 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   if (v6) {
     s=socket_tcp6b();
     if (socket_connect6(s,ip,port,scope_id)==-1) {
+      char a[100],b[100],c[100];
+      a[fmt_ulong(a,port)]=0;
+      b[fmt_ulong(b,scope_id)]=0;
+      c[fmt_ip6c(c,ip)]=0;
+      printf("socket_connect6(%s,%s,%s) failed!\n",c,a,b);
       carp("socket_connect6");
       close(s);
       return -1;
@@ -889,21 +899,27 @@ again:
       struct addrinfo hints, *ai, *aitop;
       int gaierr;
       char p[FMT_ULONG];
+      const char* tolookup=socksproxyhost?socksproxyhost:connhost;
       p[fmt_ulong(p,connport)]=0;
       memset(&hints,0,sizeof(hints));
       hints.ai_family=AF_UNSPEC;
       hints.ai_flags=0;
       hints.ai_socktype=0;
 
+      ips.len=0;
+      if ((gaierr=scan_ip6(tolookup,ip)) && tolookup[gaierr]==0) {
+	/* ip given, no dns needed */
+	stralloc_catb(&ips,ip,16);
+	goto nodns;
+      }
       if (verbose) buffer_putsflush(buffer_1,"DNS lookup... ");
-      if ((gaierr = getaddrinfo(socksproxyhost?socksproxyhost:connhost,p,&hints,&aitop)) != 0 || !aitop) {
+      if ((gaierr = getaddrinfo(tolookup,p,&hints,&aitop)) != 0 || !aitop) {
 	buffer_puts(buffer_2,"dl: could not resolve IP: ");
-	buffer_puts(buffer_2,connhost);
+	buffer_puts(buffer_2,tolookup);
 	buffer_putnlflush(buffer_2);
 	return 1;
       }
       ai=aitop;
-      ips.len=0;
       while (ai) {
 	if (ai->ai_family==AF_INET6)
 	  stralloc_catb(&ips,(char*)&(((struct sockaddr_in6*)ai->ai_addr)->sin6_addr),16);
@@ -915,6 +931,7 @@ again:
       }
       if (verbose) buffer_putsflush(buffer_1,"done\n");
     }
+nodns:
 
     if (output)
       filename=strcmp(output,"-")?output:"";

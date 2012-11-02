@@ -5,6 +5,7 @@
   remove spurious Content-Range header in 304 HTTP responses
   fix crash bug on I/O errors inside SSL connections
   make use of new libowfat API to reduce syscalls
+  fix directory traversal in FTP (Jann Horn)
 
 0.12:
   close ftp-uploaded files in cleanup() (Johannes Ziemke)

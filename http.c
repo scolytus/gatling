@@ -657,6 +657,10 @@ freeandfail:
 	case 'P':
 		  if (tmp[1]=='O')
 		    method=(ctx_for_sockfd->t==HTTPREQUEST)?"POST":"POST/SSL";
+#ifdef SUPPORT_DAV
+		  else if (tmp[1]=='R')
+		    method=(ctx_for_sockfd->t==HTTPREQUEST)?"PROPFIND":"PROPFIND/SSL";
+#endif
 		  else
 		    method=(ctx_for_sockfd->t==HTTPREQUEST)?"PUT":"PUT/SSL";
 		  break;
@@ -665,7 +669,13 @@ freeandfail:
 	switch (*tmp) {
 	case 'H': method="HEAD"; break;
 	case 'G': method="GET"; break;
-	case 'P': method=(tmp[1]=='O')?"POST":"PUT"; break;
+	case 'P': method=(tmp[1]=='O')?"POST":
+#ifdef SUPPORT_DAV
+		  ((tmp[1]=='R')?"PROPFIND":"PUT");
+#else
+		  "PUT";
+#endif
+		  break;
 	}
 #endif
 	buffer_putm(buffer_1,method,x->port?"/PROXY ":"/CGI ");
@@ -1363,6 +1373,7 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
       Filename[i+1]=':';
   /* fourth, try to do some el-cheapo virtual hosting */
   if (!(s=http_header(h,"Host"))) {
+makefakeheader:
     /* construct artificial Host header from IP */
     s=alloca(IP6_FMT+7);
     i=fmt_ip6c(s,h->myip);
@@ -1370,6 +1381,10 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     i+=fmt_ulong(s+i,h->myport);
     s[i]=0;
   } else {
+    size_t k;
+    for (k=0; s[k] && s[k]!='/' && s[k]>' '; ++k) ;
+    s[k]='\r';
+    if (s[0]=='.' || !s[0]) goto makefakeheader;
     if (virtual_hosts>=0) {
       char* tmp;
       int j=str_chr(s,'\r');
@@ -1851,6 +1866,9 @@ void httpresponse(struct http_data* h,int64 s,long headerlen) {
 #ifdef SUPPORT_PUT
   int put;
 #endif
+#ifdef SUPPORT_DAV
+  int propfind;
+#endif
   char* c;
   const char* m;
   time_t ims=0;
@@ -1863,6 +1881,9 @@ void httpresponse(struct http_data* h,int64 s,long headerlen) {
   if (byte_diff(c,5,"GET /") && byte_diff(c,6,"POST /") &&
 #ifdef SUPPORT_PUT
       byte_diff(c,5,"PUT /") &&
+#endif
+#ifdef SUPPORT_DAV
+      byte_diff(c,10,"PROPFIND /") &&
 #endif
       byte_diff(c,6,"HEAD /")) {
 e400:
@@ -1883,6 +1904,10 @@ e400:
     post=c[1]=='O';
 #ifdef SUPPORT_PUT
     put=c[1]=='U';
+#endif
+#ifdef SUPPORT_DAV
+    if ((propfind=c[1]=='R'))
+      c+=5;	// we will advance by 4, so make sure it's 9 total
 #endif
     c+=(head||post)?5:4;
     for (d=c; *d!=' '&&*d!='\t'&&*d!='\n'&&*d!='\r'; ++d) ;

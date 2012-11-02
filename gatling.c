@@ -2034,9 +2034,8 @@ usage:
 
 #if !defined(__OPTIMIZE__) && defined(__linux__)
   /* make sure we can dump core even if we switched uid */
-//  printf("dump flag is: %d\nsetting process to dumpable...\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
   prctl(PR_SET_DUMPABLE,1,0,0);
-//  printf("dump flag is now: %d\n",prctl(PR_GET_DUMPABLE,0,0,0,0));
+  /* and make sure we don't have a core dump size limit in place */
   {
     struct rlimit orig;
     orig.rlim_cur=orig.rlim_max=RLIM_INFINITY;
