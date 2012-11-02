@@ -1382,8 +1382,12 @@ makefakeheader:
     s[i]=0;
   } else {
     size_t k;
+    char* t;
     for (k=0; s[k] && s[k]!='/' && s[k]>' '; ++k) ;
-    s[k]='\r';
+    t=alloca(k+2);
+    memcpy(t,s,k);
+    t[k]='\r'; t[k+1]=0;
+    s=t;
     if (s[0]=='.' || !s[0]) goto makefakeheader;
     if (virtual_hosts>=0) {
       char* tmp;
