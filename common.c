@@ -64,6 +64,8 @@ int canonpath(char* s) {
       if (s[i+1]=='.' && (s[i+2]=='/' || s[i+2]==0)) {		/* "/../" */
 	if (j>1)
 	  for (j-=2; s[j]!='/' && j>0; --j);	/* remove previous dir */
+	else
+	  j=0;
 	/* s = "/foo/.."
 	 *      ^j   ^i
 	 */
