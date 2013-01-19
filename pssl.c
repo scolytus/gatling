@@ -28,94 +28,20 @@ havege_state hs;
 
 int my_ciphersuites[] =
 {
-    SSL_EDH_RSA_AES_256_SHA,
-    SSL_EDH_RSA_CAMELLIA_256_SHA,
-    SSL_EDH_RSA_AES_128_SHA,
-    SSL_EDH_RSA_CAMELLIA_128_SHA,
-    SSL_EDH_RSA_DES_168_SHA,
-    SSL_RSA_AES_256_SHA,
-    SSL_RSA_CAMELLIA_256_SHA,
-    SSL_RSA_AES_128_SHA,
-    SSL_RSA_CAMELLIA_128_SHA,
-    SSL_RSA_DES_168_SHA,
-    SSL_RSA_RC4_128_SHA,
-    SSL_RSA_RC4_128_MD5,
+    TLS_DHE_RSA_WITH_AES_256_CBC_SHA,
+    TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA,
+    TLS_DHE_RSA_WITH_AES_128_CBC_SHA,
+    TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA,
+    TLS_DHE_RSA_WITH_3DES_EDE_CBC_SHA,
+    TLS_RSA_WITH_AES_256_CBC_SHA,
+    TLS_RSA_WITH_CAMELLIA_256_CBC_SHA,
+    TLS_RSA_WITH_AES_128_CBC_SHA,
+    TLS_RSA_WITH_CAMELLIA_128_CBC_SHA,
+    TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+    TLS_RSA_WITH_RC4_128_SHA,
+    TLS_RSA_WITH_RC4_128_MD5,
     0
 };
-
-/*
- * These session callbacks use a simple chained list
- * to store and retrieve the session information.
- */
-ssl_session *s_list_1st = NULL;
-ssl_session *cur, *prv;
-
-static int my_get_session( ssl_context *ssl )
-{
-    time_t t = time( NULL );
-
-    if( ssl->resume == 0 )
-        return( 1 );
-
-    cur = s_list_1st;
-    prv = NULL;
-
-    while( cur != NULL )
-    {
-        prv = cur;
-        cur = cur->next;
-
-        if( ssl->timeout != 0 && t - prv->start > ssl->timeout )
-            continue;
-
-        if( ssl->session->ciphersuite != prv->ciphersuite ||
-            ssl->session->length != prv->length )
-            continue;
-
-        if( memcmp( ssl->session->id, prv->id, prv->length ) != 0 )
-            continue;
-
-        memcpy( ssl->session->master, prv->master, 48 );
-        return( 0 );
-    }
-
-    return( 1 );
-}
-
-static int my_set_session( ssl_context *ssl )
-{
-    time_t t = time( NULL );
-
-    cur = s_list_1st;
-    prv = NULL;
-
-    while( cur != NULL )
-    {
-        if( ssl->timeout != 0 && t - cur->start > ssl->timeout )
-            break; /* expired, reuse this slot */
-
-        if( memcmp( ssl->session->id, cur->id, cur->length ) == 0 )
-            break; /* client reconnected */
-
-        prv = cur;
-        cur = cur->next;
-    }
-
-    if( cur == NULL )
-    {
-        cur = (ssl_session *) malloc( sizeof( ssl_session ) );
-        if( cur == NULL )
-            return( 1 );
-
-        if( prv == NULL )
-              s_list_1st = cur;
-        else  prv->next  = cur;
-    }
-
-    memcpy( cur, ssl->session, sizeof( ssl_session ) );
-
-    return( 0 );
-}
 
 static int my_net_recv( void *ctx, unsigned char *buf, size_t len ) {
   int sock=(int)(uintptr_t)ctx;
@@ -178,9 +104,8 @@ fail:
   ssl_set_authmode( ssl, SSL_VERIFY_NONE );
   ssl_set_rng( ssl, havege_random, &hs );
   ssl_set_bio( ssl, my_net_recv, (void*)(uintptr_t)sock, my_net_send, (void*)(uintptr_t)sock );
-  ssl_set_scb( ssl, my_get_session, my_set_session );
   ssl_set_ciphersuites( ssl, my_ciphersuites );
-  ssl_set_session( ssl, 1, 0, ssn );
+  ssl_set_session( ssl, ssn );
 
   ssl_set_ca_chain( ssl, srvcert.next, NULL, NULL );
   ssl_set_own_cert( ssl, &srvcert, &rsa );
