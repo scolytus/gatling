@@ -1,3 +1,6 @@
+0.14:
+  update polarssl support to version 1.2.0 (Roland Stigge)
+
 0.13:
   add SUPPORT_DIR_REDIRECT in gatling_features.h
   several SCGI and FASTCGI fixes
