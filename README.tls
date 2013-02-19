@@ -31,3 +31,11 @@ where -X is the option to enable this, 2 is the timeout in seconds, and
 the rest after the comma is the sshd command line you want gatling to
 run.  Note that gatling auto-appends the -i option to this command line,
 so you do not need to specify it here.
+
+PLEASE NOTE: if you are planning to run gatling with SSL in chroot mode,
+you need to make sure the needed files (by the SSL library) are there.
+For example, for openssl, there needs to be a /dev/urandom inside the
+chroot jail.  Typical error message:
+
+  ssl_handshake_error 8 error:140B512D:SSL routines:SSL_GET_NEW_SESSION:ssl session id callback failed
+
