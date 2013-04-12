@@ -7,6 +7,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <openssl/ssl.h>
+#include <openssl/engine.h>
 
 static int library_inited;
 
@@ -29,6 +30,7 @@ int init_serverside_tls(SSL** ssl,int sock) {
   if (!library_inited) {
     library_inited=1;
     SSL_library_init();
+    ENGINE_load_builtin_engines();
   }
   /* a new SSL context with the bare minimum of options */
   if (!(ctx=SSL_CTX_new(SSLv23_server_method()))) {
@@ -76,6 +78,10 @@ int init_serverside_tls(SSL** ssl,int sock) {
     return -1;
   }
 
+  {
+    char* tmp=getenv("TLSCIPHERS");
+    if (tmp) ssl_ciphers=tmp;
+  }
   SSL_set_cipher_list(myssl, ssl_ciphers);
 
 #if 0
@@ -101,6 +107,7 @@ int init_clientside_tls(SSL** ssl,int sock) {
   if (!library_inited) {
     library_inited=1;
     SSL_library_init();
+    ENGINE_load_builtin_engines();
   }
   if (!(ctx=SSL_CTX_new(SSLv23_client_method()))) return -1;
 
