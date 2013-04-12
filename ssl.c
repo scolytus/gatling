@@ -31,6 +31,7 @@ int init_serverside_tls(SSL** ssl,int sock) {
     library_inited=1;
     SSL_library_init();
     ENGINE_load_builtin_engines();
+    SSL_load_error_strings();
   }
   /* a new SSL context with the bare minimum of options */
   if (!(ctx=SSL_CTX_new(SSLv23_server_method()))) {
@@ -71,10 +72,10 @@ int init_serverside_tls(SSL** ssl,int sock) {
 
   /* this will also check whether public and private keys match */
   if (!SSL_use_RSAPrivateKey_file(myssl, ssl_server_cert, SSL_FILETYPE_PEM)) {
-    SSL_free(myssl);
 #if 0
     printf("SSL_use_RSAPrivateKey_file failed\n");
 #endif
+    SSL_free(myssl);
     return -1;
   }
 
@@ -108,6 +109,7 @@ int init_clientside_tls(SSL** ssl,int sock) {
     library_inited=1;
     SSL_library_init();
     ENGINE_load_builtin_engines();
+    SSL_load_error_strings();
   }
   if (!(ctx=SSL_CTX_new(SSLv23_client_method()))) return -1;
 
