@@ -196,11 +196,13 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
   if (v6) {
     s=socket_tcp6b();
     if (socket_connect6(s,ip,port,scope_id)==-1) {
+#if 0
       char a[100],b[100],c[100];
       a[fmt_ulong(a,port)]=0;
       b[fmt_ulong(b,scope_id)]=0;
       c[fmt_ip6c(c,ip)]=0;
-//      printf("socket_connect6(%s,%s,%s) failed!\n",c,a,b);
+      printf("socket_connect6(%s,%s,%s) failed!\n",c,a,b);
+#endif
       carp("socket_connect6");
       close(s);
       return -1;
