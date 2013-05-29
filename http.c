@@ -1002,7 +1002,7 @@ eof:
       char s[FMT_ULONG];
       numbuf[fmt_ulong(numbuf,sockfd)]=0;
       r[fmt_ulonglong(r,peer->received)]=0;
-      s[fmt_ulonglong(s,peer->sent)]=0;
+      s[fmt_ulonglong(s,H->sent)]=0;
       buffer_putmflush(buffer_1,"cgiproxy_read0 ",numbuf," ",r," ",s,"\n");
     }
     if (H->buddy) peer->buddy=-1;
