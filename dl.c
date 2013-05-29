@@ -200,7 +200,7 @@ static int make_connection(char* ip,uint16 port,uint32 scope_id) {
       a[fmt_ulong(a,port)]=0;
       b[fmt_ulong(b,scope_id)]=0;
       c[fmt_ip6c(c,ip)]=0;
-      printf("socket_connect6(%s,%s,%s) failed!\n",c,a,b);
+//      printf("socket_connect6(%s,%s,%s) failed!\n",c,a,b);
       carp("socket_connect6");
       close(s);
       return -1;
