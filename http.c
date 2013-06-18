@@ -1369,11 +1369,11 @@ int64 http_openfile(struct http_data* h,char* filename,struct stat* ss,int sockf
     for (src=dst=0;;) {
       j=scan_urlencoded2(Filename+src,Filename+dst,&i);
       src+=j;
-      if (Filename[src]==0) break;
       dst+=i;
+      if (Filename[src]==0) break;
       Filename[dst++]=Filename[src++];
     }
-    Filename[src+i]=0;
+    Filename[dst]=0;
   }
   /* third, change /. to /: so .procmailrc is visible in ls as
    * :procmailrc, and it also thwarts most web root escape attacks */
