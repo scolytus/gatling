@@ -71,3 +71,7 @@ encryption and choose the strongest cipher first.  The RC4+MEDIUM is in
 there so gatling works with IE from Windows XP.  If you do not need
 that, remove that part.  You can test whether it worked by looking at
 the cipher suite in your browser; it should mention DHE now.
+
+If you don't want two files lying around, you can also append the
+contents of dhparams.pem to your server.pem; gatling will also look
+there.
