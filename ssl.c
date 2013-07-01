@@ -26,6 +26,7 @@ int init_serverside_tls(SSL** ssl,int sock) {
   SSL_CTX* ctx;
   X509_STORE *store;
   X509_LOOKUP *lookup;
+  DH* dh;
 
   if (!library_inited) {
     library_inited=1;
@@ -59,6 +60,16 @@ int init_serverside_tls(SSL** ssl,int sock) {
 
   /* set the callback here; SSL_set_verify didn't work before 0.9.6c */
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, verify_cb);
+
+  {
+    BIO* bio=BIO_new_file("dhparams.pem","r");
+    if (bio==NULL) bio=BIO_new_file("server.pem","r");
+    if (bio) {
+      dh=PEM_read_bio_DHparams(bio,NULL,NULL,NULL);
+      BIO_free(bio);
+      if (dh) SSL_CTX_set_tmp_dh(ctx, dh);
+    }
+  }
 
   /* a new SSL object, with the rest added to it directly to avoid copying */
   myssl = SSL_new(ctx);
