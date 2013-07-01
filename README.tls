@@ -39,3 +39,35 @@ chroot jail.  Typical error message:
 
   ssl_handshake_error 8 error:140B512D:SSL routines:SSL_GET_NEW_SESSION:ssl session id callback failed
 
+
+
+
+UPDATE 2013-07-01: gatling now supports ephemeral Diffie Hellman to
+enable Perfect Forward Secrecy.  This, in a nutshell, means that if
+someone steals or subpoenas your server to obtain your secret key, they
+can still not decrypt any previous data transfers because they used
+ephemeral (temporary) keys.  Hint: YOU WANT THIS.  The downside is that
+it uses up more CPU time.
+
+To get this to work, you need to create Diffie Hellman parameters, like
+so:
+
+  openssl gendh -out dhparams.pem -rand - 1024
+
+Please note that it is also recommended to set the OpenSSL ciphers.
+If you don't do the, the default ciphers are used, which include all
+kinds of weak (by today's standards) ciphers.  You do this via the
+environment before running tlsgatling:
+
+  TLSCIPHERS='TLSv1+HIGH:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH' tlsgatling [arguments]
+
+If you are using minit and serdo, put this in your script file:
+
+  export TLSCIPHERS=TLSv1+HIGH:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH
+
+This will set the ciphers to the TLSv1 suite, only use high security
+ciphers, disable the ciphers that do not need authentication or
+encryption and choose the strongest cipher first.  The RC4+MEDIUM is in
+there so gatling works with IE from Windows XP.  If you do not need
+that, remove that part.  You can test whether it worked by looking at
+the cipher suite in your browser; it should mention DHE now.
