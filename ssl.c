@@ -17,8 +17,18 @@ static int verify_cb(int preverify_ok, X509_STORE_CTX *ctx) { return 1; }
 const char* ssl_server_cert="server.pem";
 const char* ssl_client_crl="clientcrl.pem";
 const char* ssl_client_ca="clientca.pem";
-const char* ssl_ciphers="DEFAULT";
+const char* ssl_dhparams="dhparams.pem";
+const char* ssl_ciphers="TLSv1+HIGH:!SSLv2:+TLSv1:+SSLv3:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH";
 const char* ssl_client_cert="clientcert.pem";
+
+const char ssl_default_dhparams[]="—---BEGIN DH PARAMETERS-----\n"
+"MIIBCAKCAQEAhS4NySChob9OZmB7WOUbOIxurRRbItWnKmC2fq1pJHRft/r72/qq\n"
+"g8qquhYAmikXgX4+uZEgfLBWPlx1d8wHggnKtEJ+0KzlGpxek7QORwN2j9872jXC\n"
+"25iZar+Om4hUXREuVyGU02GmGHgfemVT1mOvZMbBxzTfmaUdP9Q304oKz4RUYV1w\n"
+"+Jv3iO6MYySz6bhsc7lSyayUIJxXJoaqgz6EJVImU6LwXo8gUbD5GUVXhEzDHuRG\n"
+"fbKleVvLf1MC7TT6H5PAFFOkfFET//C9QJkSmUsg3u5GtwvKNZhwrggqNzchXSkS\n"
+"FDQXPlpTK7h3BlR8vDadEpT68OcdLr2+owIBAg==\n"
+"—---END DH PARAMETERS-----\n";
 
 int init_serverside_tls(SSL** ssl,int sock) {
 /* taken from the qmail tls patch */
@@ -62,8 +72,10 @@ int init_serverside_tls(SSL** ssl,int sock) {
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, verify_cb);
 
   {
-    BIO* bio=BIO_new_file("dhparams.pem","r");
+    BIO* bio=BIO_new_file(ssl_dhparams,"r");
     if (bio==NULL) bio=BIO_new_file("server.pem","r");
+    if (bio==NULL)
+      bio=BIO_new_mem_buf(ssl_default_dhparams,sizeof(ssl_default_dhparams)-1);
     if (bio) {
       dh=PEM_read_bio_DHparams(bio,NULL,NULL,NULL);
       BIO_free(bio);
