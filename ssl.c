@@ -75,7 +75,7 @@ int init_serverside_tls(SSL** ssl,int sock) {
     BIO* bio=BIO_new_file(ssl_dhparams,"r");
     if (bio==NULL) bio=BIO_new_file("server.pem","r");
     if (bio==NULL)
-      bio=BIO_new_mem_buf(ssl_default_dhparams,sizeof(ssl_default_dhparams)-1);
+      bio=BIO_new_mem_buf((void*)ssl_default_dhparams,sizeof(ssl_default_dhparams)-1);
     if (bio) {
       dh=PEM_read_bio_DHparams(bio,NULL,NULL,NULL);
       BIO_free(bio);

@@ -114,7 +114,7 @@ extern int init_serverside_tls(SSL** ssl,int sock);
 #ifdef USE_POLARSSL
 /* in pssl.c */
 #include <polarssl/ssl.h>
-extern int init_serverside_tls(ssl_context* ssl,ssl_session* ssn,int sock);
+extern int init_serverside_tls(ssl_context* ssl,int sock);
 #endif
 
 #endif
@@ -171,7 +171,6 @@ struct http_data {
 #ifdef SUPPORT_HTTPS
 #ifdef USE_POLARSSL
   ssl_context ssl;
-  ssl_session ssn;
 #endif
 #ifdef USE_OPENSSL
   SSL* ssl;

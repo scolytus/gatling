@@ -710,7 +710,7 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 #ifdef USE_OPENSSL
 	  if (init_serverside_tls(&h->ssl,n))
 #elif defined(USE_POLARSSL)
-	  if (init_serverside_tls(&h->ssl,&h->ssn,n))
+	  if (init_serverside_tls(&h->ssl,n))
 #endif
 	  {
 	    if (logging) {
