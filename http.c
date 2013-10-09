@@ -1112,14 +1112,14 @@ int read_http_post(int sockfd,struct http_data* H) {
     i=SSL_read(H->ssl,buf,l);
     if (i<0) {
       i=SSL_get_error(H->ssl,i);
-      if (l==SSL_ERROR_WANT_READ || l==SSL_ERROR_WANT_WRITE) {
+      if (i==SSL_ERROR_WANT_READ || i==SSL_ERROR_WANT_WRITE) {
 #elif defined(USE_POLARSSL)
     i=ssl_read(&H->ssl,(unsigned char*)buf,l);
     if (i<0) {
       if (l==POLARSSL_ERR_NET_WANT_READ || l==POLARSSL_ERR_NET_WANT_WRITE) {
 #endif
 	io_eagain(sockfd);
-	if (handle_ssl_error_code(sockfd,i,1)==-1)
+	if (handle_ssl_error_code((int)sockfd,i,1)==-1)
 	  return -1;
       }
       return 0;
@@ -1616,6 +1616,7 @@ itsafile:
     }
 #ifdef SUPPORT_DIR_REDIRECT
     if (S_ISDIR(ss->st_mode)) {
+      io_close(fd);
       /* someone asked for http://example.com/foo
        * when he should have asked for http://example.com/foo/
        * redirect */
@@ -2665,7 +2666,6 @@ void forkslave(int fd,buffer* in,int savedir) {
       exit(127);
     }
     close(s);
-    --https_connections;
     return;
   }
 #endif
