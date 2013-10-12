@@ -1218,8 +1218,14 @@ outofmemory:
 
       while ((de=readdir(d))) {
 
+#ifdef DT_DIR
 	if (de->d_type!=DT_DIR && de->d_type!=DT_REG && de->d_type!=DT_LNK) continue;
 	if (de->d_type==DT_DIR && !(attr&0x10)) continue;
+#else
+	if (lstat(de->d_name,&ss)) continue;
+	if (!S_ISDIR(ss.st_mode) && !S_ISREG(ss.st_mode) && !S_ISLNK(ss.st_mode)) continue;
+	if (S_ISDIR(ss.st_mode) && !(attr&0x10)) continue;
+#endif
 
 	if (de->d_name[0]=='.') continue;
 	if (de->d_name[0]==':') de->d_name[0]='.';
@@ -1229,6 +1235,9 @@ outofmemory:
 //	  printf("matching %s vs %s\n",globutf8,de->d_name);
 	if ((globlatin1 && globmatch(globlatin1,de->d_name)) ||
 	    (globutf8 && globmatch(globutf8,de->d_name))) {
+#ifndef DT_DIR
+	  if (S_ISLNK(ss.st_mode))
+#endif
 	  if (stat(de->d_name,&ss)==-1) continue;
 //	  printf("globbed ok: %s\n",de->d_name);
 	  if (!base) {
