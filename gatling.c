@@ -442,6 +442,7 @@ int sort_size_d(de* x,de* y) { return y->ss.st_size-x->ss.st_size; }
 #ifndef __MINGW32__
 static uid_t __uid;
 static gid_t __gid;
+static int do_switch_uid;
 
 static int prepare_switch_uid(const char* new_uid) {
   uid_t u=0;
@@ -466,15 +467,13 @@ static int prepare_switch_uid(const char* new_uid) {
     }
     __uid=u;
     __gid=g;
-  } else {
-    /* default to chown(nobody) and chgrp(nogroup) */
-    __uid=-1;
-    __gid=-1;
+    do_switch_uid=1;
   }
   return 0;
 }
 
 int switch_uid() {
+  if (!do_switch_uid) return 0;
 #ifdef LIBC_HAS_SETRESUID
   if (setresgid(__gid,__gid,__gid) ||
       setgroups(1,&__gid) ||
@@ -692,11 +691,9 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	h->myscope_id=scope_id;
 	if (punk) {
 	  changestate(h,PUNISHMENT);
-//	  h->t=PUNISHMENT;
 	  io_timeout(n,next);
 	} else if (H->t==HTTPSERVER4 || H->t==HTTPSERVER6) {
 	  changestate(h,HTTPREQUEST);
-//	  h->t=HTTPREQUEST;
 	  if (timeout_secs)
 	    io_timeout(n,next);
 #ifdef SUPPORT_HTTPS
@@ -723,14 +720,12 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	  }
 
 	  changestate(h,HTTPSACCEPT_CHECK);
-//	  h->t=HTTPSACCEPT;
 	  if (timeout_secs)
 	    io_timeout(n,nextftp);
 #endif
 #ifdef SUPPORT_SMB
 	} else if (H->t==SMBSERVER4 || H->t==SMBSERVER6) {
 	  changestate(h,SMBREQUEST);
-//	  h->t=SMBREQUEST;
 	  if (timeout_secs)
 	    io_timeout(n,next);
 #endif
@@ -738,10 +733,8 @@ static void accept_server_connection(int64 i,struct http_data* H,unsigned long f
 	} else {
 	  if (H->t==FTPSERVER6)
 	    changestate(h,FTPCONTROL6);
-//	    h->t=FTPCONTROL6;
 	  else
 	    changestate(h,FTPCONTROL4);
-//	    h->t=FTPCONTROL4;
 	  iob_addbuf(&h->iob,"220 Hi there!\r\n",15);
 	  h->keepalive=1;
 	  if (ftptimeout_secs)
@@ -879,7 +872,6 @@ void do_sslaccept(int sock,struct http_data* h,int reading) {
     h->writefail=1;
 #endif
     changestate(h,HTTPSREQUEST);
-//    h->t=HTTPSREQUEST;
     if (logging) {
       buffer_puts(buffer_1,"ssl_handshake_ok ");
       buffer_putulong(buffer_1,sock);
@@ -900,6 +892,9 @@ static void handle_read_misc(int64 i,struct http_data* h,unsigned long ftptimeou
     *   - an SMB connection waiting for the next command */
   char buf[8192];
   int l;
+#ifdef MOREDEBUG
+  printf("MOREDEBUG: entering handle_read_misc for fd #%d\n",(int)i);
+#endif
 #ifdef SUPPORT_HTTPS
   assert(h->t != HTTPSRESPONSE);
   if (h->t == HTTPSREQUEST) {
@@ -941,6 +936,9 @@ static void handle_read_misc(int64 i,struct http_data* h,unsigned long ftptimeou
   } else
 #endif
   l=io_tryread(i,buf,sizeof buf);
+#ifdef MOREDEBUG
+  printf("MOREDEBUG: io_tryread on fd #%d returned %ld\n",(int)i,(long)l);
+#endif
   if (l==-3) {
 #ifdef SUPPORT_FTP
 ioerror:
@@ -1024,7 +1022,6 @@ pipeline:
 	 * connection and the first request on it as a dos attack. */
 	if (h->mimetype && new_request_from_ip(h->peerip,now.sec.x-4611686018427387914ULL)==1) {
 	  changestate(h,PUNISHMENT);
-//	  h->t=PUNISHMENT;
 	  if (logging) {
 	    char buf[IP6_FMT];
 	    char n[FMT_LONG];
@@ -1044,7 +1041,7 @@ pipeline:
 #ifdef SUPPORT_HTTPS
 	if (h->t==HTTPREQUEST || h->t==HTTPSREQUEST) {
 	  httpresponse(h,i,l);
-	  if (h->t == HTTPSREQUEST) changestate(h,HTTPSRESPONSE); // h->t=HTTPSRESPONSE;
+	  if (h->t == HTTPSREQUEST) changestate(h,HTTPSRESPONSE);
 	}
 #else
 	if (h->t==HTTPREQUEST)
@@ -1100,6 +1097,9 @@ pipeline:
       }
     }
   }
+#ifdef MOREDEBUG
+  printf("MOREDEBUG: entering handle_read_misc for fd #%d\n",(int)i);
+#endif
 }
 
 #ifdef SUPPORT_HTTPS
@@ -1140,6 +1140,9 @@ int64 https_write_callback(int64 sock,const void* buf,uint64 n) {
 
 static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum) {
   int64 r;
+#ifdef MOREDEBUG
+  puts("MOREDEBUG: entering handle_write_misc");
+#endif
 #ifdef SUPPORT_HTTPS
   assert(h->t != HTTPSREQUEST);
   if (h->t == HTTPSRESPONSE)
@@ -1147,6 +1150,9 @@ static void handle_write_misc(int64 i,struct http_data* h,uint64 prefetchquantum
   else
 #endif
   r=iob_send(i,&h->iob);
+#ifdef MOREDEBUG
+  printf("MOREDEBUG: iob_send on fd #%d returned %ld (%lu remaining)\n",(int)i,(long)r,(unsigned long)iob_bytesleft(&h->iob));
+#endif
   if (r==-1)
     io_eagain(i);
   else if (r<=0) {
@@ -1249,6 +1255,9 @@ wroteitall:
     if (iob_bytesleft(&h->iob)==0)	/* optimization, not strictly necessary */
       goto wroteitall;
   }
+#ifdef MOREDEBUG
+  puts("MOREDEBUG: leaving handle_write_misc");
+#endif
 }
 
 static void prepare_listen(int s,void* whatever) {
@@ -1386,7 +1395,7 @@ int main(int argc,char* argv[],char* envp[]) {
 	  buffer fsb;
 #ifndef __MINGW32__
 	  if (chroot_to) { chdir(chroot_to); chroot(chroot_to); }
-	  prepare_switch_uid(new_uid);
+	  if (prepare_switch_uid(new_uid)==-1 || switch_uid()==-1) panic("switch_uid failed");
 #endif
 	  if (!io_readfile(&savedir,".")) panic("open()");
 	  buffer_init(&fsb,(void*)read,forksock[1],fsbuf,sizeof fsbuf);
