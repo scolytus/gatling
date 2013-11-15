@@ -387,8 +387,8 @@ static int smb_handle_negotiate_request(unsigned char* c,size_t len,struct smb_r
     "\x02\x00"	// Max Mpx Count 2
     "\x01\x00"	// Max VCs 1
 #else
-    "\x10\x00"	// Max Mpx Count 2
-    "\x10\x00"	// Max VCs 1
+    "\x10\x00"	// Max Mpx Count 16
+    "\x10\x00"	// Max VCs 16
 #endif
     "\x04\x41\x00\x00"	// Max Buffer Size (16644, like XP)
     "\x00\x00\x01\x00"	// Max Raw Buffer (65536, like XP)
