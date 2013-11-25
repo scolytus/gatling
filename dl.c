@@ -928,12 +928,18 @@ again:
       }
       ai=aitop;
       while (ai) {
-	if (ai->ai_family==AF_INET6)
-	  stralloc_catb(&ips,(char*)&(((struct sockaddr_in6*)ai->ai_addr)->sin6_addr),16);
-	else {
+	uint32_t scopeid;
+	if (ai->ai_family==AF_INET6) {
+	  char* addr;
+	  stralloc_catb(&ips,addr=(char*)&(((struct sockaddr_in6*)ai->ai_addr)->sin6_addr),16);
+	  scopeid=((struct sockaddr_in6*)ai->ai_addr)->sin6_scope_id;
+	  if (scopeid==0 || byte_diff(addr,8,"\xfe\x80\x00\x00\x00\x00\x00\x00")) scopeid=scope_id;
+	} else {
 	  stralloc_catb(&ips,V4mappedprefix,12);
 	  stralloc_catb(&ips,(char*)&(((struct sockaddr_in*)ai->ai_addr)->sin_addr),4);
+	  scopeid=0;
 	}
+	stralloc_catb(&ips,(char*)&scopeid,4);
 	ai=ai->ai_next;
       }
       if (verbose) buffer_putsflush(buffer_1,"done\n");
@@ -1010,7 +1016,8 @@ nodns:
   {
     int i;
     s=-1;
-    for (i=0; i+16<=ips.len; i+=16) {
+    for (i=0; i+20<=ips.len; i+=20) {
+      uint32_t scopeid;
       if (usev4 && !ip6_isv4mapped(ips.s+i)) continue;
       if (verbose) {
 	char buf[IP6_FMT];
@@ -1020,7 +1027,8 @@ nodns:
 	buffer_putulong(buffer_1,socksproxyhost?socksport:connport);
 	buffer_putnlflush(buffer_1);
       }
-      s=make_connection(ips.s+i,socksproxyhost?socksport:connport,scope_id);
+      byte_copy((char*)&scopeid,4,ips.s+i+16);
+      s=make_connection(ips.s+i,socksproxyhost?socksport:connport,scopeid);
       if (s!=-1) {
 	byte_copy(ip,16,ips.s+i);
 	break;
