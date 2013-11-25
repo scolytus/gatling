@@ -121,7 +121,7 @@ extern int init_serverside_tls(ssl_context* ssl,int sock);
 
 /* the tree id is always 1 (we export exactly one tree in TreeConnectAndX)
  * the user id is always 1, too (we hand it out in SessionSetupAndX)
- * we need to hand out file handles relative the the PID though */
+ * we need to hand out file handles relative to the PID though */
 struct handle {
   uint32_t pid,handle;
   int fd;
