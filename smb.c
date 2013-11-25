@@ -1101,6 +1101,7 @@ outofmemory:
     else if (loi==0x102)
       sizeperrecord=0x44;
     if (subcommand==1) {
+      h->smbattrs=attr;
       filename=(uint16*)(c-smbheadersize+paramofs+12);
       l=(paramcount-12)/2;
       if ((h->ftppath=malloc(l+l+4))) {
@@ -1118,6 +1119,7 @@ outofmemory:
       }
       resume=0;
     } else {
+      attr=h->smbattrs;
       resume=(uint16*)(c-smbheadersize+paramofs+12);
       rl=paramcount-12;
 
@@ -1125,7 +1127,7 @@ outofmemory:
       if ((uintptr_t)resume % 2)
 	goto filenotfound;
       if (resume[rl-1])
-	return -1;		// want null terminated filename
+	goto filenotfound;		// want null terminated filename
       for (i=0; i<rl; ++i)
 	if (uint16_read((char*)&resume[i])=='\\' || uint16_read((char*)&resume[i])=='/') {
 //	  printf("resume filename contains %c!\n",resume[i]);
@@ -1301,6 +1303,26 @@ outofmemory:
 	  /* if this is a FIND_NEXT and we have not reached the resume
 	   * filename yet, resume is not NULL. */
 	  if (resume) {
+#if 0
+	    printf("actualnamelen=%u rl=%u cur+sizeperrecord=\"",actualnamelen,rl);
+	    {
+	      size_t i;
+	      char a[6];
+	      uint32_t ch;
+	      for (i=0; i<actualnamelen; i+=2) {
+		ch=uint16_read(cur+sizeperrecord+i);
+		a[fmt_utf8(a,ch)]=0;
+		printf("%s",a);
+	      }
+	      printf("\" resume=\"");
+	      for (i=0; i<rl; i++) {
+		ch=uint16_read((char*)(resume+i));
+		a[fmt_utf8(a,ch)]=0;
+		printf("%s",a);
+	      }
+	      printf("\"\n");
+	    }
+#endif
 	    if (actualnamelen+2==rl && byte_equal(cur+sizeperrecord,actualnamelen,resume))
 	      resume=0;
 	    continue;
@@ -1348,11 +1370,12 @@ outofmemory:
 	uint16_pack(trans2+9,trans2+20-sr->buf);
 	uint16_pack(trans2+13,cur-base);
 	uint16_pack(trans2+15,base-smbhdr);
-	uint16_pack(trans2+21,cur-base+13);
 	if (subcommand==1) {
+	  uint16_pack(trans2+21,cur-base+13);
 	  uint16_pack(trans2+26,searchcount);	// search count...!?
 	  uint16_pack(trans2+32,last-base);
 	} else {
+	  uint16_pack(trans2+21,cur-base+11);
 	  uint16_pack(trans2+24,searchcount);	// search count...!?
 	  uint16_pack(trans2+30,last-base);
 	}

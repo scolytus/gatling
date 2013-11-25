@@ -158,6 +158,9 @@ struct http_data {
 #if defined(SUPPORT_FTP) || defined(SUPPORT_SMB)
   char* ftppath;	/* for FTP we store the path here, for SMB the last FIRST_FIRST2 glob expression */
 #endif
+#ifdef SUPPORT_SMB
+  uint32_t smbattrs;	/* attributes from FIND_FIRST2 so FIND_NEXT2 knows whether to return directories */
+#endif
 #ifdef SUPPORT_FTP
   uint64 ftp_rest;	/* offset to start transfer at */
 #endif
