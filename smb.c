@@ -742,18 +742,22 @@ static int smb_handle_CreateAndX(struct http_data* h,const unsigned char* c,size
       char* c=add_smb_response2(sr,template,1+2*34+2,0xa2);
       struct stat ss;
       if (!c) return -1;
+      int isdir;
       fstat(hdl->fd,&ss);
+      isdir=S_ISDIR(ss.st_mode);
       uint16_pack(c+OFS16(template,"w1"),sr->used);
       uint16_pack(c+OFS16(template,"w2"),hdl->handle);
       uint64_pack_ntdate(c+OFS16(template,"q0"),ss.st_ctime);
       uint64_pack_ntdate(c+OFS16(template,"q1"),ss.st_atime);
       uint64_pack_ntdate(c+OFS16(template,"q2"),ss.st_mtime);
       uint64_pack_ntdate(c+OFS16(template,"q3"),ss.st_mtime);
-      uint32_pack(c+OFS16(template,"d1"),S_ISDIR(ss.st_mode)?0x11:0x1);
+      uint32_pack(c+OFS16(template,"d1"),isdir?0x11:0x1);
       uint64_pack(c+OFS16(template,"q4"),0x100000);	// that's what Samba says
       uint64_pack(c+OFS16(template,"q5"),ss.st_size);	// end of file 
       uint16_pack(c+OFS16(template,"w3"),0);
-      uint16_pack(c+OFS16(template,"w4"),ss.st_nlink);
+      uint16_pack(c+OFS16(template,"w4"),ss.st_nlink>255?255:ss.st_nlink);
+      if (isdir)
+	c[OFS16(template,"w4")+2]=1;
     }
     return 0;
   }
@@ -1297,16 +1301,8 @@ outofmemory:
 	  /* if this is a FIND_NEXT and we have not reached the resume
 	   * filename yet, resume is not NULL. */
 	  if (resume) {
-#if 0
-	    printf("resume (%u,\"",rl);
-	    for (i=0; i<rl; ++i)
-	      printf("%c",resume[i]);
-	    printf("\"), actual length: %u, name %s\n",actualnamelen,de->d_name);
-#endif
-	    if (byte_equal(cur+sizeperrecord,rl,resume)) {
-//	      printf("match!\n");
+	    if (actualnamelen+2==rl && byte_equal(cur+sizeperrecord,actualnamelen,resume))
 	      resume=0;
-	    }
 	    continue;
 	  }
 

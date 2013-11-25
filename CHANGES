@@ -2,6 +2,7 @@
   update polarssl support to version 1.2.0 (Roland Stigge)
   fix cgiproxy_read0 written bytes statistic (was always 0)
   handle invalid urlencoded sequences by passing them through instead of truncating them
+  fix FIND_NEXT2 in smb
 
 0.13:
   add SUPPORT_DIR_REDIRECT in gatling_features.h
