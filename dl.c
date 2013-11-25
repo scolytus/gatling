@@ -651,6 +651,11 @@ kaputt:
   return 0;
 }
 
+static void fmt_num2(char *dest,int i) {
+  dest[0]=i/10+'0';
+  dest[1]=i%10+'0';
+}
+
 int main(int argc,char* argv[]) {
   int useport=0;
   int usev4=0;
@@ -1554,11 +1559,257 @@ skipdownload:
     if (verbose) {
       char tbuf[30];
       tbuf[fmt_httpdate(tbuf,u.actime)]=0;
-      buffer_puts(buffer_1,"ok, fid=");
+      buffer_putm(buffer_1,"ok, is a ",buf[0x20+68]==0?"file":"directory",", fid=");
       buffer_putulong(buffer_1,fid);
       buffer_puts(buffer_1,", size=");
       buffer_putulonglong(buffer_1,filesize);
       buffer_putmflush(buffer_1,", mtime=",tbuf,".\n");
+    }
+
+    if (buf[0x20+68]==1) {
+      // is a directory, do FindFirst/FindNext instead of ReadFile
+
+      time_t now;
+      char *x,*y;
+      char req[200+2048];
+      char* filename=0;
+
+      if (strlen(pathname)>1024) panic("file name too long\n");
+
+      now=time(0);
+
+      byte_copy(req,4+78,
+		"\x00\x00\x00\x58"	// 0	NetBIOS
+		"\xffSMB"		// 4+0	SMB
+		"\x32\x00\x00\x00\x00\x08\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00"		// 4+24	Tree ID
+		"\x17\x00"		// 4+26	Process ID
+		"\x00\x00"		// 4+28	User ID
+		"\x00\x00"		// 4+30	Multiplex ID
+		// Trans2 Request
+		"\x0f"			// 4+32	Word Count (15)
+		"\x12\x00"		// 4+33	Total Parameter Count (18)
+		"\x00\x00\x0a\x00\x38\x1f\x00\x00\x00\x00"
+		"\x00\x00\x00\x00\x00\x00"
+		"\x12\x00"		// 4+51	Parameter Count (18)
+		"\x42\x00"		// 4+53	Parameter Offset (66)
+		"\x00\x00"		// 4+55	Data Count
+		"\x58\x00"		// 4+57	Data Offset (88)
+		"\x01\x00"
+		"\x01\x00"		// 4+61 FIND_FIRST2
+		// word count from 4+32 points here
+		"\x15\x00"		// 4+63	Byte Count, starts counting here
+		"\x00"			// Padding
+		// FIND_FIRST2 Parameters; 4+53 points here, parameter count from 4+33 and 4+51 starts counting here
+		"\x17\x00"		// 4+66	search attributes: +hidden +system +directory +readonly
+		"\x56\x05"		// 4+68	search count: 1366 (!?!?)
+		"\x06\x00"		// 4+70	flags: return resume keys + close on eos
+		"\x04\x01"		// 4+72	level of interest: find file both directory info (260)
+		"\x00\x00\x00\x00");	// 4+74	storage type
+
+      uint16_pack(req+4+24,tid);
+      uint16_pack(req+4+28,uid);
+      uint16_pack(req+4+30,++mid);
+
+      x = req + 4+78;
+      y = pathname;
+
+      {
+	uint32_t ch;
+	size_t i,pathlen;
+
+	y = pathname;
+	while (*y=='/' || *y=='\\') ++y;
+	while (*y && *y!='/' && *y!='\\') ++y;
+	while (*y=='/' || *y=='\\') ++y;
+
+	for (i=0; y[i]; ) {
+	  size_t r;
+	  r=scan_utf8(y+i,5,&ch);
+	  if (r)
+	    y+=r;
+	  else {
+	    ch=(unsigned char)y[i];
+	    ++y;
+	  }
+	  uint16_pack(x,ch);
+	  x+=2;
+	}
+	if (ch!='\\') {
+	  uint16_pack(x,'\\');
+	  x+=2;
+	}
+	uint16_pack(x,'*');
+	x+=2;
+	uint16_pack(x,0);
+	x+=2;
+	pathlen=x-(req+4+78);	// length in bytes
+
+	uint16_pack(req+4+63, 13+pathlen);	// byte count
+	uint16_pack(req+4+33, 12+pathlen);	// total parameter count
+	uint16_pack(req+4+51, 12+pathlen);	// parameter count
+	uint16_pack(req+4+57, 76+pathlen);	// data offset
+	uint32_pack_big(req,x-req-4);
+	if (write(s,req,x-req) != x-req) panic("FindFirst request short write");
+      }
+
+      for (;;) {
+	int end_of_search;
+	uint32_t fnlen=0;
+	uint16_t search_id=0;
+
+	readnetbios(&ib,buf,&wanted);
+	if (wanted>sizeof(buf)) panic("packet too large");
+	if (buffer_get(&ib,buf,wanted)!=wanted) panic(filename?"FindNext response short read\n":"FindFirst response short read\n");
+	if (validatesmb(buf,wanted,0x32,filename?8:10,0,tid,mid)) panic("Received invalid SMB response\n");
+
+	// Unfortunately, the reply does not say whether it is replying to a FIND_FIRST2 or a FIND_NEXT2
+	// So we look at the parameter count.  For FIND_FIRST2 it is 10, for FIND_NEXT2 it is 8.
+	{
+	  char* x=buf+0x20;
+	  size_t pcount=uint16_read(x+1);
+	  size_t pofs=uint16_read(x+9);
+	  size_t dcount=uint16_read(x+13);
+	  size_t dofs=uint16_read(x+15);
+	  size_t bcount=uint16_read(x+21);
+	  if (dofs+dcount>wanted || 0x20+21+bcount>wanted)
+	    panic("SMB protocol violation: data count does not fit into packet\n");
+	  if (pofs+pcount>dofs)
+	    panic("SMB protocol violation: parameters overlap with data\n");
+	  if (pcount != uint16_read(x+7))
+	    panic("SMB protocol violation: parameter count != total parameter count\n");
+	  if (dcount != uint16_read(x+3))
+	    panic("SMB protocol violation: byte count != total data count\n");
+	  if (pofs<56)
+	    panic("SMB protocol violation: parameter offset too small\n");
+	  if (buf[0x21]==10) {
+	    search_id = uint16_read(buf+pofs);
+	    end_of_search = uint16_read(buf+pofs+4);
+	  } else
+	    end_of_search = uint16_read(buf+pofs+2);
+	}
+
+	/* we got a superficially valid looking reply; dump all the file names */
+	{
+	  char* x=buf+0x20;
+	  char* last=buf+wanted;
+	  size_t datacount = uint16_read(x+3);
+	  x = buf+uint16_read(x+15);
+	  if (x+datacount > last)
+	    panic("SMB protocol violation: data + datacount > packet\n");
+	  while (x+4<last) {
+	    time_t mtime;
+	    uint64_t filesize;
+	    uint32_t attr;
+	    uint32_t ofs=uint32_read(x);
+	    if (ofs>datacount || ofs<(120-26) || x+ofs>last)
+	      panic("SMB protocol violation: invalid ofs in filename record\n");
+	    mtime=(uint64_read(x+24) / 10000000ll) - 11644473600ll;
+	    filesize=uint64_read(x+40);
+	    attr=uint32_read(x+56);
+	    fnlen=uint32_read(x+60);
+	    filename=x+94;
+	    if (filename+fnlen > x+ofs)
+	      panic("SMB protocol violation: invalid file name length in filename record\n");
+	    {
+	      char a[FMT_ULONG];
+	      char b[100];
+	      char buf[11];
+	      size_t n;
+	      struct tm* T;
+	      static char *smonths[]={"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+	      char* fn;
+	      a[n=fmt_ulonglong(a,filesize)]=0;
+	      b[fmt_pad(b,a,n,10,20)]=0;
+	      T=localtime(&mtime);
+	      memset(buf,' ',sizeof(buf));
+	      fmt_num2(buf+1,T->tm_mday);
+	      if (buf[1]=='0') buf[1]=' ';
+	      if (mtime>now||now-mtime>60*60*24*365/2) {
+		fmt_num2(buf+5,(T->tm_year+1900)/100);
+		fmt_num2(buf+7,(T->tm_year+1900)%100);
+	      } else {
+		fmt_num2(buf+4,T->tm_hour);
+		buf[6]=':';
+		fmt_num2(buf+7,T->tm_min);
+	      }
+	      buf[10]=0;
+	      if (attr&0x10)
+		buffer_puts(buffer_1,"drwxr-xr-x");
+	      else if (attr&1)
+		buffer_puts(buffer_1,"-r-xr-xr-x");
+	      else
+		buffer_puts(buffer_1,"-rwxr-xr-x");
+	      buffer_putm(buffer_1,"  1 root     root     ",b," ",smonths[T->tm_mon],buf," ");
+	      fn=filename;
+	      y=fn+fnlen;
+	      while (fn<y) {
+		uint32_t ch=uint16_read(fn);
+		buffer_put(buffer_1,b,fmt_utf8(b,ch));
+		fn+=2;
+	      }
+	      buffer_putnlflush(buffer_1);
+	    }
+	    x+=ofs;
+	  }
+	}
+
+	/* now see if there is a continuation or not */
+	if (end_of_search) break;
+
+	/* there are more file names, we need to send a FIND_NEXT2 */
+	if (fnlen>2048) panic("filename too long\n");
+
+	byte_copy(req,4+78,
+		"\x00\x00\x00\x6c"	// 0	NetBIOS
+		"\xffSMB"		// 4+0	SMB
+		"\x32\x00\x00\x00\x00\x08\x01\xc0\x00\x00"
+		"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+		"\x00\x00"		// 4+24	Tree ID
+		"\x17\x00"		// 4+26	Process ID
+		"\x00\x00"		// 4+28	User ID
+		"\x00\x00"		// 4+30	Multiplex ID
+		// Trans2 Request
+		"\x0f"			// 4+32	Word Count (15)
+		"\x26\x00"		// 4+33	Total Parameter Count (38)
+		"\x00\x00\x0a\x00\x38\x1f\x00\x00\x00\x00"
+		"\x00\x00\x00\x00\x00\x00"
+		"\x26\x00"		// 4+51	Parameter Count (38)
+		"\x42\x00"		// 4+53	Parameter Offset (66)
+		"\x00\x00"		// 4+55	Data Count
+		"\x6c\x00"		// 4+57	Data Offset (108)
+		"\x01\x00"
+		"\x02\x00"		// 4+61 FIND_NEXT2
+		// word count from 4+32 points here
+		"\x2b\x00"		// 4+63	Byte Count, starts counting here
+		"\x00"			// Padding
+		// FIND_FIRST2 Parameters; 4+53 points here, parameter count from 4+33 and 4+51 starts counting here
+		"\x01\x00"		// 4+66	search id (comes from FIND_FIRST2 response)
+		"\x56\x05"		// 4+68	search count: 1366 (!?!?)
+		"\x04\x01"		// 4+70	level of interest: find file both directory info (260)
+		"\x00\x00\x00\x00"	// 4+72	resume key
+		"\x06\x00");		// 4+76	flags
+
+	uint16_pack(req+4+24,tid);
+	uint16_pack(req+4+28,uid);
+	uint16_pack(req+4+30,++mid);
+	uint16_pack(req+4+66,search_id);
+
+	x=req+4+78; byte_copy(x,fnlen,filename);
+	x+=fnlen; byte_copy(x,2,"\x00\x00");
+	x+=2;
+
+	uint16_pack(req+4+63, 13+fnlen+2);	// byte count
+	uint16_pack(req+4+33, 12+fnlen+2);	// total parameter count
+	uint16_pack(req+4+51, 12+fnlen+2);	// parameter count
+	uint16_pack(req+4+57, 76+fnlen+2);	// data offset
+	uint32_pack_big(req,x-req-4);
+	if (write(s,req,x-req) != x-req) panic("FindNext request short write");
+
+      }
+
+      goto closeanddone;
     }
 
     if (filesize<=resumeofs) {
@@ -1613,10 +1864,10 @@ skipdownload:
 	}
 	readnetbios(&ib,buf,&wanted);
 	if (wanted>readsize+300) panic("packet too large");
-	if (wanted<0x20+12*2+3) panic("Received invalid SMB response\n");
+	if (wanted<0x20+12*2+3) panic("SMB (ReadFile): Received invalid SMB response\n");
 	if (buffer_get(&ib,readbuf,0x20+12*2+3)!=0x20+12*2+3) panic("ReadFile response short read\n");
 
-	if (validatesmb(readbuf,wanted,0x2e,12,0,tid,mid)) panic("Received invalid SMB response\n");
+	if (validatesmb(readbuf,wanted,0x2e,12,0,tid,mid)) panic("SMB (ReadFile): Received invalid SMB response\n");
 	gotten=uint16_read(readbuf+0x39);
 	dataofs=uint16_read(readbuf+0x2d);
 	if (dataofs+gotten>wanted) panic("invalid dataofs in ReadFile response");
@@ -1665,7 +1916,7 @@ closeanddone:
       readnetbios(&ib,buf,&wanted);
       if (wanted>sizeof(buf)) panic("packet too large");
       if (buffer_get(&ib,buf,wanted)!=wanted) panic("Close response short read\n");
-      if (validatesmb(buf,wanted,0x04,0,0,tid,mid)) panic("Received invalid SMB response\n");
+      if (validatesmb(buf,wanted,0x04,0,0,tid,mid)) panic("SMB (CloseFile): Received invalid SMB response\n");
     }
 
     if (verbose) buffer_putsflush(buffer_1,"ok.\nTree Disconnect... ");
@@ -1686,7 +1937,7 @@ closeanddone:
       readnetbios(&ib,buf,&wanted);
       if (wanted>sizeof(buf)) panic("packet too large");
       if (buffer_get(&ib,buf,wanted)!=wanted) panic("Tree Disconnect response short read\n");
-      if (validatesmb(buf,wanted,0x71,0,0,tid,mid)) panic("Received invalid SMB response\n");
+      if (validatesmb(buf,wanted,0x71,0,0,tid,mid)) panic("SMB (Tree Disconnect): Received invalid SMB response\n");
     }
     if (verbose) buffer_putsflush(buffer_1,"ok.\n");
 
