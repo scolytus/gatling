@@ -342,7 +342,7 @@ usage:
   {
     long i;
     long j;
-    long err;
+    long err=0;
     int *socks;
     socks=malloc(sizeof(int)*count);
     if (!socks) panic("malloc");
