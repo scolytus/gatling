@@ -108,6 +108,7 @@ enum conntype {
 /* in ssl.c */
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/engine.h>
 extern int init_serverside_tls(SSL** ssl,int sock);
 #endif
 
