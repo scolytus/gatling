@@ -2364,6 +2364,9 @@ usage:
   io_finishandshutdown();
 #ifdef SUPPORT_HTTPS
 #ifdef USE_OPENSSL
+  ENGINE_cleanup();
+  CRYPTO_cleanup_all_ex_data();
+  ASN1_STRING_TABLE_cleanup();
   ERR_free_strings();
 #endif
 #endif
