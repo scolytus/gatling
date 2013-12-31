@@ -21,14 +21,14 @@ const char* ssl_dhparams="dhparams.pem";
 const char* ssl_ciphers="TLSv1+HIGH:!SSLv2:+TLSv1:+SSLv3:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH";
 const char* ssl_client_cert="clientcert.pem";
 
-const char ssl_default_dhparams[]="—---BEGIN DH PARAMETERS-----\n"
+const char ssl_default_dhparams[]="-----BEGIN DH PARAMETERS-----\n"
 "MIIBCAKCAQEAhS4NySChob9OZmB7WOUbOIxurRRbItWnKmC2fq1pJHRft/r72/qq\n"
 "g8qquhYAmikXgX4+uZEgfLBWPlx1d8wHggnKtEJ+0KzlGpxek7QORwN2j9872jXC\n"
 "25iZar+Om4hUXREuVyGU02GmGHgfemVT1mOvZMbBxzTfmaUdP9Q304oKz4RUYV1w\n"
 "+Jv3iO6MYySz6bhsc7lSyayUIJxXJoaqgz6EJVImU6LwXo8gUbD5GUVXhEzDHuRG\n"
 "fbKleVvLf1MC7TT6H5PAFFOkfFET//C9QJkSmUsg3u5GtwvKNZhwrggqNzchXSkS\n"
 "FDQXPlpTK7h3BlR8vDadEpT68OcdLr2+owIBAg==\n"
-"—---END DH PARAMETERS-----\n";
+"-----END DH PARAMETERS-----\n";
 
 int init_serverside_tls(SSL** ssl,int sock) {
 /* taken from the qmail tls patch */
@@ -36,16 +36,15 @@ int init_serverside_tls(SSL** ssl,int sock) {
   SSL_CTX* ctx;
   X509_STORE *store;
   X509_LOOKUP *lookup;
-  DH* dh;
 
   if (!library_inited) {
     library_inited=1;
+    SSL_load_error_strings();
     SSL_library_init();
     ENGINE_load_builtin_engines();
-    SSL_load_error_strings();
   }
   /* a new SSL context with the bare minimum of options */
-  if (!(ctx=SSL_CTX_new(SSLv23_server_method()))) {
+  if (!(ctx=SSL_CTX_new(TLSv1_server_method()))) {
 #if 0
     printf("SSL_CTX_new failed\n");
 #endif
@@ -72,15 +71,38 @@ int init_serverside_tls(SSL** ssl,int sock) {
   SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, verify_cb);
 
   {
-    BIO* bio=BIO_new_file(ssl_dhparams,"r");
-    if (bio==NULL) bio=BIO_new_file("server.pem","r");
-    if (bio==NULL)
-      bio=BIO_new_mem_buf((void*)ssl_default_dhparams,sizeof(ssl_default_dhparams)-1);
-    if (bio) {
-      dh=PEM_read_bio_DHparams(bio,NULL,NULL,NULL);
-      BIO_free(bio);
-      if (dh) SSL_CTX_set_tmp_dh(ctx, dh);
+    const char* dhparam_attempts[] = { ssl_dhparams, ssl_server_cert, NULL };
+    size_t i;
+    for (i=0; i<sizeof(dhparam_attempts)/sizeof(dhparam_attempts[0]); ++i) {
+      BIO* bio;
+      DH* dh;
+      if ((bio=dhparam_attempts[i]?BIO_new_file(dhparam_attempts[i],"r"):BIO_new_mem_buf((void*)ssl_default_dhparams,sizeof(ssl_default_dhparams)-1))) {
+	if ((dh=PEM_read_bio_DHparams(bio,NULL,NULL,NULL))) {
+	  SSL_CTX_set_tmp_dh(ctx, dh);
+	}
+	BIO_free(bio);
+      }
+      if (dh) {
+	DH_free(dh);
+	break;
+      }
     }
+  }
+
+  {
+    /* now try to set up ECDH */
+    EC_KEY* ecdh=NULL;
+    char* tmp=getenv("TLSECDHCURVE");
+    int nid=NID_undef;
+    if (tmp) nid=OBJ_sn2nid(tmp);
+    if (nid==NID_undef) nid=NID_X9_62_prime256v1;
+    ecdh=EC_KEY_new_by_curve_name(nid);
+    if (ecdh) {
+      if (SSL_CTX_set_tmp_ecdh(ctx,ecdh) != 1)
+	puts("SSL_CTX_set_tmp_ecdh failed");
+    } else
+      puts("could not set ECDH curve");
+    EC_KEY_free(ecdh);
   }
 
   /* a new SSL object, with the rest added to it directly to avoid copying */
