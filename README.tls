@@ -62,10 +62,10 @@ Please note that you should also set the OpenSSL ciphers.  As of
 20130907 gatling will do this for you if you don't.  The set gatling
 uses is
 
-  TLSv1+HIGH:!SSLv2:+TLSv1:!aNULL:!eNULL:@STRENGTH
+  HIGH:!DSS:!RC4:!MD5:!aNULL:!eNULL:@STRENGTH
 
 Note: As of 20140101 gatling is hard-coded to not allow SSLv2 or SSLv3,
-only TLS 1.0 and up, and also does not support RC4 anymore.
+only TLS 1.0 and up.
 
 This cipher string means: Use TLSv1 ciphers with high grade encryption,
 do not allow SSLv2 or SSLv3, insist on TLSv1 or better, do not allow cipher
@@ -79,12 +79,12 @@ transmissions that did not have perfect forward secrecy enabled.
 
 You can set ciphers via the environment before running tlsgatling:
 
-  TLSCIPHERS='TLSv1+HIGH:!aNULL:!eNULL:@STRENGTH' tlsgatling [arguments]
+  TLSCIPHERS='HIGH:!aNULL:!eNULL:@STRENGTH' tlsgatling [arguments]
 
 If you are using minit and serdo, put this in your script file before
 running tlsgatling:
 
-  export TLSCIPHERS=TLSv1+HIGH:!aNULL:!eNULL:@STRENGTH
+  export TLSCIPHERS=HIGH:!aNULL:!eNULL:@STRENGTH
 
 If you don't want two files lying around, you can also append the
 contents of dhparams.pem to your server.pem; gatling will also look
