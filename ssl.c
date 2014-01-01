@@ -44,12 +44,13 @@ int init_serverside_tls(SSL** ssl,int sock) {
     ENGINE_load_builtin_engines();
   }
   /* a new SSL context with the bare minimum of options */
-  if (!(ctx=SSL_CTX_new(TLSv1_server_method()))) {
+  if (!(ctx=SSL_CTX_new(SSLv23_server_method()))) {
 #if 0
     printf("SSL_CTX_new failed\n");
 #endif
     return -1;
   }
+  SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3);
   if (!SSL_CTX_use_certificate_chain_file(ctx, ssl_server_cert)) {
     SSL_CTX_free(ctx);
 #if 0
