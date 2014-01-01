@@ -18,7 +18,7 @@ const char* ssl_server_cert="server.pem";
 const char* ssl_client_crl="clientcrl.pem";
 const char* ssl_client_ca="clientca.pem";
 const char* ssl_dhparams="dhparams.pem";
-const char* ssl_ciphers="TLSv1+HIGH:!SSLv2:+TLSv1:+SSLv3:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH";
+const char* ssl_ciphers="TLSv1+HIGH:!SSLv2:+TLSv1:!aNULL:!eNULL:@STRENGTH";
 const char* ssl_client_cert="clientcert.pem";
 
 const char ssl_default_dhparams[]="-----BEGIN DH PARAMETERS-----\n"

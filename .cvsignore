@@ -30,3 +30,5 @@ havealloca.h
 hitprofile
 matchiprange
 md5lib
+ptlsgatling
+dhparams.pem

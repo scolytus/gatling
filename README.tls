@@ -62,31 +62,29 @@ Please note that you should also set the OpenSSL ciphers.  As of
 20130907 gatling will do this for you if you don't.  The set gatling
 uses is
 
-  TLSv1+HIGH:!SSLv2:+TLSv1:+SSLv3:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH
+  TLSv1+HIGH:!SSLv2:+TLSv1:!aNULL:!eNULL:@STRENGTH
 
-This means: Use TLSv1 ciphers with high grade encryption, do not allow
-SSLv2, insist on SSLv3 or TLSv1, also support RC4 with medium ciphers
-(if your site does not need this, remove it), do not allow cipher suites
-without authentication or encryption, and sort by strength so the
+Note: As of 20140101 gatling is hard-coded to not allow SSLv2 or SSLv3,
+only TLS 1.0 and up, and also does not support RC4 anymore.
+
+This cipher string means: Use TLSv1 ciphers with high grade encryption,
+do not allow SSLv2 or SSLv3, insist on TLSv1 or better, do not allow cipher
+suites without authentication or encryption, and sort by strength so the
 strongest common suite between client and server gets selected.
 
-Note that this contains two compromises.  1. It still allows SSLv3.
-This is at the time of this writing still considered necessary because
-browsers not supporting TLS are still in circulation.  2. It still
-allows RC4 with medium crypto strength.  This is for old, "export
-restricted" browsers with deliberately weak crypto.  If you do not need
-to support those, set a cipher suite without the "RC4+MEDIUM" term
-(also remove one ':').  The need for this will hopefully go away when
-Windows XP leaves its active service lifespan.
+Note that this contains a compromise.  It still allows cipher suites
+without perfect forward secrecy.  This means that if somebody steals the
+secret key from your server, they can decrypt all earlier intercepted
+transmissions that did not have perfect forward secrecy enabled.
 
 You can set ciphers via the environment before running tlsgatling:
 
-  TLSCIPHERS='TLSv1+HIGH:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH' tlsgatling [arguments]
+  TLSCIPHERS='TLSv1+HIGH:!aNULL:!eNULL:@STRENGTH' tlsgatling [arguments]
 
 If you are using minit and serdo, put this in your script file before
 running tlsgatling:
 
-  export TLSCIPHERS=TLSv1+HIGH:RC4+MEDIUM:!aNULL:!eNULL:@STRENGTH
+  export TLSCIPHERS=TLSv1+HIGH:!aNULL:!eNULL:@STRENGTH
 
 If you don't want two files lying around, you can also append the
 contents of dhparams.pem to your server.pem; gatling will also look
@@ -98,9 +96,7 @@ are not a secret key and no harm ought to come from using the ones
 gatling comes with, but it will probably still make you feel better if
 you generate your own.
 
-NOTE: If you use a site like ssllabs.com, it will give you two warnings
-that are not actually true.  The first one says that the server supports
-SSL 2 (which is technically true, but you will not be able to establish
-a connection because none of the cipher suites are allowed).  The second
-one is that the server does not mitigate the BEAST attack.  If your
-version of OpenSSL is current, this is flat out not true.
+NOTE: If you use a site like ssllabs.com, it will give you a false
+positive warning that is not actually true.  It says that the server
+does not mitigate the BEAST attack.  If your version of OpenSSL is
+current, this is flat out not true.
