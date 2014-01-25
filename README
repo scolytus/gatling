@@ -5,3 +5,6 @@ scalable web server using the IO and IOB API from libowfat
 To compile this, you will need the current libowfat version, probably
 even the current CVS version.
 
+Read the README.* files and visit the project page at
+http://www.fefe.de/gatling/ for further information.
+
